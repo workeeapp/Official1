@@ -1255,19 +1255,24 @@ export function planTargetedActions(input: {
     const digitalTargets = mutateTargets.filter((target) =>
       isDigitalEmployee(target),
     );
-    // A digital worker is never a share participant. An add that names the
-    // speaker and Lucy is two personal rows: the speaker's task, and Lucy's
-    // tracking task. An add that names only Lucy stays on her book. Other
-    // humans named on that same action still receive an assignment on their
-    // own book. One list add does not create a reminder.
+    // A digital worker is never a share participant. A chore that names the
+    // speaker and Lucy is two personal rows. A worker-tracking title
+    // (להזכיר ל… / לשלוח הודעה / לשלוח נדנוד / לעזור ל…) stays only on the
+    // worker's book, even when the speaker is also named. Other humans still
+    // receive a chore assignment on their own book. One list add does not
+    // create a reminder.
     if (normalizedList.action === "add" && digitalTargets.length > 0) {
+      const humanList = humanCopyOfDigitalAdd(normalizedList);
+      const humanMetadata = humanList
+        ? { lists: [{ ...humanList, targets: [] }], filing: [] }
+        : null;
       const speakerTarget = humanTargets.find(
         (target) => target.id === input.actor.id,
       );
-      if (speakerTarget) {
+      if (speakerTarget && humanMetadata) {
         applications.push({
           employeeId: speakerTarget.id,
-          metadata,
+          metadata: humanMetadata,
           visibility: {
             scope: "personal",
             addedById: input.actor.id,
@@ -1287,9 +1292,10 @@ export function planTargetedActions(input: {
         });
       }
       for (const person of humanPartnerTargets) {
+        if (!humanMetadata) continue;
         applications.push({
           employeeId: person.id,
-          metadata,
+          metadata: humanMetadata,
           visibility: {
             scope: "personal",
             addedById: input.actor.id,
@@ -1298,7 +1304,7 @@ export function planTargetedActions(input: {
         });
         addNotification(
           person.id,
-          metadata,
+          humanMetadata,
           partnerLabel(humanPartnerTargets, person.id),
         );
       }
@@ -3067,6 +3073,31 @@ function listActionTargets(list: LlmListAction): string[] {
   return (list.targets ?? [])
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter(Boolean);
+}
+
+/** Lucy's own follow-up row. It is not the speaker's chore. */
+export function isWorkerTrackingTitle(title: string): boolean {
+  const text = title.trim();
+  return (
+    text.startsWith("להזכיר ל") ||
+    text.startsWith("לשלוח הודעה") ||
+    text.startsWith("לשלוח נדנוד") ||
+    text.startsWith("לעזור ל")
+  );
+}
+
+function taskTitleOf(item: Record<string, unknown>): string {
+  const value = item["שם משימה"];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/** Human books keep the chore. Worker-tracking titles stay on the worker. */
+function humanCopyOfDigitalAdd(list: LlmListAction): LlmListAction | null {
+  if (list.listType !== "tasks") return list;
+  const items = list.items.filter((item) => !isWorkerTrackingTitle(taskTitleOf(item)));
+  if (items.length === 0) return null;
+  if (items.length === list.items.length) return list;
+  return { ...list, items };
 }
 
 /**

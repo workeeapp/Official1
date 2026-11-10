@@ -347,7 +347,7 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
     expect(dump.map((line) => line.id)).toEqual([speakerRows[0]!.id]);
   }, 30000);
 
-  it("user + family + Lucy keeps the speaker row and the family assignment", async () => {
+  it("a tracking title aimed at the family and Lucy stays only on Lucy", async () => {
     account = await createHarnessAccount("טל", { partners: ["עמית"] });
     const partner = account.partners[0];
     expect(partner?.id).toBeTruthy();
@@ -403,10 +403,8 @@ describe("digital-worker tasks stay off the speaker dump, and range delete uses 
       });
     }
 
-    expect(new Set(await ownedTaskTitles(account.employeeId))).toEqual(
-      new Set(["לשתות מים", sharedTitle]),
-    );
-    expect(await ownedTaskTitles(partner!.id)).toEqual([sharedTitle]);
+    expect(await ownedTaskTitles(account.employeeId)).toEqual(["לשתות מים"]);
+    expect(await ownedTaskTitles(partner!.id)).toEqual([]);
     expect(await ownedTaskTitles(lucyId)).toEqual([sharedTitle]);
   });
 

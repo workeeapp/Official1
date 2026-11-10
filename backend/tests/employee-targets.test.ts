@@ -3588,7 +3588,7 @@ describe("employee targets", () => {
     expect(lucyApply?.visibility.scope).toBe("personal");
   });
 
-  it("user + Lucy task is persisted on both books, not as a share", () => {
+  it("a tracking title aimed at the speaker and Lucy stays only on Lucy", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",
       kind: "digital",
@@ -3626,14 +3626,10 @@ describe("employee targets", () => {
     const speakerTasks = plan.applications.filter(
       (row) => row.employeeId === amit.id,
     );
-    expect(speakerTasks).toHaveLength(2);
-    const speakerTracking = speakerTasks.find((row) =>
-      JSON.stringify(row.metadata.lists).includes("להזכיר"),
+    expect(speakerTasks).toHaveLength(1);
+    expect(JSON.stringify(speakerTasks[0]?.metadata.lists)).not.toContain(
+      "להזכיר",
     );
-    expect(speakerTracking?.visibility).toMatchObject({
-      scope: "personal",
-      visibleTo: [amit.id],
-    });
     const lucyTasks = plan.applications.filter(
       (row) => row.employeeId === lucy.id,
     );
@@ -3651,7 +3647,47 @@ describe("employee targets", () => {
     );
   });
 
-  it("user + family + Lucy keeps the speaker row and the family assignment", () => {
+  it("a chore aimed at the speaker and Lucy is saved on both books", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "להתקשר לעמיר" }],
+            targets: ["עמית", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [amit.id, lucy.id].sort(),
+    );
+    for (const row of plan.applications) {
+      expect(JSON.stringify(row.metadata.lists)).toContain("להתקשר לעמיר");
+      expect(row.visibility).toMatchObject({
+        scope: "personal",
+        visibleTo: [row.employeeId],
+      });
+    }
+  });
+
+  it("user + family + Lucy keeps a tracking title only on Lucy", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",
       kind: "digital",
@@ -3679,27 +3715,47 @@ describe("employee targets", () => {
         filing: [],
       },
     });
-    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
-      [amit.id, lucy.id, tal.id].sort(),
-    );
-    expect(
-      plan.applications.find((row) => row.employeeId === amit.id)?.visibility,
-    ).toMatchObject({
-      scope: "personal",
-      visibleTo: [amit.id],
-    });
-    expect(
-      plan.applications.find((row) => row.employeeId === tal.id)?.visibility,
-    ).toMatchObject({
-      scope: "personal",
-      visibleTo: [tal.id],
-    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([lucy.id]);
     expect(
       plan.applications.find((row) => row.employeeId === lucy.id)?.visibility,
     ).toMatchObject({
       scope: "personal",
       visibleTo: [lucy.id],
     });
+    expect(plan.notifications).toEqual([]);
+  });
+
+  it("user + family + Lucy still assigns a chore to the family member", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "לסגור את החלון" }],
+            targets: ["עמית", "טל", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [amit.id, lucy.id, tal.id].sort(),
+    );
     expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
   });
 

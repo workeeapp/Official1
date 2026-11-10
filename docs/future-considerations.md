@@ -45,7 +45,7 @@ Ideas to consider later — not committed work. Captured from product discussion
 
 ## Digital-worker targeting follow-ups (after ba22249)
 
-An **add** that names a digital worker is persisted on that worker’s book and on each named person’s own book, including the speaker when the speaker is a target. It is not a share with the worker. An add that names only the worker stays on the worker’s book. These follow-ups are still open:
+An **add** that names a digital worker persists a chore on that worker’s book and on each named person’s own book, including the speaker when the speaker is a target. A worker-tracking title (להזכיר ל… / לשלוח הודעה / לשלוח נדנוד / לעזור ל…) stays only on the worker’s book. It is not a share with the worker. These follow-ups are still open:
 
 1. **Update / remove that targets Lucy.** Those actions still use the older per-target loop, so a change or delete that names Lucy can still land on the speaker’s book.
 2. **Confirm the same add rule for shopping and custom lists.** Shopping adds go through the new split and are not covered by the task tests. A **named custom list** is matched as a shared collection *before* that split, so an add that names Lucy on a named custom list can still be written on the speaker.
