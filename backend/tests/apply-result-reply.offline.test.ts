@@ -226,6 +226,68 @@ describe("decideReplyFromApplyResult", () => {
     expect(decided.spoken).not.toMatch(/^\s*1\.\s/m);
   });
 
+  it("partial range delete names the row that was not removed", () => {
+    const kept = "task-kept";
+    const missed = "task-missed";
+    const requested = captureRequestedFromMetadata({
+      lists: [
+        remove("tasks", [
+          { item_id: kept },
+          { item_id: missed },
+          { item_id: "task-2" },
+          { item_id: "task-3" },
+        ]),
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      listMutations: [
+        {
+          action: "remove",
+          itemId: kept,
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k1",
+          itemLabel: "משימה 7",
+        },
+        {
+          action: "remove",
+          itemId: "task-2",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k2",
+          itemLabel: "משימה 9",
+        },
+        {
+          action: "remove",
+          itemId: "task-3",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k3",
+          itemLabel: "משימה 10",
+        },
+      ],
+      shareMisses: [
+        {
+          itemId: missed,
+          reason: "missing",
+          label: "להזכיר לטל",
+          dumpLine: 8,
+        },
+      ],
+    });
+    expect(result.completeness).toBe("partial");
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הסרתי 4 פריטים."),
+    });
+    expect(decided.keepDraft).toBe(false);
+    expect(decided.spoken).toContain("הסרתי 3 פריטים.");
+    expect(decided.spoken).toContain("לא הוסר: 8. «להזכיר לטל».");
+    expect(decided.spoken).not.toContain(LIST_FIND_MISS);
+    expect(decided.spoken).not.toContain("הסרתי 4");
+  });
+
   it("full failure: blocks success claim", () => {
     const decided = decideReplyFromApplyResult({
       applyResult: resultFullFailure(),

@@ -47,11 +47,18 @@ export function sideFailureLines(input: {
 }): string[] {
   const lines: string[] = [];
   if (input.shareMisses.length > 0) {
-    lines.push(
-      formatShareOutcomeReply(
-        summarizeShareApply(input.listMutations, input.shareMisses),
-      ) || SHARE_CLAIM_MISS,
+    const summary = summarizeShareApply(
+      input.listMutations,
+      input.shareMisses,
     );
+    // Remove misses are already named from ApplyResult. A share-outcome line
+    // would add the generic «לא מצאתי» on top of that partial report.
+    const removeLookupOnly =
+      summary.shareIntentCount === 0 &&
+      input.shareMisses.every((miss) => miss.op === "remove");
+    if (!removeLookupOnly) {
+      lines.push(formatShareOutcomeReply(summary) || SHARE_CLAIM_MISS);
+    }
   }
   const attach = input.attachmentOutcome;
   if (

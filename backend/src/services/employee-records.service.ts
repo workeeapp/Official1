@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import {
   isGuestEmployee,
+  llmItemLabel,
   parseAttachmentIds,
   parseJobUrgency,
   type ChatAttachmentRef,
@@ -2235,7 +2236,37 @@ export interface ListItemMutation {
 export type ShareApplyMiss = {
   itemId: string;
   reason: "missing" | "forbidden";
+  /** Title and dump line so a partial remove can name what was not deleted. */
+  label?: string;
+  dumpLine?: number;
+  op?: "remove" | "update";
+  listType?: string;
 };
+
+function shareMissFromItem(
+  item: Record<string, unknown>,
+  itemId: string,
+  reason: ShareApplyMiss["reason"],
+  op: "remove" | "update",
+  listType: string,
+): ShareApplyMiss {
+  const rawLabel = llmItemLabel(item);
+  const label =
+    rawLabel === "dump_line" || rawLabel === "saved_data" ? "" : rawLabel;
+  const rawLine = item.dump_line ?? item.dumpLine;
+  const dumpLine =
+    typeof rawLine === "number" && Number.isFinite(rawLine) && rawLine >= 1
+      ? rawLine
+      : undefined;
+  return {
+    itemId,
+    reason,
+    op,
+    ...(listType ? { listType } : {}),
+    ...(label ? { label } : {}),
+    ...(dumpLine ? { dumpLine } : {}),
+  };
+}
 
 /** NEW task+nested-remind transaction failed — surfaces as lists apply_miss. */
 export type NestedRemindTxnMiss = {
@@ -3150,7 +3181,15 @@ async function applyListAction(
       const resolved = await resolveLiveListItemForMutate(mutateId, employeeId);
       if (!resolved?.existing?.id) {
         if (mutateId) {
-          shareMisses.push({ itemId: mutateId, reason: "missing" });
+          shareMisses.push(
+            shareMissFromItem(
+              item,
+              mutateId,
+              "missing",
+              "remove",
+              resolvedAction.listType,
+            ),
+          );
         }
         continue;
       }
@@ -3162,7 +3201,15 @@ async function applyListAction(
         accessCache,
       );
       if (access && !access.allowed) {
-        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
+        shareMisses.push(
+          shareMissFromItem(
+            item,
+            existing.id,
+            "forbidden",
+            "remove",
+            resolvedAction.listType,
+          ),
+        );
         continue;
       }
       if (
@@ -3174,7 +3221,15 @@ async function applyListAction(
           accessCache,
         ))
       ) {
-        shareMisses.push({ itemId: existing.id, reason: "forbidden" });
+        shareMisses.push(
+          shareMissFromItem(
+            item,
+            existing.id,
+            "forbidden",
+            "remove",
+            resolvedAction.listType,
+          ),
+        );
         continue;
       }
       const targetListName =

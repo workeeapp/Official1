@@ -3588,6 +3588,123 @@ describe("employee targets", () => {
     expect(lucyApply?.visibility.scope).toBe("personal");
   });
 
+  it("user + Lucy task is persisted only on Lucy's book", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "לשתות מים" }],
+            targets: ["עמית"],
+          },
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "להזכיר לעמית לשתות מים" }],
+            targets: ["עמית", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    const speakerTasks = plan.applications.filter(
+      (row) => row.employeeId === amit.id,
+    );
+    expect(speakerTasks).toHaveLength(1);
+    expect(
+      JSON.stringify(speakerTasks[0]?.metadata.lists),
+    ).not.toContain("להזכיר");
+    const lucyTasks = plan.applications.filter(
+      (row) => row.employeeId === lucy.id,
+    );
+    expect(lucyTasks).toHaveLength(1);
+    expect(JSON.stringify(lucyTasks[0]?.metadata.lists)).toContain("להזכיר");
+    expect(lucyTasks[0]?.visibility.visibleTo).toEqual([lucy.id]);
+    expect(plan.notifications.map((row) => row.employee.id)).not.toContain(
+      lucy.id,
+    );
+  });
+
+  it("user + family + Lucy keeps the family assignment and skips the speaker copy", () => {
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "להזכיר לעמית ולטל לסגור את החלון" }],
+            targets: ["עמית", "טל", "לוסי"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId).sort()).toEqual(
+      [lucy.id, tal.id].sort(),
+    );
+    expect(
+      plan.applications.find((row) => row.employeeId === tal.id)?.visibility,
+    ).toMatchObject({
+      scope: "personal",
+      visibleTo: [tal.id],
+    });
+    expect(plan.notifications.map((row) => row.employee.id)).toEqual([tal.id]);
+  });
+
+  it("user + family without a digital worker still co-shares on the speaker", () => {
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "לקנות חלב" }],
+            targets: ["עמית", "טל"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([amit.id]);
+    expect(plan.applications[0]?.visibility.scope).toBe("shared");
+    expect(plan.applications[0]?.visibility.visibleTo).toEqual(
+      expect.arrayContaining([amit.id, tal.id]),
+    );
+  });
+
   it("plans a WhatsApp send to a raw phone number", () => {
     expect(
       planPhoneRelays(

@@ -38,6 +38,8 @@ export type IntentMiss = {
   listId?: string;
   listType?: string;
   listName?: string;
+  /** Dump title when this miss can name the row that was not changed. */
+  label?: string;
 };
 
 export type ResolveIntentRefsResult = {
@@ -241,7 +243,32 @@ function resolveDumpLineItem(
     dump.find((row) => row.id === id);
   const kind = line?.kind?.trim() || action.listType;
   passThroughIds.add(id);
-  return stampIdOnItem(raw, id, kind);
+  return stampDumpTitle(stampIdOnItem(raw, id, kind), kind, line?.title_stem ?? "");
+}
+
+/** So a later apply miss can name the dump row, not only its opaque id. */
+function stampDumpTitle(
+  item: Record<string, unknown>,
+  kind: string,
+  titleStem: string,
+): Record<string, unknown> {
+  const stem = titleStem.trim();
+  if (!stem) {
+    return item;
+  }
+  const key =
+    kind === "shopping"
+      ? "שם פריט"
+      : kind === "contacts" || kind === "phone_book"
+        ? "שם פרטי"
+        : kind === "tasks"
+          ? "שם משימה"
+          : "תיאור";
+  const existing = item[key];
+  if (typeof existing === "string" && existing.trim()) {
+    return item;
+  }
+  return { ...item, [key]: stem };
 }
 
 function resolveSavedDataItem(

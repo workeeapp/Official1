@@ -62,6 +62,8 @@ export type ApplyMiss = {
   listType?: string;
   listName?: string;
   detail?: string;
+  /** Numbered-dump line when the miss came from a dump-mapped row. */
+  dumpLine?: number;
 };
 
 /** Intent / H / show-turn-strip drops. */
@@ -76,6 +78,8 @@ export type ResultIntentMiss = {
   op?: string;
   domain?: ApplyResultDomain;
   source?: "intent" | "dump_guard" | "show_turn_strip";
+  /** Product title of the row this miss did not change. */
+  label?: string;
 };
 
 export type DomainApplyResult = {
@@ -407,6 +411,12 @@ export function computeDomainCompleteness(input: {
         continue;
       }
       if (missIds.has(id)) {
+        const applyIdx = apply_misses.findIndex(
+          (miss, i) => !usedApplyMiss.has(i) && miss.id?.trim() === id,
+        );
+        if (applyIdx >= 0) {
+          usedApplyMiss.add(applyIdx);
+        }
         matchedMiss += 1;
         continue;
       }
@@ -440,10 +450,8 @@ export function computeDomainCompleteness(input: {
       if (miss.op !== req.op) {
         return false;
       }
-      // Id-less request: prefer id-less miss; miss with id already counted via missIds for id reqs.
-      if (miss.id?.trim()) {
-        return false;
-      }
+      // A dump-line remove is id-less at request capture and gains an id only
+      // after the dump map is applied. That miss still accounts for one request.
       if (req.listType && miss.listType && miss.listType !== req.listType) {
         return false;
       }
@@ -671,6 +679,7 @@ export function buildApplyResult(input: {
         listId: miss.listId,
         listType: miss.listType,
         listName: miss.listName,
+        ...(miss.label ? { label: miss.label } : {}),
         source: "intent" as const,
       })),
       ...(input.dumpGuardDrops ?? []).map((drop) => ({
@@ -681,6 +690,8 @@ export function buildApplyResult(input: {
         op: drop.op,
         domain: "lists" as const,
         source: "dump_guard" as const,
+        ...(drop.dumpLine ? { dumpLine: drop.dumpLine } : {}),
+        ...(drop.label ? { label: drop.label } : {}),
       })),
       ...stripMisses.filter((miss) => miss.domain === "lists"),
     ];
@@ -701,6 +712,10 @@ export function buildApplyResult(input: {
         domain: "lists" as const,
         reason: miss.reason,
         id: miss.itemId,
+        ...(miss.op ? { op: miss.op } : {}),
+        ...(miss.listType ? { listType: miss.listType } : {}),
+        ...(miss.label ? { detail: miss.label } : {}),
+        ...(miss.dumpLine ? { dumpLine: miss.dumpLine } : {}),
       })),
       ...(input.nestedRemindMisses ?? []).map((miss) => ({
         domain: "lists" as const,

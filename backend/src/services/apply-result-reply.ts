@@ -41,9 +41,33 @@ function hasRequestedMutates(result: ApplyResult): boolean {
   );
 }
 
+function isRemoveOp(op: string | undefined): boolean {
+  return op === "remove" || op === "remove_filing" || op === "delete_list";
+}
+
+/** Name a row a partial delete did not remove. Empty when nothing identifiable. */
+function leftoverPhrase(input: {
+  dumpLine?: number;
+  label?: string;
+}): string {
+  const label = input.label?.trim() ?? "";
+  const line = input.dumpLine;
+  if (line && line > 0 && label) {
+    return `${line}. «${label}»`;
+  }
+  if (label) {
+    return `«${label}»`;
+  }
+  if (line && line > 0) {
+    return `שורה ${line}`;
+  }
+  return "";
+}
+
 function reportableMissLines(result: ApplyResult): string[] {
   const lines: string[] = [];
   const seen = new Set<string>();
+  const leftovers: string[] = [];
   const push = (line: string) => {
     if (!line || seen.has(line)) {
       return;
@@ -51,6 +75,16 @@ function reportableMissLines(result: ApplyResult): string[] {
     seen.add(line);
     lines.push(line);
   };
+  const pushLeftover = (phrase: string) => {
+    if (!phrase || leftovers.includes(phrase)) {
+      return;
+    }
+    leftovers.push(phrase);
+  };
+  const appliedRemoves = flattenApplied(result).filter((row) =>
+    isRemoveOp(row.op),
+  );
+  const nameLeftovers = appliedRemoves.length > 0;
 
   for (const domain of Object.values(result.domains)) {
     if (!domain) {
@@ -68,12 +102,31 @@ function reportableMissLines(result: ApplyResult): string[] {
         miss.reason === "invalid_source" ||
         miss.reason === "show_dump_cleared_mutates"
       ) {
-        push(LIST_FIND_MISS);
+        const phrase = leftoverPhrase({
+          dumpLine: miss.dumpLine,
+          label: miss.label,
+        });
+        const removeMiss =
+          !miss.op || isRemoveOp(miss.op);
+        if (nameLeftovers && removeMiss && phrase) {
+          pushLeftover(phrase);
+        } else {
+          push(LIST_FIND_MISS);
+        }
       }
     }
     for (const miss of domain.apply_misses as ApplyMiss[]) {
       if (miss.reason === "missing" || miss.reason === "forbidden") {
-        push(LIST_FIND_MISS);
+        const phrase = leftoverPhrase({
+          dumpLine: miss.dumpLine,
+          label: miss.detail,
+        });
+        const removeMiss = !miss.op || isRemoveOp(miss.op);
+        if (nameLeftovers && removeMiss && phrase) {
+          pushLeftover(phrase);
+        } else {
+          push(LIST_FIND_MISS);
+        }
       } else if (miss.reason === "missed" || miss.reason === "skipped") {
         push(LIST_FIND_MISS);
       } else if (miss.op === "add" || miss.reason.includes("add")) {
@@ -82,6 +135,11 @@ function reportableMissLines(result: ApplyResult): string[] {
         push(PARTIAL_MISS_LINE);
       }
     }
+  }
+  if (leftovers.length === 1) {
+    push(`לא הוסר: ${leftovers[0]}.`);
+  } else if (leftovers.length > 1) {
+    push(`לא הוסרו: ${leftovers.join(", ")}.`);
   }
   return lines;
 }

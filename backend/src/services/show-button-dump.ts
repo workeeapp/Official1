@@ -632,6 +632,9 @@ export type DumpGuardDroppedItem = {
   listName?: string;
   op?: string;
   reason: "outside_dump" | "outside_dump_scope";
+  /** Dump line and title, when the dropped id was on the numbered map. */
+  dumpLine?: number;
+  label?: string;
 };
 
 /** Model-supplied add destination — not a dump line reference. */
@@ -738,12 +741,15 @@ export function restrictListMutatesToLastNumberedDump(
         continue;
       }
       droppedOutsideDump = true;
+      const line = dump.find((row) => row.id.trim() === id);
       droppedItems.push({
         itemId: id,
         listType: action.listType,
         listName: action.listName,
         op: action.action,
         reason: "outside_dump",
+        ...(line?.n ? { dumpLine: line.n } : {}),
+        ...(line?.title_stem.trim() ? { label: line.title_stem.trim() } : {}),
       });
     }
     if (kept.every((raw) => !actionItemIdFromRaw(raw))) {

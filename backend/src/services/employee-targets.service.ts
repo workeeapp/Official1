@@ -1252,6 +1252,42 @@ export function planTargetedActions(input: {
     const humanPartnerTargets = humanTargets.filter(
       (target) => target.id !== input.actor.id,
     );
+    const digitalTargets = mutateTargets.filter((target) =>
+      isDigitalEmployee(target),
+    );
+    // A digital worker is never a share participant. A task that names the
+    // speaker and Lucy is persisted only on Lucy's book. Other humans named
+    // on that same action still receive an assignment on their own book.
+    if (normalizedList.action === "add" && digitalTargets.length > 0) {
+      for (const worker of digitalTargets) {
+        applications.push({
+          employeeId: worker.id,
+          metadata,
+          visibility: {
+            scope: "personal",
+            addedById: input.actor.id,
+            visibleTo: [worker.id],
+          },
+        });
+      }
+      for (const person of humanPartnerTargets) {
+        applications.push({
+          employeeId: person.id,
+          metadata,
+          visibility: {
+            scope: "personal",
+            addedById: input.actor.id,
+            visibleTo: [person.id],
+          },
+        });
+        addNotification(
+          person.id,
+          metadata,
+          partnerLabel(humanPartnerTargets, person.id),
+        );
+      }
+      continue;
+    }
     // All item list types: co-share when speaker ∈ targets; else assign fan-out.
     const sharedSingleRow =
       normalizedList.action === "add" &&
