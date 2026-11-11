@@ -3647,6 +3647,44 @@ describe("employee targets", () => {
     );
   });
 
+  it("a tracking title aimed only at the speaker is not written to the speaker book", () => {
+    // Bug path: model emitted להזכיר ל… with targets=[speaker] (forgot Lucy).
+    // Must not land on the human book — that is what «הצג משימות» was dumping.
+    const lucy: PublicEmployee = {
+      id: "lucy-1",
+      kind: "digital",
+      name: "לוסי",
+      surname: "",
+      nickname: "לוסי",
+      email: null,
+      phone: null,
+      protected: true,
+    };
+    const plan = planTargetedActions({
+      actor: amit,
+      employees,
+      workers: [lucy],
+      metadata: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [{ "שם משימה": "להזכיר לעמית לשתות חלב" }],
+            targets: ["עמית"],
+          },
+        ],
+        filing: [],
+      },
+    });
+    expect(
+      plan.applications.some((row) => row.employeeId === amit.id),
+    ).toBe(false);
+    expect(
+      plan.applications.some((row) => row.employeeId === lucy.id),
+    ).toBe(false);
+  });
+
   it("a chore aimed at the speaker and Lucy is saved on both books", () => {
     const lucy: PublicEmployee = {
       id: "lucy-1",

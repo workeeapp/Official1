@@ -48,6 +48,9 @@ import {
   shiftJerusalemYmd,
   upcomingWeekdayDates,
 } from "../utils/relative-date.js";
+import { isWorkerTrackingTitle } from "./worker-tracking-title.js";
+
+export { isWorkerTrackingTitle } from "./worker-tracking-title.js";
 
 const ALL_TARGET_TOKENS = /^(all|everyone|\*|כולם|כל אחד|כל העובדים)$/i;
 
@@ -1287,15 +1290,21 @@ export function planTargetedActions(input: {
     // A digital worker is never a share participant. A chore that names the
     // speaker and Lucy is two personal rows. A worker-tracking title
     // (להזכיר ל… / לשלוח הודעה / לשלוח נדנוד / לעזור ל…) stays only on the
-    // worker's book, even when the speaker is also named. Other humans still
-    // receive a chore assignment on their own book. Update and remove use
-    // the same split when the item id was not already routed to its owner.
+    // worker's book, even when the speaker is also named — and even when the
+    // model forgot to name the worker (speaker-only targets). Other humans
+    // still receive a non-tracking chore on their own book. Update and remove
+    // use the same split when the item id was not already routed to its owner.
     // One list add does not create a reminder.
+    const hasWorkerTrackingItem =
+      normalizedList.listType === "tasks" &&
+      normalizedList.items.some((item) =>
+        isWorkerTrackingTitle(taskTitleOf(item)),
+      );
     if (
       (normalizedList.action === "add" ||
         normalizedList.action === "update" ||
         normalizedList.action === "remove") &&
-      digitalTargets.length > 0
+      (digitalTargets.length > 0 || hasWorkerTrackingItem)
     ) {
       const humanList = humanCopyOfDigitalAdd(normalizedList);
       const humanMetadata = humanList
@@ -3108,17 +3117,6 @@ function listActionTargets(list: LlmListAction): string[] {
   return (list.targets ?? [])
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter(Boolean);
-}
-
-/** Lucy's own follow-up row. It is not the speaker's chore. */
-export function isWorkerTrackingTitle(title: string): boolean {
-  const text = title.trim();
-  return (
-    text.startsWith("להזכיר ל") ||
-    text.startsWith("לשלוח הודעה") ||
-    text.startsWith("לשלוח נדנוד") ||
-    text.startsWith("לעזור ל")
-  );
 }
 
 function taskTitleOf(item: Record<string, unknown>): string {

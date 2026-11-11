@@ -37,6 +37,7 @@ import {
   REMINDERS_LIST_EMOJI,
 } from "./list-emoji.js";
 import type { ReminderSnapshotRow } from "./reminder.service.js";
+import { isWorkerTrackingTitle } from "./worker-tracking-title.js";
 
 export {
   SHOW_REMINDERS_COMMAND,
@@ -3825,6 +3826,9 @@ export function listUndatedTasksExcludedByDateRange(
   const pureAssign = collaboration === "assign";
   const out: DumpItem[] = [];
   for (const row of rows) {
+    if (opts?.flatLayout !== true && isWorkerTrackingTitle(row.title)) {
+      continue;
+    }
     if (
       !dumpRowPassesNonDateFilters(
         row,
@@ -3884,6 +3888,16 @@ function filterDumpRows(
   const pureAssign = collaboration === "assign";
 
   let kept = rows.filter((row) => {
+    // Speaker «הצג משימות»: Lucy's tracking rows (להזכיר ל… / לשלוח הודעה…)
+    // must not appear even when they wrongly landed on the speaker book.
+    // Worker inventory keeps them (flatLayout).
+    if (
+      listType === "tasks" &&
+      effective?.flatLayout !== true &&
+      isWorkerTrackingTitle(row.title)
+    ) {
+      return false;
+    }
     if (
       !dumpRowPassesNonDateFilters(
         row,

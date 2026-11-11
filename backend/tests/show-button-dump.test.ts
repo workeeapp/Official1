@@ -3795,11 +3795,57 @@ describe("worker inventory tasks dump helpers", () => {
       filing: [],
     };
     const filtered = excludeItemIdsFromSnapshot(snap, new Set(["job-shadow"]));
+    // Worker inventory always uses flatLayout; without it, tracking titles are
+    // treated as speaker-dump noise and omitted.
     const text = formatShowDumpFromKind("tasks", filtered, {
       viewerName: "לוסי",
+      flatLayout: true,
     })!;
     expect(text).toContain("להזכיר לטל לקנות חלב");
     expect(text).not.toContain("לבדוק עם ערן");
+  });
+
+  it("הצג משימות hides worker-tracking titles that wrongly sit on the speaker book", () => {
+    // Production bug: «להזכיר לטל…» rows were saved onto the speaker book
+    // (model targeted speaker only / legacy). Bare הצג משימות must omit them;
+    // worker flatLayout inventory still shows them.
+    const speakerSnap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "user-1", "שם משימה": "תור לשיננית" },
+            {
+              item_id: "lucy-nudge-1",
+              "שם משימה": "להזכיר לטל תור לשיננית",
+            },
+            {
+              item_id: "lucy-nudge-2",
+              "שם משימה": "להזכיר לטל לשתות חלב",
+            },
+            { item_id: "user-2", "שם משימה": "פגישה" },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const speakerDump = formatShowDumpFromKind("tasks", speakerSnap, {
+      viewerName: "טל",
+    })!;
+    expect(speakerDump).toContain("תור לשיננית");
+    expect(speakerDump).toContain("פגישה");
+    expect(speakerDump).not.toContain("להזכיר לטל תור לשיננית");
+    expect(speakerDump).not.toContain("להזכיר לטל לשתות חלב");
+    expect(speakerDump).not.toMatch(/להזכיר לטל/u);
+    const workerView = formatShowDumpFromKind("tasks", speakerSnap, {
+      viewerName: "טל",
+      flatLayout: true,
+    })!;
+    expect(workerView).toContain("להזכיר לטל תור לשיננית");
+    expect(workerView).toContain("להזכיר לטל לשתות חלב");
   });
 
   it("הצג משימות (speaker book) dumps speaker tasks — not Lucy OPEN_JOBS follow-ups", () => {
