@@ -107,6 +107,10 @@ import {
 } from "./employee-targets.service.js";
 import { applyPostSaveReminderOfferSafetyNet } from "./post-save-reminder-offer.js";
 import { messageSignalsExplicitOneOffMove } from "./one-off-task-occurrence.js";
+import {
+  applyStopSeriesAfterPingSafetyNet,
+  formatStopSeriesAfterPingAck,
+} from "./stop-series-after-ping.js";
 import { phonesMatch } from "../utils/phone.js";
 import {
   formatSessionClockContext,
@@ -3114,6 +3118,24 @@ export async function sendChatMessage(input: {
       }
       metadata = redactMetadataSecrets(metadata);
     }
+    // Bare «הפסיקי» right after a ping → cancel RECENT_OUTBOUND.reminder_id only.
+    // Fail-safe: never let the model cancel a different watch/clock instead.
+    let stopSeriesAfterPingRewrite: {
+      rewrote: boolean;
+      targetItem: string | null;
+    } = { rewrote: false, targetItem: null };
+    if (!guestSpeaker) {
+      const stopNet = applyStopSeriesAfterPingSafetyNet({
+        message: input.message,
+        recentOutbound,
+        metadata,
+      });
+      metadata = stopNet.metadata;
+      stopSeriesAfterPingRewrite = {
+        rewrote: stopNet.rewrote,
+        targetItem: stopNet.targetItem,
+      };
+    }
     const incomingReminders = guestSpeaker ? [] : metadata.reminders ?? [];
     // Nested items[].remind: joins written in atomic/package paths (NEW contract).
     // Exact-key soft-link is legacy-only — see clocksEligibleForExactKeySoftLink.
@@ -3989,6 +4011,20 @@ export async function sendChatMessage(input: {
       if (!spokenAfter || spokenAfter === LIST_FIND_MISS) {
         workingReply = setEngineResponse(workingReply, reminderDeleteFallback);
       }
+    }
+    // Engine rewrote bare stop onto RECENT_OUTBOUND — replace wrong SOLT/watch prose.
+    if (
+      stopSeriesAfterPingRewrite.rewrote &&
+      (reminderResult.removed?.length ?? 0) > 0
+    ) {
+      workingReply = replaceSpokenForExecutionOverride(
+        workingReply,
+        formatStopSeriesAfterPingAck(
+          stopSeriesAfterPingRewrite.targetItem ??
+            reminderResult.removed[0] ??
+            "",
+        ),
+      );
     }
     // The model already said «שיניתי/מחקתי» — correct it when the engine refused the list op.
     const listOpRefusal = formatListOpRefusals(listOpResults);
