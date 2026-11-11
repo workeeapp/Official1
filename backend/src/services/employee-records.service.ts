@@ -85,8 +85,23 @@ import {
   effectiveListEmoji,
   emojiForNewCustomList,
 } from "./list-emoji.js";
+import {
+  describePastOneOffRewrite,
+  shouldRewritePastOneOffDateUpdateAsAdd,
+} from "./one-off-task-occurrence.js";
 
 export type ItemScope = "personal" | "shared";
+
+/** Options for one-off timed-task occurrence guards during apply. */
+export type ApplyEmployeeRecordsOptions = {
+  /**
+   * Speaker explicitly asked to move/reschedule an existing occurrence.
+   * When true, a past one-off may still have its תאריך לביצוע updated.
+   */
+  allowPastOneOffDateMove?: boolean;
+  /** Due comparisons — turn-pinned wall clock (same Date as SESSION_CLOCK). */
+  now?: Date;
+};
 
 export interface ItemVisibility {
   scope: ItemScope;
@@ -2374,6 +2389,7 @@ export async function applyEmployeeRecords(
   metadata: LlmMetadata,
   visibility?: ItemVisibility,
   actorId?: string,
+  options?: ApplyEmployeeRecordsOptions,
 ): Promise<{
   events: SharedItemEvent[];
   mutations: ListItemMutation[];
@@ -2413,7 +2429,13 @@ export async function applyEmployeeRecords(
   let attachmentOutcome = emptyAttachmentOutcome();
 
   for (const action of metadata.lists) {
-    const result = await applyListAction(employeeId, action, resolved, actor);
+    const result = await applyListAction(
+      employeeId,
+      action,
+      resolved,
+      actor,
+      options,
+    );
     events.push(...result.events);
     mutations.push(...result.mutations);
     cancelledReminders.push(...result.cancelledReminders);
@@ -2975,6 +2997,7 @@ async function applyListAction(
   action: LlmListAction,
   visibility: ItemVisibility,
   actorId: string,
+  options?: ApplyEmployeeRecordsOptions,
 ): Promise<{
   events: SharedItemEvent[];
   mutations: ListItemMutation[];
@@ -3381,11 +3404,12 @@ async function applyListAction(
             visibleTo: idList(existing.visibleTo),
           }
         : mergeItemVisibility(existing, visibility, rowOwnerId);
+    const existingRow = existing;
     const unshared =
-      existing && !access
+      existingRow && !access
         ? (visibility.removeIds ?? []).filter(
             (id) =>
-              id !== rowOwnerId && idList(existing.visibleTo).includes(id),
+              id !== rowOwnerId && idList(existingRow.visibleTo).includes(id),
           )
         : [];
     const resolvedVisibility = withoutPartners(
@@ -3419,10 +3443,41 @@ async function applyListAction(
       occurrence.change && resolvedAction.action === "update"
         ? applyOccurrenceChange(doneRecord, occurrence.change)
         : doneRecord;
-    const nextDataRecord =
+    let nextDataRecord =
       resolvedAction.listType === "tasks"
         ? normalizeTaskTitleFields(nextDataRecordRaw)
         : nextDataRecordRaw;
+    // Past one-off + different calendar day → NEW occurrence (keep old row).
+    // Fail-safe: never silently lose the requested future date/time.
+    let forceAddFromPastOneOff = false;
+    let pastOneOffRewriteNote = "";
+    if (
+      resolvedAction.action === "update" &&
+      existing &&
+      resolvedAction.listType === "tasks" &&
+      !occurrence.change &&
+      !done.doneDate &&
+      shouldRewritePastOneOffDateUpdateAsAdd({
+        existingData: existing.data,
+        nextData: nextDataRecord,
+        now: options?.now,
+        allowExplicitMove: options?.allowPastOneOffDateMove === true,
+      })
+    ) {
+      forceAddFromPastOneOff = true;
+      pastOneOffRewriteNote = describePastOneOffRewrite({
+        existingData: existing.data,
+        nextData: nextDataRecord,
+      });
+      for (const key of ["item_id", "itemId", "id"] as const) {
+        delete fieldsItem[key];
+      }
+      existing = null;
+      rowOwnerId = employeeId;
+      nextDataRecord = normalizeTaskTitleFields(
+        normalizeListItemData(fieldsItem),
+      );
+    }
     const occurrenceChanged = nextDataRecord !== doneRecord;
     if (
       occurrence.change &&
@@ -3443,6 +3498,8 @@ async function applyListAction(
       existing?.itemKey ||
       "";
     const itemUrgency = readItemUrgency(fieldsItem);
+    const treatAsAdd =
+      forceAddFromPastOneOff || resolvedAction.action === "add";
     const fields = {
       data: nextData,
       scope: resolvedVisibility.scope,
@@ -3450,7 +3507,7 @@ async function applyListAction(
       visibleTo: resolvedVisibility.visibleTo,
       ...(itemUrgency !== undefined
         ? { urgency: itemUrgency }
-        : resolvedAction.action === "add"
+        : treatAsAdd
           ? { urgency: "normal" as const }
           : {}),
     };
@@ -3802,7 +3859,9 @@ async function applyListAction(
               action: "list_add",
               entityType: "EmployeeListItem",
               entityId: atomic.itemId,
-              summary: `add ${resolvedAction.listType}: ${nextItemKey}`,
+              summary: pastOneOffRewriteNote
+                ? `add ${resolvedAction.listType}: ${nextItemKey} (${pastOneOffRewriteNote})`
+                : `add ${resolvedAction.listType}: ${nextItemKey}`,
             });
           }
         } catch {
@@ -3870,7 +3929,9 @@ async function applyListAction(
           action: "list_add",
           entityType: "EmployeeListItem",
           entityId: created.id,
-          summary: `add ${resolvedAction.listType}: ${nextItemKey}`,
+          summary: pastOneOffRewriteNote
+            ? `add ${resolvedAction.listType}: ${nextItemKey} (${pastOneOffRewriteNote})`
+            : `add ${resolvedAction.listType}: ${nextItemKey}`,
         });
       }
     }

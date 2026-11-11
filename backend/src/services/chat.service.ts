@@ -105,6 +105,8 @@ import {
   showButtonsForNotify,
   type SharedListRef,
 } from "./employee-targets.service.js";
+import { applyPostSaveReminderOfferSafetyNet } from "./post-save-reminder-offer.js";
+import { messageSignalsExplicitOneOffMove } from "./one-off-task-occurrence.js";
 import { phonesMatch } from "../utils/phone.js";
 import {
   formatSessionClockContext,
@@ -2251,6 +2253,12 @@ export interface TurnContextParts {
    * Set only when buildLucyInstructions attaches the Lucy engine.
    */
   rulesInInstructions?: boolean;
+  /**
+   * Single turn wall clock for SESSION_CLOCK. sendChatMessage pins one Date
+   * and reuses it for past one-off apply so model facts and engine guards
+   * cannot straddle a Jerusalem midnight between compose and apply.
+   */
+  now?: Date;
 }
 
 /**
@@ -2262,7 +2270,7 @@ export function composeTurnContext(parts: TurnContextParts): string {
   const guest = parts.guestSpeaker;
   const factsOnly = { rulesInInstructions: parts.rulesInInstructions === true };
   return [
-    formatSessionClockContext(undefined, factsOnly),
+    formatSessionClockContext(parts.now ?? new Date(), factsOnly),
     guest ? "" : formatSpeakerAddressContext(parts.addressGender),
     formatEmployeeContext(parts.speakerSnapshot, "EMPLOYEE_SAVED_DATA", factsOnly),
     guest || !parts.workerSnapshot
@@ -2576,6 +2584,8 @@ export async function sendChatMessage(input: {
         digitalEmployeeId: digital.id,
       }),
     )) ?? "";
+  // One wall clock for this turn: SESSION_CLOCK facts + past one-off apply.
+  const turnNow = new Date();
   const context = composeTurnContext({
     guestSpeaker,
     consultFrom: Boolean(consultFrom),
@@ -2600,6 +2610,7 @@ export async function sendChatMessage(input: {
       employees,
       loadLlmConfig().systemMessage,
     ),
+    now: turnNow,
   });
   const instructions = buildLucyInstructions({
     digital,
@@ -3004,12 +3015,19 @@ export async function sendChatMessage(input: {
     const cancelledReminderIds: string[] = listOpResults.flatMap(
       (row) => row.cancelledReminderIds,
     );
+    const allowPastOneOffDateMove = messageSignalsExplicitOneOffMove(
+      input.message,
+    );
     for (const application of plan.applications) {
       const applied = await applyEmployeeRecords(
         application.employeeId,
         application.metadata,
         application.visibility,
         employee.id,
+        {
+          allowPastOneOffDateMove,
+          now: turnNow,
+        },
       );
       collectedEvents.push(...applied.events);
       listMutations.push(...applied.mutations);
@@ -5335,6 +5353,14 @@ export async function sendChatMessage(input: {
             return { ...button, label };
           }),
         };
+      });
+      // Timed tasks add without an explicit reminder → soft כן/לא offer.
+      // Idempotent: skips when model already offered or a clock was saved.
+      bubbles = applyPostSaveReminderOfferSafetyNet({
+        metadata,
+        listMutations,
+        reminderSavedCount: reminderResult.saved.length,
+        bubbles,
       });
       workingReply = setEngineSpokenBubbles(workingReply, bubbles);
     }

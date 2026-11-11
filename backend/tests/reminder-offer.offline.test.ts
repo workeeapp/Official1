@@ -16,12 +16,14 @@ const config = (JSON.parse(readFileSync(resolve(process.cwd(), "..", "LLM.config
 }).systemMessage.join("\n");
 
 describe("post-save reminder offer", () => {
-  it("offered only when useful — never mandatory", () => {
-    expect(config).toContain("OFFER ONLY WHEN USEFUL (contextual judgment, never mandatory)");
-    expect(config).toContain("No offer → [0] confirm only.");
-    expect(config).not.toContain("FORBIDDEN a single responses entry with no offer");
-    expect(config).toContain("tasks → a separate reminder offer entry only when a reminder would genuinely help");
-    expect(config).toContain("□ Post-save reminder offer: tasks only, only when useful (separate entry, כן/לא); never for shopping / custom lists;");
+  it("timed tasks add → soft offer; engine may inject; never duplicate", () => {
+    expect(config).toContain("OFFER WHEN THE TASK HAS A DATE AND/OR TIME");
+    expect(config).toContain("Engine may inject the soft offer if you omit it after a timed add");
+    expect(config).toContain("FORBIDDEN a second offer bubble when one already exists this turn");
+    expect(config).toContain(
+      "□ Post-save reminder offer: tasks only; after timed add always soft כן/לא (engine may inject; never duplicate; skip if reminder already requested/saved)",
+    );
+    expect(config).toContain("□ ONE-OFF TIMED TASK IDENTITY:");
   });
 
   it("when offered: separate entry, כן+לא only, own words (no prescribed sentence)", () => {

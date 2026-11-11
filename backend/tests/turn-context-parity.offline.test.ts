@@ -11,6 +11,8 @@ import {
 } from "../src/services/chat.service.js";
 import { mapSeededDumpLines } from "../src/eval/run-live-full.js";
 import type { EmployeeRecordSnapshot } from "../src/services/employee-records.service.js";
+import { sessionClock } from "../src/utils/relative-date.js";
+import { shouldRewritePastOneOffDateUpdateAsAdd } from "../src/services/one-off-task-occurrence.js";
 
 const root = resolve(import.meta.dirname, "..");
 const read = (rel: string) => readFileSync(resolve(root, rel), "utf8");
@@ -99,9 +101,52 @@ describe("composeTurnContext", () => {
     expect(text).not.toMatch(/^LAST_NUMBERED_DUMP:$/m);
     expect(text).not.toMatch(/^PENDING_ATTACHMENTS:$/m);
   });
+
+  it("SESSION_CLOCK uses the pinned turn now (Jerusalem date/time + now_iso)", () => {
+    // 2026-11-11 23:50 Israel — late enough that a later new Date() could cross midnight.
+    const turnNow = new Date("2026-11-11T21:50:00.000Z");
+    const clock = sessionClock(turnNow);
+    const text = composeTurnContext(
+      parts({ now: turnNow, rulesInInstructions: true }),
+    );
+    expect(text).toContain(`timezone: Asia/Jerusalem`);
+    expect(text).toContain(`current_date: ${clock.currentDate}`);
+    expect(text).toContain(`current_time: ${clock.currentTime}`);
+    expect(text).toContain(`now_iso: ${clock.nowIso}`);
+    expect(clock.currentDate).toBe("2026-11-11");
+    // Same turnNow drives past-one-off: due earlier that Jerusalem day is past.
+    expect(
+      shouldRewritePastOneOffDateUpdateAsAdd({
+        existingData: {
+          "שם משימה": "X",
+          "תאריך לביצוע": "2026-11-11",
+          "שעה לביצוע": "10:00",
+        },
+        nextData: {
+          "שם משימה": "X",
+          "תאריך לביצוע": "2027-02-17",
+          "שעה לביצוע": "13:30",
+        },
+        now: turnNow,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("LIVE_FULL harness uses the production composer", () => {
+  it("sendChatMessage pins one turnNow for SESSION_CLOCK and past-one-off apply", () => {
+    const chat = read("src/services/chat.service.ts");
+    expect(chat).toMatch(/const turnNow = new Date\(\)/);
+    expect(chat).toMatch(/now:\s*turnNow/);
+    // Apply must reuse turnNow — never a second new Date() for the guard.
+    const applyBlock = chat.slice(
+      chat.indexOf("allowPastOneOffDateMove"),
+      chat.indexOf("allowPastOneOffDateMove") + 600,
+    );
+    expect(applyBlock).toContain("now: turnNow");
+    expect(applyBlock).not.toContain("now: new Date()");
+  });
+
   it("sendChatMessage and run-live-full both call composeTurnContext; facts ride as liveFacts", () => {
     const chat = read("src/services/chat.service.ts");
     expect(chat.match(/composeTurnContext\(\{/g)?.length).toBe(1);
