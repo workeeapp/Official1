@@ -47,9 +47,14 @@ describe("P2: one rule for warmth, emoji and list names", () => {
     expect(instructions).toContain("Match length and energy to their message");
     expect(instructions).toContain("FORBIDDEN recycling a stock greeting or closer");
     expect(instructions).toContain("היי <name>, מה נשמע?");
-    expect(instructions).toContain("A casual open (היי / מה נשמע / בוקר טוב) is conversation, not a task");
     expect(instructions).toContain(
-      "do not invent a follow-up question, offer, or capability pitch unless they asked",
+      "On a bare היי / בוקר טוב / תודה: FORBIDDEN answering with «מה נשמע?»",
+    );
+    expect(instructions).toContain(
+      "default to plain Hebrew with no emoji and without automatically inserting their name every time",
+    );
+    expect(instructions).toContain(
+      "do not invent an offer or capability pitch unless they asked",
     );
   });
 
