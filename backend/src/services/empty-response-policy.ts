@@ -18,7 +18,7 @@
  * Does not invent ACTIONs. Does not change multi-bubble behavior. Prompt/schema
  * teaching of mandatory responses is out of Stage 2A scope.
  */
-import type { LlmMetadata } from "@workee/shared";
+import type { AddressGender, LlmMetadata } from "@workee/shared";
 import { parseLlmReply } from "@workee/shared";
 import type { ApplyResult } from "./apply-result.js";
 import { formatEmptySpokenFromApplyResult } from "./apply-result-reply.js";
@@ -162,6 +162,7 @@ export function decideEmptySpokenFallback(input: {
   guestMutationNotice?: string;
   listOpFallback?: string;
   reminderDeleteFallback?: string;
+  addressGender?: AddressGender | null;
 }): EmptySpokenDecision {
   const emptiness = classifySpokenEmptiness(input.reply);
   if (emptiness === "nonempty") {
@@ -198,7 +199,10 @@ export function decideEmptySpokenFallback(input: {
     return { fallback: listOp, reason: "list_op", emptiness };
   }
 
-  const fromApply = formatEmptySpokenFromApplyResult(input.applyResult);
+  const fromApply = formatEmptySpokenFromApplyResult(
+    input.applyResult,
+    input.addressGender,
+  );
   if (fromApply) {
     return { fallback: fromApply, reason: "apply_result", emptiness };
   }

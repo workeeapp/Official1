@@ -21,8 +21,7 @@ import {
 } from "./helpers/eval-live-provider-harness.js";
 
 const CONFIRM = "הפסקתי את התזכורת היומית לשתות מים.";
-const UNKNOWN_CAUTION =
-  "לא הצלחתי לאמת את כל הפעולות — נסי שוב או בדקי את הרשימה.";
+const UNKNOWN_CAUTION_RE = /לא הצלחתי לאמת את כל הפעולות —/;
 
 function stubLlmQueue(payloads: unknown[]) {
   let i = 0;
@@ -122,7 +121,7 @@ describe("reminder cancel reply follows the applied clock", () => {
     expect(row?.status).toBe("cancelled");
     expect(parseLlmReply(sent.reply).response).toBe(CONFIRM);
     expect(sent.reply).not.toContain("הסרתי 2");
-    expect(sent.reply).not.toContain(UNKNOWN_CAUTION);
+    expect(sent.reply).not.toMatch(UNKNOWN_CAUTION_RE);
   }, 30000);
 
   it("a real miss stays a partial failure and cancels only the clock that existed", async () => {
@@ -160,7 +159,7 @@ describe("reminder cancel reply follows the applied clock", () => {
     expect(sent.reply).toContain("לשתות מים");
     expect(sent.reply).toContain("לא מצאתי את הפריט ברשימה.");
     expect(sent.reply).not.toContain("הסרתי 2");
-    expect(sent.reply).not.toContain(UNKNOWN_CAUTION);
+    expect(sent.reply).not.toMatch(UNKNOWN_CAUTION_RE);
     expect(sent.reply).not.toContain("שתי התזכורות");
   }, 30000);
 });

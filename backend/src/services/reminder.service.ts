@@ -55,6 +55,7 @@ import {
 import { fetchQuote } from "./market.js";
 import { scheduleSoon } from "./reminder-fire.js";
 import { seedWatchBaseline } from "./watch-baseline.js";
+import { sanitizeReminderPingFields } from "./worker-tracking-title.js";
 import {
   decideCreateOrReuseClock,
   decideReuseWithoutSteal,
@@ -1168,7 +1169,12 @@ export async function createItemWithNestedRemindersAtomic(input: {
         contacts,
       );
       const key = reminder.item.trim().slice(0, 255) || "reminder";
-      const label = reminder.item.trim().slice(0, 255) || key;
+      const pingFields = sanitizeReminderPingFields({
+        item: reminder.item.trim().slice(0, 255) || key,
+        text: reminder.text || "",
+      });
+      const label =
+        (pingFields.item || pingFields.text || key).slice(0, 255) || key;
       const ruleFields =
         recurring?.recurrence
           ? {
@@ -1193,7 +1199,7 @@ export async function createItemWithNestedRemindersAtomic(input: {
           ...ruleFields,
           pingIds,
           aboutIds: [],
-          messageText: reminder.text || "",
+          messageText: pingFields.text,
           composeAtFire: Boolean(reminder.compose),
           composeSource: reminder.composeSource || "",
           composeLookbackHours: reminder.composeLookbackHours || 0,
@@ -1537,22 +1543,38 @@ export async function applyNestedReminderPackages(input: {
             if (fp) {
               fingerprintsByReminderId.set(decision.reminderId, fp);
             }
-            packageSaved.push({
-              id: decision.reminderId,
-              item: reminder.item.trim(),
-              itemKey: reminder.item.trim().slice(0, 255),
-              itemLabel: reminder.item.trim().slice(0, 255),
-              fireAt: formatJerusalemDateTime(fireAt),
-              ping: pingIds
-                .map((id) => formatPingLabel(id, input.employees))
-                .join(","),
-              requestedItemId: pack.itemId,
-            });
+            {
+              const reused = sanitizeReminderPingFields({
+                item: reminder.item.trim().slice(0, 255),
+                text: reminder.text || "",
+              });
+              const reusedLabel =
+                (reused.item || reused.text || reminder.item.trim()).slice(
+                  0,
+                  255,
+                ) || reminder.item.trim();
+              packageSaved.push({
+                id: decision.reminderId,
+                item: reusedLabel,
+                itemKey: reminder.item.trim().slice(0, 255),
+                itemLabel: reusedLabel,
+                fireAt: formatJerusalemDateTime(fireAt),
+                ping: pingIds
+                  .map((id) => formatPingLabel(id, input.employees))
+                  .join(","),
+                requestedItemId: pack.itemId,
+              });
+            }
             continue;
           }
 
           const key = reminder.item.trim().slice(0, 255) || "reminder";
-          const label = reminder.item.trim().slice(0, 255) || key;
+          const pingFields = sanitizeReminderPingFields({
+            item: reminder.item.trim().slice(0, 255) || key,
+            text: reminder.text || "",
+          });
+          const label =
+            (pingFields.item || pingFields.text || key).slice(0, 255) || key;
           const ruleFields =
             recurring?.recurrence
               ? {
@@ -1574,7 +1596,7 @@ export async function applyNestedReminderPackages(input: {
               ...ruleFields,
               pingIds,
               aboutIds: [],
-              messageText: reminder.text || "",
+              messageText: pingFields.text,
               composeAtFire: Boolean(reminder.compose),
               composeSource: reminder.composeSource || "",
               composeLookbackHours: reminder.composeLookbackHours || 0,
@@ -3299,7 +3321,6 @@ export async function applyReminders(input: {
 
     try {
       const owned = rows.filter((row) => row.ownerId === ownerId);
-      const label = (existing?.itemLabel ?? reminder.item.trim()).slice(0, 255);
       const stopsRule = reminder.recurrence === null;
       const nextRepeat = recurring
         ? legacyRepeatFor(recurring.recurrence)
@@ -3319,11 +3340,22 @@ export async function applyReminders(input: {
         : hadRule && !keepsRule
           ? { recurrence: Prisma.DbNull, occurrencesFired: 0 }
           : {};
-      const nextText = reminder.text.trim()
+      const nextTextRaw = reminder.text.trim()
         ? reminder.text.trim().slice(0, 4096)
         : existing && canReuseClock
           ? existing.messageText
           : "";
+      // Never persist Lucy's internal «להזכיר ל…» as the human ping label/body.
+      const pingFields = sanitizeReminderPingFields({
+        item: (existing?.itemLabel ?? reminder.item.trim()).slice(0, 255),
+        text: nextTextRaw,
+      });
+      const label = (
+        pingFields.item ||
+        pingFields.text ||
+        reminder.item.trim()
+      ).slice(0, 255);
+      const nextText = pingFields.text.slice(0, 4096);
       const nextCompose =
         canReuseClock && existing
           ? reminder.compose || existing.composeAtFire
@@ -3529,7 +3561,7 @@ export async function applyReminders(input: {
               ownerId,
               actorId: input.actor.id,
               itemKey: key,
-              itemLabel: reminder.item.trim().slice(0, 255),
+              itemLabel: label,
               listType: reminder.listType,
               fireAt,
               repeat: nextRepeat,

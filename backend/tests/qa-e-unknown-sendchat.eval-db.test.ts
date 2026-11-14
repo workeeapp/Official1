@@ -11,8 +11,8 @@ import { setLlmClientForTests } from "../src/services/llm-client.js";
 import { sendChatMessage } from "../src/services/chat.service.js";
 import * as applyResultReply from "../src/services/apply-result-reply.js";
 import {
-  APPLY_RESULT_UNKNOWN_CAUTION,
   decideReplyFromApplyResult,
+  unknownCautionForAddress,
 } from "../src/services/apply-result-reply.js";
 import type { ApplyResult } from "../src/services/apply-result.js";
 import { LIST_FIND_MISS } from "../src/services/employee-records.service.js";
@@ -101,7 +101,12 @@ describe("QA E — unknown ApplyResult via sendChatMessage", () => {
 
     const bubbles = parseLlmReply(result.reply).responses.map(String);
     expect(bubbles).toHaveLength(1);
-    expect(bubbles[0]).toBe(APPLY_RESULT_UNKNOWN_CAUTION);
+    expect(bubbles[0]).toMatch(/^לא הצלחתי לאמת את כל הפעולות —/);
+    expect([
+      unknownCautionForAddress("male"),
+      unknownCautionForAddress("female"),
+      unknownCautionForAddress(null),
+    ]).toContain(bubbles[0]);
     expect(bubbles[0]).not.toContain("מחקתי");
     expect(bubbles.join("\n")).not.toContain("בועה נוספת");
     expect(bubbles[0]).not.toMatch(/הצלחתי למחוק|נמחק בהצלחה/);

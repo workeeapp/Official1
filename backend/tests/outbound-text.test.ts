@@ -214,4 +214,47 @@ describe("formatAttributedOutbound", () => {
       }),
     ).toBe("טל שואל מה שלומך?");
   });
+
+  it("never sends Lucy's להזכיר tracking title as the ping body", () => {
+    expect(
+      formatAttributedOutbound({
+        actorName: "טל",
+        destIsActor: true,
+        item: "להזכיר לטל לשתות חלב",
+        text: "",
+      }),
+    ).toBe("תזכורת: לשתות חלב");
+    expect(
+      formatAttributedOutbound({
+        actorName: "טל",
+        destIsActor: true,
+        item: "להזכיר לטל תור לשיננית",
+        text: "להזכיר לטל תור לשיננית",
+      }),
+    ).toBe("תזכורת: תור לשיננית");
+    expect(
+      formatAttributedOutbound({
+        actorName: "טל",
+        destIsActor: true,
+        item: "להזכיר לטל לשתות חלב",
+        text: "",
+      }),
+    ).not.toMatch(/להזכיר לטל/u);
+    expect(
+      reminderFireButtons({
+        item: "להזכיר לטל לשתות חלב",
+        text: "",
+        composeAtFire: false,
+      }),
+    ).toEqual([
+      {
+        label: "נדנד",
+        command: "נדנדי לי לשתות חלב בעוד 10 דקות",
+      },
+      {
+        label: "סמן כבוצע",
+        command: "סמן כבוצע: לשתות חלב",
+      },
+    ]);
+  });
 });

@@ -10,7 +10,7 @@ import {
 import {
   decideReplyFromApplyResult,
   ORDINARY_MUTATION_EMPTY_ACK,
-  APPLY_RESULT_UNKNOWN_CAUTION,
+  unknownCautionForAddress,
 } from "../src/services/apply-result-reply.js";
 import {
   classifySpokenEmptiness,
@@ -36,6 +36,7 @@ function runEmptyPath(input: {
   metadata?: Record<string, unknown>;
   pendingShowDump?: { kind: string } | null;
   afterEmpty?: (reply: string) => string;
+  addressGender?: "male" | "female" | null;
 }): {
   emptiness: string;
   afterPolicy: string;
@@ -50,6 +51,7 @@ function runEmptyPath(input: {
   const decidedB = decideReplyFromApplyResult({
     applyResult: input.applyResult,
     modelDraft: input.reply,
+    addressGender: input.addressGender,
   });
   let reply = input.reply;
   if (!decidedB.keepDraft) {
@@ -60,6 +62,7 @@ function runEmptyPath(input: {
     applyResult: input.applyResult,
     metadata: metadata as never,
     pendingShowDump: input.pendingShowDump ?? null,
+    addressGender: input.addressGender,
   });
   if (decision.fallback) {
     reply = setEngineResponse(reply, decision.fallback);
@@ -379,7 +382,19 @@ describe("Stage 2A empty policy — production path", () => {
       reply: draft([]),
       applyResult,
     });
-    expect(out.spoken).toBe(APPLY_RESULT_UNKNOWN_CAUTION);
+    expect(out.spoken).toBe(unknownCautionForAddress(null));
+    const female = runEmptyPath({
+      reply: draft([]),
+      applyResult,
+      addressGender: "female",
+    });
+    expect(female.spoken).toBe(unknownCautionForAddress("female"));
+    const male = runEmptyPath({
+      reply: draft([]),
+      applyResult,
+      addressGender: "male",
+    });
+    expect(male.spoken).toBe(unknownCautionForAddress("male"));
   });
 
   it("mutate+show empty: ApplyResult ack then combine with dump", () => {

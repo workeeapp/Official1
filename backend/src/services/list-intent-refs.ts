@@ -38,6 +38,8 @@ export type IntentMiss = {
   listId?: string;
   listType?: string;
   listName?: string;
+  /** Parent lists action (remove|update) — needed to pair id-less requested ops. */
+  op?: string;
   /** Dump title when this miss can name the row that was not changed. */
   label?: string;
 };
@@ -208,10 +210,12 @@ function resolveDumpLineItem(
   misses: IntentMiss[],
   passThroughIds: Set<string>,
 ): Record<string, unknown> | null {
+  const op = action.action;
   if (dump.length === 0) {
     misses.push({
       reason: "dump_empty",
       mutateSource: "dump_line",
+      op,
       listType: action.listType,
       listName: action.listName,
     });
@@ -222,6 +226,7 @@ function resolveDumpLineItem(
     misses.push({
       reason: "dump_line_invalid",
       mutateSource: "dump_line",
+      op,
       listType: action.listType,
       listName: action.listName,
     });
@@ -233,6 +238,7 @@ function resolveDumpLineItem(
     misses.push({
       reason: "dump_line_invalid",
       mutateSource: "dump_line",
+      op,
       dumpLine: n,
       listType: action.listType,
       listName: action.listName,
@@ -283,6 +289,7 @@ function resolveSavedDataItem(
     misses.push({
       reason: "missing_id",
       mutateSource: "saved_data",
+      op: action.action,
       listType: action.listType,
       listName: action.listName,
       listId: action.listId,
@@ -294,6 +301,7 @@ function resolveSavedDataItem(
     misses.push({
       reason: "not_in_this_turn_facts",
       mutateSource: "saved_data",
+      op: action.action,
       itemId: id,
       listType: action.listType,
       listName: action.listName,
@@ -308,6 +316,7 @@ function resolveSavedDataItem(
       misses.push({
         reason: "list_id_mismatch",
         mutateSource: "saved_data",
+        op: action.action,
         itemId: id,
         listId: actionListId,
         listType: action.listType,
@@ -370,6 +379,7 @@ export function resolveIntentRefs(
         misses.push({
           reason: "invalid_source",
           mutateSource: source,
+          op: action.action,
           listType: action.listType,
           listName: action.listName,
           listId: action.listId,

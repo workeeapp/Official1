@@ -1,6 +1,12 @@
+import { sanitizeReminderPingFields } from "./worker-tracking-title.js";
+
 function reminderLine(item: string | undefined, text: string): string {
-  const dictated = text.trim();
-  const label = (item ?? "").trim();
+  const sanitized = sanitizeReminderPingFields({
+    item: item ?? "",
+    text,
+  });
+  const dictated = sanitized.text.trim();
+  const label = sanitized.item.trim();
   const raw = dictated && label && dictated === label ? label : dictated || label;
   const content = asInfinitive(raw.replace(/^(תזכורת:\s*)+/u, "").trim());
   return content ? `תזכורת: ${content}` : "";
@@ -19,9 +25,10 @@ function asInfinitive(value: string): string {
 
 export const REMINDER_SNOOZE_MINUTES = 10;
 
-/** Strip leading «תזכורת:» + infinitive — same chore shape as reminderLine. */
+/** Strip leading «תזכורת:» + tracking titles + infinitive — same chore as reminderLine. */
 function normalizePlainPingChore(raw: string): string {
-  return asInfinitive(raw.trim().replace(/^(תזכורת:\s*)+/u, "").trim());
+  const { item } = sanitizeReminderPingFields({ item: raw, text: "" });
+  return asInfinitive(item.replace(/^(תזכורת:\s*)+/u, "").trim());
 }
 
 /** Shared gate + chore label for plain-ping fire buttons (נדנד / סמן כבוצע). */
@@ -115,10 +122,14 @@ export function formatAttributedOutbound(input: {
   item?: string;
   text: string;
 }): string {
-  const dictated = input.text.trim();
-  const label = (input.item ?? "").trim();
+  const sanitized = sanitizeReminderPingFields({
+    item: input.item ?? "",
+    text: input.text,
+  });
+  const dictated = sanitized.text.trim();
+  const label = sanitized.item.trim();
   const isDictatedSend = Boolean(dictated && dictated !== label);
-  const ping = reminderLine(input.item, input.text);
+  const ping = reminderLine(sanitized.item, sanitized.text);
   if (!ping && !dictated) {
     return "";
   }

@@ -49,7 +49,7 @@ import {
 import {
   applyEmployeeRecords,
   summarizeUnshareApply,
-  EMPTY_REPLY_RETRY,
+  emptyReplyRetryForAddress,
   LIST_FIND_MISS,
   formatAppliedMutationFallback,
   EMPLOYEE_SAVED_DATA_RULES,
@@ -234,6 +234,7 @@ import {
   type IntentMiss,
 } from "./list-intent-refs.js";
 import {
+  accountingListsForApplyResult,
   buildApplyResult,
   captureRequestedFromMetadata,
   collectShowTurnStripDrops,
@@ -3314,8 +3315,17 @@ export async function sendChatMessage(input: {
         }
       }
     }
+    // Result-A lists accounting: post-resolve/H stamped ids (not pre-resolve
+    // forged dump_line ids), plus dropped pre items so intent misses can pair.
+    const applyResultRequestedForBuild = {
+      ...applyResultRequested,
+      lists: accountingListsForApplyResult(
+        applyResultRequested.lists,
+        metadata.lists ?? [],
+      ),
+    };
     let turnApplyResult: ApplyResult = buildApplyResult({
-      requested: applyResultRequested,
+      requested: applyResultRequestedForBuild,
       intentMisses: intentMissesForResult,
       dumpGuardDrops: dumpGuardDropsForResult,
       stripMisses: stripMissesForResult,
@@ -3917,6 +3927,7 @@ export async function sendChatMessage(input: {
     const decidedReply = decideReplyFromApplyResult({
       applyResult: turnApplyResult,
       modelDraft: workingReply,
+      addressGender: employee.addressGender,
     });
     if (!decidedReply.keepDraft) {
       // Stage 2B: wholesale responses replace — no leftover model bubbles.
@@ -3954,6 +3965,7 @@ export async function sendChatMessage(input: {
         guestMutationNotice,
         listOpFallback,
         reminderDeleteFallback,
+        addressGender: employee.addressGender,
       });
       if (emptyDecision.fallback) {
         workingReply = setEngineResponse(workingReply, emptyDecision.fallback);
@@ -5173,7 +5185,10 @@ export async function sendChatMessage(input: {
     // After live domains: empty responses:[] on a pure quote ask is filled above;
     // only then fall back so we never prepend «לא הצלחתי» before a successful fetch.
     if (!parseLlmReply(workingReply).response.trim()) {
-      workingReply = setEngineResponse(workingReply, EMPTY_REPLY_RETRY);
+      workingReply = setEngineResponse(
+        workingReply,
+        emptyReplyRetryForAddress(employee.addressGender),
+      );
     }
     const reminderApplyNotice = formatReminderApplyNotice(reminderResult);
     const tipOps = collectAppliedTipOps({

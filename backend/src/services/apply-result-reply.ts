@@ -4,7 +4,7 @@
  * ApplyResult proves a failure (miss / drop / partial / unknown). The model's
  * text is never analyzed to decide this.
  */
-import { parseLlmReply } from "@workee/shared";
+import { parseLlmReply, type AddressGender } from "@workee/shared";
 import { LIST_ADD_MISS, LIST_FIND_MISS } from "./employee-records.service.js";
 import type {
   ApplyResult,
@@ -21,8 +21,26 @@ export type DecideReplyFromApplyResult = {
 };
 
 const PARTIAL_MISS_LINE = "חלק מהפריטים לא עודכנו.";
-const UNKNOWN_CAUTION =
+
+/** @deprecated Prefer unknownCautionForAddress(gender) — female legacy default. */
+const UNKNOWN_CAUTION_FEMALE =
   "לא הצלחתי לאמת את כל הפעולות — נסי שוב או בדקי את הרשימה.";
+
+/**
+ * Engine caution when ApplyResult completeness is unknown.
+ * Conjugate second-person to SPEAKER_ADDRESS gender (never hardcode נקבה).
+ */
+export function unknownCautionForAddress(
+  gender?: AddressGender | null,
+): string {
+  if (gender === "male") {
+    return "לא הצלחתי לאמת את כל הפעולות — נסה שוב או בדוק את הרשימה.";
+  }
+  if (gender === "female") {
+    return UNKNOWN_CAUTION_FEMALE;
+  }
+  return "לא הצלחתי לאמת את כל הפעולות — נסו שוב או בדקו את הרשימה.";
+}
 
 function flattenApplied(result: ApplyResult): AppliedOp[] {
   const out: AppliedOp[] = [];
@@ -230,13 +248,17 @@ function formatFromResult(result: ApplyResult): string {
   return parts.join("\n");
 }
 
-function formatUnknown(result: ApplyResult): string {
+function formatUnknown(
+  result: ApplyResult,
+  gender?: AddressGender | null,
+): string {
   const applied = flattenApplied(result);
   const appliedLines = formatAppliedLines(applied);
+  const caution = unknownCautionForAddress(gender);
   if (appliedLines.length > 0) {
-    return [...appliedLines, UNKNOWN_CAUTION].join("\n");
+    return [...appliedLines, caution].join("\n");
   }
-  return UNKNOWN_CAUTION;
+  return caution;
 }
 
 /** Narrow confirmed ack when model left spoken empty after complete apply. */
@@ -253,13 +275,14 @@ export const ORDINARY_MUTATION_EMPTY_ACK = "בוצע.";
  */
 export function formatEmptySpokenFromApplyResult(
   result: ApplyResult,
+  gender?: AddressGender | null,
 ): string | null {
   if (!hasRequestedMutates(result)) {
     return null;
   }
   const applied = flattenApplied(result);
   if (result.completeness === "unknown") {
-    return formatUnknown(result);
+    return formatUnknown(result, gender);
   }
   if (result.completeness === "partial") {
     return formatFromResult(result);
@@ -272,7 +295,8 @@ export function formatEmptySpokenFromApplyResult(
   return ORDINARY_MUTATION_EMPTY_ACK;
 }
 
-export { UNKNOWN_CAUTION as APPLY_RESULT_UNKNOWN_CAUTION };
+/** Female legacy default — tests that assert the string without gender. */
+export { UNKNOWN_CAUTION_FEMALE as APPLY_RESULT_UNKNOWN_CAUTION };
 
 /**
  * Keep the model draft unless ApplyResult proves a failure; then replace it
@@ -281,6 +305,7 @@ export { UNKNOWN_CAUTION as APPLY_RESULT_UNKNOWN_CAUTION };
 export function decideReplyFromApplyResult(input: {
   applyResult: ApplyResult;
   modelDraft: string;
+  addressGender?: AddressGender | null;
 }): DecideReplyFromApplyResult {
   const draftSpoken = parseLlmReply(input.modelDraft).response.trim();
   const result = input.applyResult;
@@ -291,7 +316,7 @@ export function decideReplyFromApplyResult(input: {
     keepDraft: false,
     spoken:
       result.completeness === "unknown"
-        ? formatUnknown(result)
+        ? formatUnknown(result, input.addressGender)
         : formatFromResult(result),
   };
 }

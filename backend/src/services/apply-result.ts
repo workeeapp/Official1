@@ -35,6 +35,8 @@ export type RequestedOp = {
   listName?: string;
   listId?: string;
   mutateSource?: string;
+  /** Numbered-dump line when the request used mutate_source=dump_line. */
+  dumpLine?: number;
 };
 
 export type AppliedOp = {
@@ -177,6 +179,108 @@ function readMutateSource(raw: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function readDumpLine(raw: unknown): number | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const record = raw as Record<string, unknown>;
+  const value = record.dump_line ?? record.dumpLine;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 1) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const n = Number(value.trim());
+    if (Number.isInteger(n) && n >= 1) {
+      return n;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * ApplyResult list accounting: prefer post-resolve/H identity (dump_line →
+ * stamped item_id) and keep pre-resolve items that were dropped so intent /
+ * dump-guard misses can still pair.
+ */
+export function accountingListsForApplyResult(
+  preResolveLists: LlmListAction[],
+  postResolveLists: LlmListAction[],
+): LlmListAction[] {
+  const post = cloneJson(postResolveLists);
+  const coveredDump = new Set<string>();
+  const coveredIds = new Set<string>();
+  for (const action of post) {
+    const items = Array.isArray(action.items) ? action.items : [];
+    for (const item of items) {
+      const id = readItemId(item);
+      if (id) {
+        coveredIds.add(id);
+      }
+      const dumpLine = readDumpLine(item);
+      if (dumpLine != null) {
+        coveredDump.add(`${action.action}\0${action.listType}\0${dumpLine}`);
+      }
+    }
+  }
+
+  for (const action of preResolveLists) {
+    if (action.action !== "remove" && action.action !== "update") {
+      continue;
+    }
+    const items = Array.isArray(action.items) ? action.items : [];
+    const ghosts: Record<string, unknown>[] = [];
+    for (const rawItem of items) {
+      if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+        continue;
+      }
+      const item = rawItem as Record<string, unknown>;
+      const id = readItemId(item);
+      const dumpLine = readDumpLine(item);
+      if (id && coveredIds.has(id)) {
+        continue;
+      }
+      if (
+        dumpLine != null &&
+        coveredDump.has(`${action.action}\0${action.listType}\0${dumpLine}`)
+      ) {
+        continue;
+      }
+      if (!id && dumpLine == null && !readMutateSource(item)) {
+        continue;
+      }
+      ghosts.push(cloneJson(item));
+      if (id) {
+        coveredIds.add(id);
+      }
+      if (dumpLine != null) {
+        coveredDump.add(`${action.action}\0${action.listType}\0${dumpLine}`);
+      }
+    }
+    if (ghosts.length === 0) {
+      continue;
+    }
+    const existing = post.find(
+      (row) =>
+        row.action === action.action &&
+        row.listType === action.listType &&
+        (row.listName || "") === (action.listName || "") &&
+        (row.listId || "") === (action.listId || ""),
+    );
+    if (existing) {
+      existing.items = [
+        ...(Array.isArray(existing.items) ? existing.items : []),
+        ...ghosts,
+      ];
+    } else {
+      post.push({
+        ...cloneJson(action),
+        items: ghosts,
+      });
+    }
+  }
+  return post;
+}
+
 /** Immutable snapshot of model-requested mutates (call before resolve/H). */
 export function captureRequestedFromMetadata(metadata: {
   lists?: LlmListAction[];
@@ -205,6 +309,7 @@ export function requestedOpsFromLists(lists: LlmListAction[]): RequestedOp[] {
       items.length > 0
     ) {
       for (const item of items) {
+        const dumpLine = readDumpLine(item);
         out.push({
           domain: "lists",
           op: action.action,
@@ -213,6 +318,7 @@ export function requestedOpsFromLists(lists: LlmListAction[]): RequestedOp[] {
           listName: action.listName || undefined,
           listId: action.listId,
           mutateSource: readMutateSource(item),
+          ...(dumpLine != null ? { dumpLine } : {}),
         });
       }
       continue;
@@ -277,6 +383,23 @@ function missMatchesRequested(
   const missId = miss.itemId?.trim() ?? "";
   const reqId = req.id?.trim() ?? "";
   if (missId && reqId && missId === reqId) {
+    return true;
+  }
+  // dump_line miss ↔ dump_line request (ids may disagree pre/post resolve).
+  if (
+    miss.dumpLine != null &&
+    req.dumpLine != null &&
+    miss.dumpLine === req.dumpLine
+  ) {
+    if (miss.op && miss.op !== req.op) {
+      return false;
+    }
+    if (miss.listType && req.listType && miss.listType !== req.listType) {
+      return false;
+    }
+    if (miss.domain && miss.domain !== req.domain) {
+      return false;
+    }
     return true;
   }
   if (reqId) {
@@ -793,6 +916,7 @@ export function buildApplyResult(input: {
         listId: miss.listId,
         listType: miss.listType,
         listName: miss.listName,
+        ...(miss.op ? { op: miss.op } : {}),
         ...(miss.label ? { label: miss.label } : {}),
         source: "intent" as const,
       })),

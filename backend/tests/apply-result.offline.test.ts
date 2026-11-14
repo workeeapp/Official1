@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { LlmListAction, LlmReminderAction } from "@workee/shared";
 import {
+  accountingListsForApplyResult,
   buildApplyResult,
   captureRequestedFromMetadata,
   collectShowTurnStripDrops,
@@ -873,5 +874,131 @@ describe("stripShowTurnMutates accounting", () => {
     });
     expect(strip.misses).toEqual([]);
     expect(strip.unclassified).toEqual([]);
+  });
+
+  it("dump_line updates 1,2 with forged pre ids → complete after accounting merge", () => {
+    const taskDump: LastNumberedDumpLine[] = [
+      { n: 1, id: "task-a", kind: "tasks", title_stem: "משימה א" },
+      { n: 2, id: "task-b", kind: "tasks", title_stem: "משימה ב" },
+    ];
+    const preLists: LlmListAction[] = [
+      {
+        action: "update",
+        listType: "tasks",
+        listName: "",
+        items: [
+          {
+            mutate_source: "dump_line",
+            dump_line: 1,
+            item_id: "forged-a",
+            "תאריך לביצוע": "2026-11-18",
+          },
+          {
+            mutate_source: "dump_line",
+            dump_line: 2,
+            item_id: "forged-b",
+            "תאריך לביצוע": "2026-11-18",
+          },
+        ],
+        targets: [],
+      },
+    ];
+    const pre = captureRequestedFromMetadata({ lists: preLists });
+    const resolved = resolveIntentRefs(pre.lists, {
+      dump: taskDump,
+      visibleRefs: new Map(),
+    });
+    expect(resolved.misses).toEqual([]);
+    expect(resolved.lists[0]?.items.map((row) => row.item_id)).toEqual([
+      "task-a",
+      "task-b",
+    ]);
+    const result = buildApplyResult({
+      requested: {
+        ...pre,
+        lists: accountingListsForApplyResult(pre.lists, resolved.lists),
+      },
+      listMutations: [
+        {
+          action: "update",
+          itemId: "task-a",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k1",
+          itemLabel: "משימה א",
+        },
+        {
+          action: "update",
+          itemId: "task-b",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k2",
+          itemLabel: "משימה ב",
+        },
+      ],
+    });
+    expect(result.domains.lists?.requested.map((r) => r.id).sort()).toEqual([
+      "task-a",
+      "task-b",
+    ]);
+    expect(result.domains.lists?.completeness).toBe("complete");
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("dump_line one ok + one invalid → partial (not unknown)", () => {
+    const taskDump: LastNumberedDumpLine[] = [
+      { n: 1, id: "task-a", kind: "tasks", title_stem: "משימה א" },
+    ];
+    const preLists: LlmListAction[] = [
+      {
+        action: "update",
+        listType: "tasks",
+        listName: "",
+        items: [
+          {
+            mutate_source: "dump_line",
+            dump_line: 1,
+            "תאריך לביצוע": "2026-11-18",
+          },
+          {
+            mutate_source: "dump_line",
+            dump_line: 2,
+            "תאריך לביצוע": "2026-11-18",
+          },
+        ],
+        targets: [],
+      },
+    ];
+    const pre = captureRequestedFromMetadata({ lists: preLists });
+    const resolved = resolveIntentRefs(pre.lists, {
+      dump: taskDump,
+      visibleRefs: new Map(),
+    });
+    expect(resolved.misses).toEqual([
+      expect.objectContaining({
+        reason: "dump_line_invalid",
+        op: "update",
+        dumpLine: 2,
+      }),
+    ]);
+    const result = buildApplyResult({
+      requested: {
+        ...pre,
+        lists: accountingListsForApplyResult(pre.lists, resolved.lists),
+      },
+      intentMisses: resolved.misses,
+      listMutations: [
+        {
+          action: "update",
+          itemId: "task-a",
+          employeeId: "e1",
+          listType: "tasks",
+          itemKey: "k1",
+          itemLabel: "משימה א",
+        },
+      ],
+    });
+    expect(result.domains.lists?.completeness).toBe("partial");
+    expect(result.completeness).toBe("partial");
   });
 });

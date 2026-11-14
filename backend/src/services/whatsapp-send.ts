@@ -16,7 +16,7 @@ import { getEnv } from "../config/env.js";
 import { ITEM_OPEN_FALLBACK_LABEL, parseItemOpenTap } from "./builtin-lists.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { toWhatsAppAddress } from "../utils/phone.js";
-import { EMPTY_REPLY_RETRY } from "./employee-records.service.js";
+import { isEmptyReplyRetry } from "./employee-records.service.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { rememberWhatsAppOutbound } from "./whatsapp-outbound-memory.js";
 import { hasWhatsAppSession } from "./whatsapp-window.js";
@@ -1052,8 +1052,8 @@ export function applyLiveDomainReply(
   const nonEmpty = (spoken ?? []).map((entry) => entry.trim()).filter(Boolean);
   const plain = !record ? reply.trim() : "";
   const onlyEmptyRetry =
-    (nonEmpty.length === 1 && nonEmpty[0] === EMPTY_REPLY_RETRY) ||
-    plain === EMPTY_REPLY_RETRY;
+    (nonEmpty.length === 1 && isEmptyReplyRetry(nonEmpty[0]!)) ||
+    isEmptyReplyRetry(plain);
   const hasAck = Boolean(
     !onlyEmptyRetry && (nonEmpty.length > 0 || plain.length > 0),
   );

@@ -226,7 +226,7 @@ describe("resolveIntentRefs", () => {
     expect(out.passThroughIds.has(customBId)).toBe(true);
   });
 
-  it("dump_line out of range → miss", () => {
+  it("dump_line out of range → miss with op", () => {
     const bad = removeAction("custom", [
       { mutate_source: "dump_line", dump_line: 99 },
     ]);
@@ -235,10 +235,16 @@ describe("resolveIntentRefs", () => {
       visibleRefs,
     });
     expect(out.lists).toEqual([]);
-    expect(out.misses.map((m) => m.reason)).toContain("dump_line_invalid");
+    expect(out.misses).toEqual([
+      expect.objectContaining({
+        reason: "dump_line_invalid",
+        op: "remove",
+        dumpLine: 99,
+      }),
+    ]);
   });
 
-  it("invalid mutate_source → miss", () => {
+  it("invalid mutate_source → miss with op", () => {
     const bad = removeAction("tasks", [
       { mutate_source: "esd", item_id: taskTodayId },
     ]);
@@ -247,7 +253,12 @@ describe("resolveIntentRefs", () => {
       visibleRefs,
     });
     expect(out.lists).toEqual([]);
-    expect(out.misses.map((m) => m.reason)).toContain("invalid_source");
+    expect(out.misses).toEqual([
+      expect.objectContaining({
+        reason: "invalid_source",
+        op: "remove",
+      }),
+    ]);
   });
 
   it("legacy shopping ids under custom dump still dropped by H", () => {

@@ -12,6 +12,7 @@ import {
 import {
   APPLY_RESULT_UNKNOWN_CAUTION,
   decideReplyFromApplyResult,
+  unknownCautionForAddress,
 } from "../src/services/apply-result-reply.js";
 import { LIST_FIND_MISS } from "../src/services/employee-records.service.js";
 import { stripShowTurnMutates } from "../src/services/show-turn-guard.js";
@@ -753,6 +754,24 @@ describe("decideReplyFromApplyResult", () => {
     expect(a.keepDraft).toBe(false);
     expect(b.keepDraft).toBe(false);
     expect(a.spoken).toBe(b.spoken);
+  });
+
+  it("unknown caution conjugates to SPEAKER_ADDRESS gender", () => {
+    expect(unknownCautionForAddress("male")).toBe(
+      "לא הצלחתי לאמת את כל הפעולות — נסה שוב או בדוק את הרשימה.",
+    );
+    expect(unknownCautionForAddress("female")).toBe(
+      APPLY_RESULT_UNKNOWN_CAUTION,
+    );
+    expect(unknownCautionForAddress(null)).toMatch(/נסו שוב או בדקו/);
+    const male = decideReplyFromApplyResult({
+      applyResult: resultUnknown(),
+      modelDraft: draftJson("עדכנתי."),
+      addressGender: "male",
+    });
+    expect(male.keepDraft).toBe(false);
+    expect(male.spoken).toContain("נסה שוב או בדוק");
+    expect(male.spoken).not.toMatch(/נסי שוב|בדקי/);
   });
 });
 

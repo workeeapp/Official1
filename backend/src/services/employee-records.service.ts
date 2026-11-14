@@ -541,9 +541,32 @@ export const LIST_FIND_MISS = "לא מצאתי את הפריט ברשימה.";
 /** Spoken when the model claimed share but apply has no shareOutcome / misses. */
 export const SHARE_CLAIM_MISS = "לא הצלחתי לשתף את הפריטים.";
 
-/** Last-resort spoken line when the model left responses empty. */
+/** Last-resort spoken line when the model left responses empty (female legacy). */
 export const EMPTY_REPLY_RETRY =
   "לא הצלחתי לבצע את זה — נסי שוב.";
+
+/** Gendered last-resort empty-spoken line (SPEAKER_ADDRESS). */
+export function emptyReplyRetryForAddress(
+  gender?: "male" | "female" | null,
+): string {
+  if (gender === "male") {
+    return "לא הצלחתי לבצע את זה — נסה שוב.";
+  }
+  if (gender === "female") {
+    return EMPTY_REPLY_RETRY;
+  }
+  return "לא הצלחתי לבצע את זה — נסו שוב.";
+}
+
+/** True when spoken is any gendered EMPTY_REPLY_RETRY variant. */
+export function isEmptyReplyRetry(text: string): boolean {
+  const t = text.trim();
+  return (
+    t === EMPTY_REPLY_RETRY ||
+    t === emptyReplyRetryForAddress("male") ||
+    t === emptyReplyRetryForAddress(null)
+  );
+}
 
 export type UnshareApplySummary = {
   /** Shopping/tasks item updates that requested unshare_with and applied. */
