@@ -36,25 +36,25 @@ describe("P2: one rule for warmth, emoji and list names", () => {
     expect(instructions).not.toContain("0–1 contextual emoji");
   });
 
-  it("VOICE keeps the single limit: at most one warm touch, none is fine", () => {
+  it("VOICE keeps one warm-touch limit and situational warmth (emoji neither default nor ban)", () => {
     expect(count(instructions, "At most one warm touch per reply")).toBe(1);
-    expect(instructions).toContain("plain Hebrew with none is always fine");
-    expect(instructions).toContain("never force an emoji");
+    expect(instructions).toContain("respond to the person and the moment");
+    expect(instructions).toContain(
+      "an emoji or light cheer when it fits the moment, plain Hebrew when it does not",
+    );
     expect(instructions).toContain("tone, warmth and emoji follow VOICE");
   });
 
-  it("VOICE forbids stock greetings/closers and pads on short casual turns", () => {
-    expect(instructions).toContain("Match length and energy to their message");
-    expect(instructions).toContain("FORBIDDEN recycling a stock greeting or closer");
-    expect(instructions).toContain("היי <name>, מה נשמע?");
-    expect(instructions).toContain(
-      "On a bare היי / בוקר טוב / תודה: FORBIDDEN answering with «מה נשמע?»",
-    );
-    expect(instructions).toContain(
-      "default to plain Hebrew with no emoji and without automatically inserting their name every time",
-    );
-    expect(instructions).toContain(
-      "do not invent an offer or capability pitch unless they asked",
+  it("VOICE keeps helpful anti-clutter without ban-first greeting rules", () => {
+    expect(instructions).toContain("Match length and energy");
+    expect(instructions).toContain("never a fixed greeting/ack template");
+    expect(instructions).toContain("A reciprocal question is fine when it genuinely fits");
+    expect(instructions).toContain("Their name only when it sounds natural");
+    expect(instructions).toContain("במה אוכל לעזור?");
+    expect(instructions).toContain("יש עוד משהו?");
+    expect(instructions).not.toContain("default to plain Hebrew with no emoji");
+    expect(instructions).not.toContain(
+      "FORBIDDEN answering with «מה נשמע?» or any follow-up question",
     );
   });
 

@@ -5154,8 +5154,7 @@
               "needles": [
                 "במה אוכל",
                 "יש עוד משהו",
-                "איך אוכל לעזור",
-                "מה נשמע"
+                "איך אוכל לעזור"
               ]
             }
           ]
@@ -5259,7 +5258,7 @@
         "full-live",
         "single-turn"
       ],
-      "description": "Voice: bare greeting — nothing saved; no stock greeting/closer or forced follow-up",
+      "description": "Voice: bare greeting — nothing saved; no help closers or forced offers",
       "setup": {},
       "turns": [
         {
@@ -5277,16 +5276,12 @@
             {
               "type": "response_forbids_any",
               "needles": [
-                "מה נשמע",
                 "במה אוכל",
                 "יש עוד משהו",
                 "איך אוכל לעזור",
-                "רוצה ש"
+                "רוצה שאשמור",
+                "רוצה שאעזור"
               ]
-            },
-            {
-              "type": "response_max_chars",
-              "maxChars": 80
             }
           ]
         }
@@ -5299,7 +5294,7 @@
         "full-live",
         "single-turn"
       ],
-      "description": "Voice: thanks — nothing saved; short ack, no forced follow-up offer",
+      "description": "Voice: thanks — nothing saved; no forced help closer or offer",
       "setup": {},
       "turns": [
         {
@@ -5317,16 +5312,12 @@
             {
               "type": "response_forbids_any",
               "needles": [
-                "מה נשמע",
                 "במה אוכל",
                 "יש עוד משהו",
                 "איך אוכל לעזור",
-                "רוצה ש"
+                "רוצה שאשמור",
+                "רוצה שאעזור"
               ]
-            },
-            {
-              "type": "response_max_chars",
-              "maxChars": 80
             }
           ]
         }

@@ -68,8 +68,11 @@ describe("open-job rules: one authoritative copy", () => {
 
   it("RAISING greets naturally under VOICE — no fixed greeting formula", () => {
     expect(instructions).toContain("short natural greeting back (VOICE");
-    expect(instructions).toContain("FORBIDDEN a stock «היי <name>, מה נשמע?» every time");
+    expect(instructions).toContain("respond to them and the moment");
     expect(instructions).not.toContain("a greeting gets a normal greeting back");
+    expect(instructions).not.toContain(
+      "FORBIDDEN a stock «היי <name>, מה נשמע?» every time",
+    );
   });
 
   it("the OPEN_JOBS header describes rows + per-viewer phrasing and points to the rules (no rule copies)", () => {
