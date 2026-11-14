@@ -39,7 +39,18 @@ describe("P2: one rule for warmth, emoji and list names", () => {
   it("VOICE keeps the single limit: at most one warm touch, none is fine", () => {
     expect(count(instructions, "At most one warm touch per reply")).toBe(1);
     expect(instructions).toContain("plain Hebrew with none is always fine");
+    expect(instructions).toContain("never force an emoji");
     expect(instructions).toContain("tone, warmth and emoji follow VOICE");
+  });
+
+  it("VOICE forbids stock greetings/closers and pads on short casual turns", () => {
+    expect(instructions).toContain("Match length and energy to their message");
+    expect(instructions).toContain("FORBIDDEN recycling a stock greeting or closer");
+    expect(instructions).toContain("היי <name>, מה נשמע?");
+    expect(instructions).toContain("A casual open (היי / מה נשמע / בוקר טוב) is conversation, not a task");
+    expect(instructions).toContain(
+      "do not invent a follow-up question, offer, or capability pitch unless they asked",
+    );
   });
 
   it("a save confirmation names the item; the list only when it adds clarity", () => {

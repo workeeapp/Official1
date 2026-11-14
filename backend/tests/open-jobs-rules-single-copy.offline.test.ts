@@ -66,6 +66,12 @@ describe("open-job rules: one authoritative copy", () => {
     expect(instructions).toContain("buttons סגירה + להוסיף תאריך");
   });
 
+  it("RAISING greets naturally under VOICE — no fixed greeting formula", () => {
+    expect(instructions).toContain("short natural greeting back (VOICE");
+    expect(instructions).toContain("FORBIDDEN a stock «היי <name>, מה נשמע?» every time");
+    expect(instructions).not.toContain("a greeting gets a normal greeting back");
+  });
+
   it("the OPEN_JOBS header describes rows + per-viewer phrasing and points to the rules (no rule copies)", () => {
     const source = readFileSync(resolve(process.cwd(), "src/services/jobs.service.ts"), "utf8");
     expect(source).toContain("How to raise, answer, counter, book, snooze, decline and close these rows: OPEN JOBS RULES");

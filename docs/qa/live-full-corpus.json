@@ -5137,7 +5137,7 @@
         "full-live",
         "single-turn"
       ],
-      "description": "Voice: plain shopping add — natural confirm (wording observed, not gated)",
+      "description": "Voice: plain shopping add — natural confirm; no forced follow-up closer",
       "setup": {},
       "turns": [
         {
@@ -5148,6 +5148,15 @@
               "action": "add",
               "listType": "shopping",
               "itemTextIncludes": "חלב"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "במה אוכל",
+                "יש עוד משהו",
+                "איך אוכל לעזור",
+                "מה נשמע"
+              ]
             }
           ]
         }
@@ -5250,7 +5259,7 @@
         "full-live",
         "single-turn"
       ],
-      "description": "Voice: bare greeting — nothing saved; wording observed",
+      "description": "Voice: bare greeting — nothing saved; no stock greeting/closer or forced follow-up",
       "setup": {},
       "turns": [
         {
@@ -5264,6 +5273,20 @@
             },
             {
               "type": "reminders_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "מה נשמע",
+                "במה אוכל",
+                "יש עוד משהו",
+                "איך אוכל לעזור",
+                "רוצה ש"
+              ]
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 80
             }
           ]
         }
@@ -5276,7 +5299,7 @@
         "full-live",
         "single-turn"
       ],
-      "description": "Voice: thanks — nothing saved; wording observed",
+      "description": "Voice: thanks — nothing saved; short ack, no forced follow-up offer",
       "setup": {},
       "turns": [
         {
@@ -5290,6 +5313,20 @@
             },
             {
               "type": "reminders_empty"
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "מה נשמע",
+                "במה אוכל",
+                "יש עוד משהו",
+                "איך אוכל לעזור",
+                "רוצה ש"
+              ]
+            },
+            {
+              "type": "response_max_chars",
+              "maxChars": 80
             }
           ]
         }
