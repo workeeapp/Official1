@@ -12,9 +12,14 @@ import type { AttachmentKind, PublicEmployee } from "@workee/shared";
 import type { Attachment } from "@prisma/client";
 import { getEnv } from "../config/env.js";
 import { prisma } from "../database/prisma.js";
-import { ServiceUnavailableError } from "../utils/errors.js";
+import {
+  ConflictError,
+  isUniqueConstraintError,
+  ServiceUnavailableError,
+} from "../utils/errors.js";
 import { sendChatMessage } from "./chat.service.js";
 import { createEmployeeForUser, listEmployeesForUser } from "./employee.service.js";
+import { createWhatsAppOnlyUser } from "./user.service.js";
 import { phonesMatch } from "../utils/phone.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import {
@@ -1019,15 +1024,19 @@ function matchDigitalName(
   });
 }
 
-async function resolveWhatsAppSpeaker(from: string): Promise<{
+/**
+ * Match an inbound WhatsApp phone to the employee who already owns it.
+ * A registered non-guest wins over an older אורח shell with the same number.
+ * Unknown numbers are not attached here.
+ */
+async function findExistingWhatsAppSpeaker(from: string): Promise<{
   userId: string;
   employeeId: string;
-}> {
+} | null> {
   const users = await prisma.user.findMany({
     select: { id: true },
     orderBy: { createdAt: "asc" },
   });
-
   const matches: Array<{ userId: string; employee: PublicEmployee }> = [];
   for (const user of users) {
     const humans = humanEmployees(await listEmployeesForUser(user.id));
@@ -1037,31 +1046,59 @@ async function resolveWhatsAppSpeaker(from: string): Promise<{
       }
     }
   }
-  // Prefer a registered member over an אורח shell when duplicates exist.
   const preferred =
     matches.find((row) => !isGuestEmployee(row.employee)) ?? matches[0];
-  if (preferred) {
-    return { userId: preferred.userId, employeeId: preferred.employee.id };
+  if (!preferred) {
+    return null;
   }
+  return { userId: preferred.userId, employeeId: preferred.employee.id };
+}
 
-  const fallbackUser = users[0];
-  if (!fallbackUser) {
-    throw new ServiceUnavailableError();
-  }
-
-  const created = await createEmployeeForUser(
-    fallbackUser.id,
-    {
+/**
+ * First contact from a phone Lucy has never stored.
+ * Own User, own human (not a guest), and that account's Lucy.
+ * Does not attach the phone to any pre-existing account.
+ */
+async function createIndependentWhatsAppAccount(from: string): Promise<{
+  userId: string;
+  employeeId: string;
+}> {
+  const user = await createWhatsAppOnlyUser();
+  let created;
+  try {
+    created = await createEmployeeForUser(user.id, {
       kind: "human",
       name: "אורח",
       surname: "",
       nickname: maskPhoneName(from),
       email: null,
       phone: from,
-    },
-    { isGuest: true },
+      isOwner: true,
+    });
+  } catch (error) {
+    await prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+    if (error instanceof ConflictError || isUniqueConstraintError(error)) {
+      const existing = await findExistingWhatsAppSpeaker(from);
+      if (existing) {
+        return existing;
+      }
+    }
+    throw error;
+  }
+  // Same provisioning the turn uses next: protected Lucy on this account.
+  await listEmployeesForUser(user.id);
+  return { userId: user.id, employeeId: created.id };
+}
+
+/** Existing phone keeps its account. An unknown phone gets a new one. */
+export async function resolveWhatsAppSpeaker(from: string): Promise<{
+  userId: string;
+  employeeId: string;
+}> {
+  return (
+    (await findExistingWhatsAppSpeaker(from)) ??
+    (await createIndependentWhatsAppAccount(from))
   );
-  return { userId: fallbackUser.id, employeeId: created.id };
 }
 
 function maskPhoneName(value: string): string {

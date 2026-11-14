@@ -243,8 +243,8 @@ export async function findPendingInviteForGuest(
 }
 
 /**
- * Attach inbound WhatsApp speaker to the invite's host account as a guest,
- * and return context for לוסי-אורח.
+ * Remember which employee opened this invite, and return its context.
+ * Never changes that employee's account, guest flag, or team.
  */
 export async function bindInboundToInvite(input: {
   fromPhone: string;
@@ -268,21 +268,8 @@ export async function bindInboundToInvite(input: {
 
   await ensureGuestLucy(invite.userId);
 
-  let employeeId = input.currentEmployeeId;
-  let userId = input.currentUserId;
-
-  if (userId !== invite.userId) {
-    // Phone is globally unique — move the guest shell onto the asker's account.
-    await prisma.employee.update({
-      where: { id: employeeId },
-      data: {
-        userId: invite.userId,
-        teamId: null,
-        isGuest: true,
-      },
-    });
-    userId = invite.userId;
-  }
+  const employeeId = input.currentEmployeeId;
+  const userId = input.currentUserId;
 
   await prisma.whatsAppInvite.update({
     where: { id: invite.id },
@@ -311,6 +298,7 @@ export async function bindInboundToInvite(input: {
   };
 }
 
+/** Leftover אורח shell only. A normal account must not see this block. */
 export function formatPendingInviteContext(ctx: PendingInviteContext): string {
   return [
     "PENDING_INVITE (cold WhatsApp invite — register before continuing the check):",
@@ -321,6 +309,17 @@ export function formatPendingInviteContext(ctx: PendingInviteContext): string {
     "Second: to continue they MUST register — collect first name + gender (זכר→male / נקבה→female); surname optional.",
     "FORBIDDEN: answering the ask_summary substance, messaging the asker, or claiming the check is done before metadata.register succeeds.",
     "When name+gender known emit metadata.register; empty mutate arrays otherwise.",
+  ].join("\n");
+}
+
+/** Opening subject for someone who already has their own Lucy. Not a gate. */
+export function formatInviteOpeningContext(ctx: PendingInviteContext): string {
+  return [
+    "INVITE CONTEXT (why they arrived — opening subject only):",
+    `asker_name: ${ctx.askerName}`,
+    `activity: ${ctx.askSummary}`,
+    "Open in this context: the first reply is about this activity from asker_name, in warm Hebrew.",
+    "This is not a limit. Handle any other normal request on this turn the same way you would without this block.",
   ].join("\n");
 }
 

@@ -177,6 +177,7 @@ import {
   createWhatsAppInvite,
   findPendingInviteByPhone,
   findPendingInviteForGuest,
+  formatInviteOpeningContext,
   formatPendingInviteContext,
   saveContactReplyButton,
   type PendingInviteContext,
@@ -2294,7 +2295,11 @@ export function composeTurnContext(parts: TurnContextParts): string {
       : formatPendingAttachmentsContext(parts.pendingAttachments),
     guest ? "" : formatPendingLocationContext(parts.pendingLocation),
     guest ? "" : formatLastLiveLocationContext(parts.lastLiveLocation),
-    parts.pendingInvite ? formatPendingInviteContext(parts.pendingInvite) : "",
+    parts.pendingInvite
+      ? parts.guestSpeaker
+        ? formatPendingInviteContext(parts.pendingInvite)
+        : formatInviteOpeningContext(parts.pendingInvite)
+      : "",
     parts.tipsContext,
   ]
     .filter(Boolean)

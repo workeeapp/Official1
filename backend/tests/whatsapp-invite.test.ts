@@ -51,6 +51,7 @@ import {
   buildWhatsAppComposeUrl,
   createWhatsAppInvite,
   formatColdInviteNotice,
+  formatInviteOpeningContext,
   formatPendingInviteContext,
   parseInviteToken,
   saveContactReplyButton,
@@ -137,7 +138,7 @@ describe("whatsapp invite helpers", () => {
     expect(inviteCreate).toHaveBeenCalledOnce();
   });
 
-  it("binds inbound guest onto the invite asker account", async () => {
+  it("binds an invite without moving the speaker onto the asker account", async () => {
     inviteFindFirst.mockResolvedValue({
       id: "inv-1",
       token: `${INVITE_TOKEN_PREFIX}TESTTOKEN1`,
@@ -166,13 +167,14 @@ describe("whatsapp invite helpers", () => {
     });
 
     expect(bound).not.toBeNull();
-    expect(bound!.userId).toBe("asker-user");
+    expect(bound!.userId).toBe("wrong-user");
     expect(bound!.employeeId).toBe("guest-emp");
     expect(bound!.context.askSummary).toBe("מתי אתה מגיע");
-    expect(employeeUpdate).toHaveBeenCalledWith(
+    expect(employeeUpdate).not.toHaveBeenCalled();
+    expect(inviteUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "guest-emp" },
-        data: expect.objectContaining({ userId: "asker-user", isGuest: true }),
+        where: { id: "inv-1" },
+        data: { guestEmployeeId: "guest-emp" },
       }),
     );
     expect(ensureGuestLucy).toHaveBeenCalledWith("asker-user");
@@ -190,6 +192,21 @@ describe("whatsapp invite helpers", () => {
     expect(text).toContain("עמית");
     expect(text).toContain("מתי אתה מגיע");
     expect(text).toContain("register");
+  });
+
+  it("formats an opening context without a registration gate", () => {
+    const text = formatInviteOpeningContext({
+      inviteId: "inv-1",
+      token: `${INVITE_TOKEN_PREFIX}X`,
+      askerName: "טל",
+      askSummary: "רשימת הקניות המשותפת",
+      recipientLabel: "דני",
+    });
+    expect(text).toContain("טל");
+    expect(text).toContain("רשימת הקניות המשותפת");
+    expect(text).not.toContain("register");
+    expect(text).not.toContain("metadata.register");
+    expect(text).not.toContain("GUEST MODE");
   });
 
   it("uses pure-send wording when expectsReply is false", () => {
