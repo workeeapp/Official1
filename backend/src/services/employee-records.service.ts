@@ -101,6 +101,13 @@ export type ApplyEmployeeRecordsOptions = {
   allowPastOneOffDateMove?: boolean;
   /** Due comparisons — turn-pinned wall clock (same Date as SESSION_CLOCK). */
   now?: Date;
+  /** When set, list and item writes use this client (the confirm transaction). */
+  db?: Prisma.TransactionClient;
+  /**
+   * Replay primary key. Never replaced when the id is already taken:
+   * the caller rolls the transaction back instead of allocating a new id.
+   */
+  stableRowId?: string;
 };
 
 export interface ItemVisibility {
@@ -2671,8 +2678,19 @@ export async function applyEmployeeRecords(
       const itemDescription = action.itemDescription.trim().slice(0, 4000);
       const shareFiling =
         resolved.scope === "shared" || resolved.visibleTo.length > 1;
-      const created = await prisma.employeeFiling.create({
+      const filingDb = options?.db ?? prisma;
+      if (options?.stableRowId) {
+        const clash = await filingDb.employeeFiling.findUnique({
+          where: { id: options.stableRowId },
+          select: { id: true },
+        });
+        if (clash) {
+          throw new Error("collab_row_id_taken");
+        }
+      }
+      const created = await filingDb.employeeFiling.create({
         data: {
+          ...(options?.stableRowId ? { id: options.stableRowId } : {}),
           employeeId,
           itemName,
           itemInfo: action.itemInfo,
@@ -3037,6 +3055,7 @@ async function applyListAction(
   let attachmentOutcome = emptyAttachmentOutcome();
   const shareMisses: ShareApplyMiss[] = [];
   const nestedRemindMisses: NestedRemindTxnMiss[] = [];
+  const db = options?.db ?? prisma;
   const accessCache: WorkerAccessCache = {};
   // Contacts v2: refuse lists.* on contacts — phone book mutates via directory only.
   if (action.listType === "contacts") {
@@ -3108,7 +3127,7 @@ async function applyListAction(
     resolvedAction.listType === "custom" &&
     Boolean(listName.trim());
 
-  const existingList = await prisma.employeeList.findFirst({
+  const existingList = await db.employeeList.findFirst({
     where: {
       employeeId,
       listType: resolvedAction.listType,
@@ -3136,7 +3155,7 @@ async function applyListAction(
   const createdList = !existingList;
   const list =
     existingList ??
-    (await prisma.employeeList.create({
+    (await db.employeeList.create({
       data: {
         employeeId,
         listType: resolvedAction.listType,
@@ -3160,7 +3179,7 @@ async function applyListAction(
     }));
 
   if (listShare) {
-    await prisma.employeeList.update({
+    await db.employeeList.update({
       where: { id: list.id },
       data: {
         scope: "shared",
@@ -3180,7 +3199,7 @@ async function applyListAction(
     list.name.trim() === "" &&
     resolvedAction.listType === "custom"
   ) {
-    const clash = await prisma.employeeList.findFirst({
+    const clash = await db.employeeList.findFirst({
       where: {
         employeeId,
         listType: "custom",
@@ -3189,7 +3208,7 @@ async function applyListAction(
       },
     });
     if (!clash || clash.id === list.id) {
-      await prisma.employeeList.update({
+      await db.employeeList.update({
         where: { id: list.id },
         data: { name: listName },
       });
@@ -3314,7 +3333,7 @@ async function applyListAction(
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
       });
-      await prisma.employeeListItem.update({
+      await db.employeeListItem.update({
         where: { id: existing.id },
         data: { deletedAt: new Date(), reminderId: null },
       });
@@ -3324,7 +3343,7 @@ async function applyListAction(
       } catch {
         // best-effort mission cascade
       }
-      const owner = await prisma.employee.findUnique({
+      const owner = await db.employee.findUnique({
         where: { id: rowOwnerId },
         select: { userId: true },
       });
@@ -3535,7 +3554,7 @@ async function applyListAction(
           : {}),
     };
 
-    const listOwner = await prisma.employee.findUnique({
+    const listOwner = await db.employee.findUnique({
       where: { id: rowOwnerId },
       select: { userId: true, kind: true },
     });
@@ -3672,7 +3691,7 @@ async function applyListAction(
         continue;
       }
 
-      await prisma.employeeListItem.update({
+      await db.employeeListItem.update({
         where: { id: existing.id },
         data: {
           ...fields,
@@ -3771,9 +3790,19 @@ async function applyListAction(
       // can soft-link by that exact id (no array-order zip).
       const clientId = readItemId(fieldsItem);
       let createId: string | undefined;
-      if (clientId && UUID_RE.test(clientId)) {
-        const clash = prisma.employeeListItem?.findUnique
-          ? await prisma.employeeListItem.findUnique({
+      if (options?.stableRowId) {
+        const stable = options.stableRowId.trim();
+        const clash = await db.employeeListItem.findUnique({
+          where: { id: stable },
+          select: { id: true },
+        });
+        if (clash) {
+          throw new Error("collab_row_id_taken");
+        }
+        createId = stable;
+      } else if (clientId && UUID_RE.test(clientId)) {
+        const clash = db.employeeListItem?.findUnique
+          ? await db.employeeListItem.findUnique({
               where: { id: clientId },
               select: { id: true },
             })
@@ -3909,7 +3938,7 @@ async function applyListAction(
         continue;
       }
 
-      const created = await prisma.employeeListItem.create({
+      const created = await db.employeeListItem.create({
         data: {
           ...(createId ? { id: createId } : {}),
           listId: list.id,

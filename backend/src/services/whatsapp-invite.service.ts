@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { getEnv } from "../config/env.js";
-import { normalizePhoneDigits, toWhatsAppAddress } from "../utils/phone.js";
+import { normalizePhoneDigits, phonesMatch, toWhatsAppAddress } from "../utils/phone.js";
 import { ensureGuestLucy } from "./employee.service.js";
 
 export const INVITE_TOKEN_PREFIX = "WRK-INV-";
@@ -21,6 +22,8 @@ export type WhatsAppInviteRow = {
   draftText: string;
   status: string;
   guestEmployeeId: string | null;
+  /** Null for a legacy message invite. */
+  payload: unknown | null;
 };
 
 export type PendingInviteContext = {
@@ -135,6 +138,8 @@ export async function createWhatsAppInvite(input: {
   recipientLabel: string;
   askSummary: string;
   expectsReply?: boolean;
+  /** Deferred share/assign. Omit for a legacy message invite. */
+  payload?: Prisma.InputJsonValue | null;
 }): Promise<{
   invite: WhatsAppInviteRow;
   composeUrl: string;
@@ -165,6 +170,7 @@ export async function createWhatsAppInvite(input: {
       askSummary: input.askSummary.trim().slice(0, 500) || "לעדכן אותי",
       draftText,
       status: "pending",
+      ...(input.payload != null ? { payload: input.payload } : {}),
     },
   });
   const composeUrl = buildWhatsAppComposeUrl(phone, draftText);
@@ -190,6 +196,7 @@ function toInviteRow(row: {
   draftText: string;
   status: string;
   guestEmployeeId: string | null;
+  payload?: unknown | null;
 }): WhatsAppInviteRow {
   return {
     id: row.id,
@@ -203,6 +210,7 @@ function toInviteRow(row: {
     draftText: row.draftText,
     status: row.status,
     guestEmployeeId: row.guestEmployeeId,
+    payload: row.payload ?? null,
   };
 }
 
@@ -230,6 +238,47 @@ export async function findPendingInviteByPhone(
     orderBy: { createdAt: "desc" },
   });
   return row ? toInviteRow(row) : null;
+}
+
+/** Pending share/assign invites for this phone, oldest first. Legacy rows are omitted. */
+export async function findPendingCollabInvites(
+  phone: string,
+): Promise<WhatsAppInviteRow[]> {
+  const digits = toWhatsAppAddress(phone) || normalizePhoneDigits(phone);
+  if (!digits) {
+    return [];
+  }
+  const rows = await prisma.whatsAppInvite.findMany({
+    where: {
+      status: "pending",
+      recipientPhone: digits,
+      payload: { not: Prisma.DbNull },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows
+    .map(toInviteRow)
+    .filter((row) => phonesMatch(row.recipientPhone, digits));
+}
+
+/** Latest pending message invite (no share/assign payload) for this phone. */
+export async function findPendingMessageInviteByPhone(
+  phone: string,
+): Promise<WhatsAppInviteRow | null> {
+  const digits = toWhatsAppAddress(phone) || normalizePhoneDigits(phone);
+  if (!digits) {
+    return null;
+  }
+  const rows = await prisma.whatsAppInvite.findMany({
+    where: {
+      status: "pending",
+      recipientPhone: digits,
+      payload: { equals: Prisma.DbNull },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const match = rows.map(toInviteRow).find((row) => phonesMatch(row.recipientPhone, digits));
+  return match ?? null;
 }
 
 export async function findPendingInviteForGuest(
@@ -263,6 +312,10 @@ export async function bindInboundToInvite(input: {
     invite = await findPendingInviteByPhone(input.fromPhone);
   }
   if (!invite) {
+    return null;
+  }
+  // A deferred share/assign belongs to one phone. A forwarded token must not bind it.
+  if (invite.payload != null && !phonesMatch(invite.recipientPhone, input.fromPhone)) {
     return null;
   }
 

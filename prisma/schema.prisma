@@ -850,7 +850,12 @@ model WhatsAppInvite {
   askSummary         String    @map("ask_summary") @db.VarChar(500)
   /** Full draft the asker forwards to the recipient (includes business link). */
   draftText          String    @map("draft_text") @db.Text
-  /** pending | consumed | expired */
+  /**
+   * Deferred share/assign action. Null = legacy message invite (Phase 1).
+   * Shape is validated in collab-invite.service.ts.
+   */
+  payload            Json?
+  /** pending | consumed | failed | cancelled | expired */
   status             String    @default("pending") @db.VarChar(16)
   guestEmployeeId    String?   @map("guest_employee_id") @db.Uuid
   createdAt          DateTime  @default(now()) @map("created_at")

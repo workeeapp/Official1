@@ -17,7 +17,7 @@ import {
   type PublicEmployee,
   type Recurrence,
 } from "@workee/shared";
-import { looksLikePhone, normalizePhoneDigits, phonesMatch } from "../utils/phone.js";
+import { looksLikePhone, normalizePhoneDigits, phonesMatch, toWhatsAppAddress } from "../utils/phone.js";
 import {
   builtinListHebrew,
   builtinListTypeFromHebrew,
@@ -4027,3 +4027,301 @@ export function savedItemNavsFromApplyResult(
   }
   return out;
 }
+
+const DEFERRED_STRIP_KEYS = new Set([
+  "remind",
+  "reminds",
+  "reminder",
+  "attachment_ids",
+  "attachmentIds",
+  "detach_attachment_ids",
+  "detachAttachmentIds",
+  "targets",
+  "target",
+  "for",
+  "assignees",
+  "list_id",
+  "listId",
+  "filing_id",
+  "filingId",
+  "linked_list_ids",
+  "linkedListIds",
+  "unlink_list_ids",
+  "unlinkListIds",
+]);
+
+export type DeferredCollabTarget = {
+  kind: "share" | "assign";
+  domain: "list" | "filing";
+  phone: string;
+  label: string;
+  action: LlmListAction | LlmFilingAction;
+};
+
+function stripDeferredItem(raw: Record<string, unknown>): Record<string, unknown> {
+  const item: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!DEFERRED_STRIP_KEYS.has(key)) {
+      item[key] = value;
+    }
+  }
+  return item;
+}
+
+function actorNamed(raw: string, actor: PublicEmployee): boolean {
+  return matchEmployee(raw, [actor])?.id === actor.id;
+}
+
+/**
+ * Split an emitted add into "apply now" versus "invite this unregistered phone".
+ * A resolved non-guest stays on the action. A contact phone that is not a
+ * registered human is deferred. Empty targets and «כולם» are unchanged.
+ * When every partner is deferred, the action is omitted so it cannot become
+ * a personal row on the speaker.
+ */
+export function partitionDeferredCollabTargets(input: {
+  lists: LlmListAction[];
+  filing: LlmFilingAction[];
+  actor: PublicEmployee;
+  employees: PublicEmployee[];
+  workers?: PublicEmployee[];
+  externalPartners?: PublicEmployee[];
+  contacts: SpeakerContact[];
+}): {
+  lists: LlmListAction[];
+  filing: LlmFilingAction[];
+  deferred: DeferredCollabTarget[];
+} {
+  const pool = [
+    ...input.employees,
+    ...(input.workers ?? []),
+    ...(input.externalPartners ?? []),
+  ];
+  const deferred: DeferredCollabTarget[] = [];
+  const lists: LlmListAction[] = [];
+
+  for (const list of input.lists) {
+    if (
+      list.action !== "add" ||
+      list.listType === "contacts" ||
+      list.targets.length === 0 ||
+      list.targets.some((target) => ALL_TARGET_TOKENS.test(target.trim())) ||
+      list.items.some((item) =>
+        isWorkerTrackingTitle(llmItemLabel(item) || taskTitleOf(item)),
+      )
+    ) {
+      lists.push(list);
+      continue;
+    }
+    const kept: string[] = [];
+    const pending: Array<{ phone: string; label: string }> = [];
+    for (const raw of list.targets) {
+      const matched = matchEmployee(raw, pool);
+      if (matched && !isGuestEmployee(matched)) {
+        const label = employeeDisplayName(matched);
+        if (!kept.includes(label)) {
+          kept.push(label);
+        }
+        continue;
+      }
+      if (matched && isGuestEmployee(matched)) {
+        kept.push(raw.trim());
+        continue;
+      }
+      const contact = matchContact(raw, input.contacts);
+      const phone = contact?.phone
+        ? toWhatsAppAddress(contact.phone) || normalizePhoneDigits(contact.phone)
+        : "";
+      if (phone) {
+        pending.push({ phone, label: contact?.name.trim() || phone });
+        continue;
+      }
+      if (raw.trim()) {
+        kept.push(raw.trim());
+      }
+    }
+    const speakerInTargets = list.targets.some((target) =>
+      actorNamed(target, input.actor),
+    );
+    const resolvedPartners = kept.filter((name) => !actorNamed(name, input.actor));
+    if (pending.length === 0) {
+      lists.push(list);
+      continue;
+    }
+    const kind = speakerInTargets ? "share" : "assign";
+    for (const item of list.items) {
+      const body = stripDeferredItem(
+        item && typeof item === "object" ? (item as Record<string, unknown>) : {},
+      );
+      for (const partner of pending) {
+        deferred.push({
+          kind,
+          domain: "list",
+          phone: partner.phone,
+          label: partner.label,
+          action: {
+            ...list,
+            targets: [],
+            items: [body],
+            listAttachmentIds: undefined,
+            listId: undefined,
+          },
+        });
+      }
+    }
+    if (resolvedPartners.length === 0) {
+      continue;
+    }
+    lists.push({
+      ...list,
+      targets: kept,
+    });
+  }
+
+  const filing: LlmFilingAction[] = [];
+  for (const row of input.filing) {
+    if (row.action !== "add_filing" || row.targets.length === 0) {
+      filing.push(row);
+      continue;
+    }
+    if (row.targets.some((target) => ALL_TARGET_TOKENS.test(target.trim()))) {
+      filing.push(row);
+      continue;
+    }
+    const kept: string[] = [];
+    const pending: Array<{ phone: string; label: string }> = [];
+    for (const raw of row.targets) {
+      const matched = matchEmployee(raw, pool);
+      if (matched && !isGuestEmployee(matched)) {
+        const label = employeeDisplayName(matched);
+        if (!kept.includes(label)) {
+          kept.push(label);
+        }
+        continue;
+      }
+      if (matched && isGuestEmployee(matched)) {
+        kept.push(raw.trim());
+        continue;
+      }
+      const contact = matchContact(raw, input.contacts);
+      const phone = contact?.phone
+        ? toWhatsAppAddress(contact.phone) || normalizePhoneDigits(contact.phone)
+        : "";
+      if (phone) {
+        pending.push({ phone, label: contact?.name.trim() || phone });
+        continue;
+      }
+      if (raw.trim()) {
+        kept.push(raw.trim());
+      }
+    }
+    if (pending.length === 0) {
+      filing.push(row);
+      continue;
+    }
+    const speakerInTargets = row.targets.some((target) =>
+      actorNamed(target, input.actor),
+    );
+    const kind = speakerInTargets ? "share" : "assign";
+    const stored: LlmFilingAction = {
+      ...row,
+      targets: [],
+      filingId: "",
+      attachmentIds: undefined,
+      detachAttachmentIds: undefined,
+      unshareWith: undefined,
+    };
+    for (const partner of pending) {
+      deferred.push({
+        kind,
+        domain: "filing",
+        phone: partner.phone,
+        label: partner.label,
+        action: stored,
+      });
+    }
+    const resolvedPartners = kept.filter((name) => !actorNamed(name, input.actor));
+    if (resolvedPartners.length === 0) {
+      continue;
+    }
+    filing.push({ ...row, targets: kept });
+  }
+
+  return { lists, filing, deferred };
+}
+
+/** One action planTargetedActions can classify from phone targets, not display names. */
+export function replayCollabMetadata(input: {
+  kind: "share" | "assign";
+  domain: "list" | "filing";
+  rowId: string;
+  action: LlmListAction | LlmFilingAction;
+  askerPhone: string;
+  recipientPhone: string;
+}): LlmMetadata {
+  const targets =
+    input.kind === "share"
+      ? [input.askerPhone, input.recipientPhone]
+      : [input.recipientPhone];
+  const metadata = emptyLlmMetadata();
+  if (input.domain === "list") {
+    const list = input.action as LlmListAction;
+    const item = {
+      ...(list.items[0] && typeof list.items[0] === "object"
+        ? (list.items[0] as Record<string, unknown>)
+        : {}),
+      item_id: input.rowId,
+    };
+    metadata.lists = [
+      {
+        ...list,
+        action: "add",
+        targets,
+        items: [item],
+        listId: undefined,
+        listAttachmentIds: undefined,
+      },
+    ];
+    return metadata;
+  }
+  const filing = input.action as LlmFilingAction;
+  metadata.filing = [
+    {
+      ...filing,
+      action: "add_filing",
+      targets,
+      filingId: "",
+      attachmentIds: undefined,
+      detachAttachmentIds: undefined,
+      unshareWith: undefined,
+    },
+  ];
+  return metadata;
+}
+
+export function collabPlanMatchesKind(
+  applications: Array<{
+    employeeId: string;
+    visibility: { addedById: string; visibleTo: string[] };
+  }>,
+  kind: "share" | "assign",
+  askerId: string,
+  recipientId: string,
+): boolean {
+  if (askerId === recipientId || applications.length !== 1) {
+    return false;
+  }
+  const application = applications[0]!;
+  if (kind === "share") {
+    return (
+      application.employeeId === askerId &&
+      application.visibility.visibleTo.includes(recipientId) &&
+      application.employeeId !== recipientId
+    );
+  }
+  return (
+    application.employeeId === recipientId &&
+    application.visibility.addedById === askerId
+  );
+}
+

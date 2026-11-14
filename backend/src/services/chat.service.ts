@@ -94,6 +94,7 @@ import {
   planScheduledJobDeliveries,
   planSelfJobDeliveries,
   planTargetedActions,
+  partitionDeferredCollabTargets,
   resolveRelayMessages,
   resolveSpokenMetadata,
   buildCollabByListKey,
@@ -175,13 +176,24 @@ import { registerGuestMember } from "./guest-register.service.js";
 import {
   consumeWhatsAppInvite,
   createWhatsAppInvite,
-  findPendingInviteByPhone,
   findPendingInviteForGuest,
+  findPendingMessageInviteByPhone,
   formatInviteOpeningContext,
   formatPendingInviteContext,
   saveContactReplyButton,
   type PendingInviteContext,
 } from "./whatsapp-invite.service.js";
+import {
+  cancelCollabInvite,
+  collabMutationsAreEmpty,
+  confirmCollabInvite,
+  createDeferredCollabInvites,
+  formatCollabInviteContext,
+  loadPresentedCollabInvites,
+  presentedInvite,
+  readCollabInviteDecision,
+  type PresentedCollabInvite,
+} from "./collab-invite.service.js";
 import {
   collectAppliedTipOps,
   formatAvailableTipsContext,
@@ -2252,6 +2264,8 @@ export interface TurnContextParts {
   pendingLocation: Parameters<typeof formatPendingLocationContext>[0];
   lastLiveLocation: Parameters<typeof formatLastLiveLocationContext>[0];
   pendingInvite: Parameters<typeof formatPendingInviteContext>[0] | null;
+  /** Pending share/assign invitations for this phone. Empty for guests. */
+  collabInvites?: string;
   tipsContext: string;
   /**
    * Stage 2: the fixed SESSION_CLOCK / SAVED_DATA reading rules ride in the
@@ -2300,6 +2314,7 @@ export function composeTurnContext(parts: TurnContextParts): string {
         ? formatPendingInviteContext(parts.pendingInvite)
         : formatInviteOpeningContext(parts.pendingInvite)
       : "",
+    parts.guestSpeaker ? "" : (parts.collabInvites ?? ""),
     parts.tipsContext,
   ]
     .filter(Boolean)
@@ -2594,6 +2609,10 @@ export async function sendChatMessage(input: {
         digitalEmployeeId: digital.id,
       }),
     )) ?? "";
+  const presentedCollab: PresentedCollabInvite[] = guestSpeaker
+    ? []
+    : await loadPresentedCollabInvites(employee.phone);
+  const collabInvites = formatCollabInviteContext(presentedCollab);
   // One wall clock for this turn: SESSION_CLOCK facts + past one-off apply.
   const turnNow = new Date();
   const context = composeTurnContext({
@@ -2614,6 +2633,7 @@ export async function sendChatMessage(input: {
     pendingLocation: guestSpeaker ? null : getPendingLocation(input.employeeId),
     lastLiveLocation: lastLiveLocationCtx,
     pendingInvite: input.pendingInvite ?? null,
+    collabInvites,
     tipsContext,
     rulesInInstructions: shouldAttachLucyRuntimeEngine(
       digital,
@@ -2738,6 +2758,29 @@ export async function sendChatMessage(input: {
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
+    if (!guestSpeaker && employee.phone && collabMutationsAreEmpty(parsedMetadata)) {
+      const decision = readCollabInviteDecision(turn.reply);
+      const accept = presentedInvite(presentedCollab, decision.acceptId);
+      const decline = presentedInvite(presentedCollab, decision.declineId);
+      if (accept && decline) {
+        // Both ids named: do not accept or decline.
+      } else if (accept) {
+        const collabLists = await listSharedCustomListsForActor(
+          input.userId,
+          employee.id,
+        );
+        await confirmCollabInvite({
+          inviteId: accept.inviteId,
+          recipient: employee,
+          sharedLists: collabLists,
+        });
+      } else if (decline) {
+        await cancelCollabInvite({
+          inviteId: decline.inviteId,
+          recipientPhone: employee.phone,
+        });
+      }
+    }
     let metadata = resolveSpokenMetadata(
       input.message,
       parsedMetadata,
@@ -2953,13 +2996,39 @@ export async function sendChatMessage(input: {
     if (dumpRestricted.droppedOutsideDump) {
       metadata = { ...metadata, lists: dumpRestricted.lists };
     }
-    const metadataForApply = {
+    let deferredCollabNotice = "";
+    let metadataForApply = {
       ...metadata,
       lists: [
         ...(metadata.lists ?? []).filter((row) => row.action !== "remove"),
         ...(metadata.lists ?? []).filter((row) => row.action === "remove"),
       ],
     };
+    if (!guestSpeaker) {
+      const partitioned = partitionDeferredCollabTargets({
+        lists: metadataForApply.lists,
+        filing: metadataForApply.filing ?? [],
+        actor: employee,
+        employees: humans,
+        workers: digitalEmployees(employees),
+        externalPartners,
+        contacts: speakerContacts,
+      });
+      metadataForApply = {
+        ...metadataForApply,
+        lists: partitioned.lists,
+        filing: partitioned.filing,
+      };
+      if (partitioned.deferred.length > 0) {
+        const deferred = await createDeferredCollabInvites({
+          userId: input.userId,
+          asker: employee,
+          digitalId: digital.id,
+          deferred: partitioned.deferred,
+        });
+        deferredCollabNotice = deferred.notice;
+      }
+    }
     // Before item-level lists so a same-turn rename/delete is visible to them.
     const listOpResults = guestSpeaker
       ? []
@@ -3909,6 +3978,9 @@ export async function sendChatMessage(input: {
             !(skip.reason === "no_session" && invitedLabels.has(skip.label)),
         );
       }
+    }
+    if (deferredCollabNotice) {
+      inviteNotice = [inviteNotice, deferredCollabNotice].filter(Boolean).join("\n\n");
     }
     const skips = [...sharedWhatsAppSkips, ...outboundSkips];
     const whatsappNotice = [inviteNotice, formatWhatsAppSkipNotice(skips)]
@@ -5809,12 +5881,14 @@ async function continueInviteAfterRegister(input: {
   askerNotice: string;
   guestAck: string;
 } | null> {
-  let invite =
-    (await findPendingInviteForGuest(input.guestEmployeeId)) ??
-    (input.guestPhone
-      ? await findPendingInviteByPhone(input.guestPhone)
-      : null);
-  if (!invite) {
+  let invite = await findPendingInviteForGuest(input.guestEmployeeId);
+  if (invite?.payload != null) {
+    invite = null;
+  }
+  if (!invite && input.guestPhone) {
+    invite = await findPendingMessageInviteByPhone(input.guestPhone);
+  }
+  if (!invite || invite.payload != null) {
     return null;
   }
   await consumeWhatsAppInvite(invite.id);
