@@ -116,6 +116,17 @@ import {
 import { jobMetaFrom } from "./job-meta.js";
 import { nextCandleLighting } from "./jewish.js";
 
+/** Plain one-shot WhatsApp failure: try again after this delay. Not a completion. */
+export const ONE_SHOT_DELIVERY_RETRY_MS = 120_000;
+const ONE_SHOT_DELIVERY_RETRY_CAP = 6;
+const ONE_SHOT_DELIVERY_BACKOFF_MS = 6 * 60 * 60 * 1000;
+/**
+ * WhatsApp accepted the send, and settlement has not finished.
+ * A later tick completes the clock without sending again.
+ * Recurring clocks store "sent" after settlement, so this value is only the crash window.
+ */
+const DELIVERY_ACCEPTED = "accepted";
+
 function pingIds(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
@@ -299,7 +310,7 @@ export async function settleFiredReminder(
   },
   now: Date,
   sendStatus: "sent" | "failed",
-  options?: { forceDone?: boolean },
+  options?: { forceDone?: boolean; retryWhenFailed?: boolean },
 ): Promise<void> {
   const sentAt = sendStatus === "sent" ? now : null;
   const firedCount = (reminder.occurrencesFired ?? 0) + 1;
@@ -308,6 +319,47 @@ export async function settleFiredReminder(
     : await resolveNextFireAt(reminder, now, firedCount);
   const rule = parseRecurrence(reminder.recurrence);
   const hasRule = Boolean(rule);
+  if (
+    !nextAt &&
+    sendStatus === "failed" &&
+    options?.retryWhenFailed === true &&
+    !options?.forceDone &&
+    !hasRule
+  ) {
+    const attempts = (reminder.occurrencesFired ?? 0) + 1;
+    const delay =
+      attempts <= ONE_SHOT_DELIVERY_RETRY_CAP
+        ? ONE_SHOT_DELIVERY_RETRY_MS
+        : ONE_SHOT_DELIVERY_BACKOFF_MS;
+    const retryAt = new Date(now.getTime() + delay);
+    await prisma.reminder.update({
+      where: { id: reminder.id },
+      data: {
+        status: "active",
+        sendStatus: "failed",
+        sentAt: null,
+        fireAt: retryAt,
+        occurrencesFired: attempts,
+      },
+    });
+    scheduleSoon(retryAt);
+    if (reminder.userId) {
+      await recordAuditEvent({
+        userId: reminder.userId,
+        actorEmployeeId: reminder.actorId,
+        action: "reminder_fire",
+        entityType: "Reminder",
+        entityId: reminder.id,
+        summary: `reminder delivery failed, will retry: ${reminder.itemLabel ?? reminder.id}`,
+        detail: {
+          sendStatus: "failed",
+          retryAt: retryAt.toISOString(),
+          attempt: attempts,
+        },
+      });
+    }
+    return;
+  }
   const workerItemId = await workerItemIdForReminder(reminder.id);
 
   if (nextAt) {
@@ -337,8 +389,9 @@ export async function settleFiredReminder(
     return;
   }
 
-  // One-shot: keep the row as history (status=done + sent_at). Detach the
-  // worker task first so deleting that item cannot CASCADE-delete this clock.
+  // One-shot success: keep the row as history (status=done + sent_at).
+  // A failed plain one-shot never reaches here; it stays active for retry.
+  // Detach the worker task first so deleting that item cannot CASCADE-delete this clock.
   const keptAsScheduledJob = await maybeActivateScheduledJob({
     userId: reminder.userId,
     workerItemId,
@@ -489,6 +542,10 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     // Claim before compose/send so concurrent tickers (or two API processes)
     // cannot fire the same due row twice.
     if (!(await claimDueReminder(reminder.id, now))) {
+      continue;
+    }
+    if (reminder.sendStatus === DELIVERY_ACCEPTED) {
+      await settleFiredReminder(reminder, now, "sent");
       continue;
     }
 
@@ -949,6 +1006,15 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         data: { lastReportSha: conditionShaAfterSend },
       });
     }
+    if (sendStatus === "sent") {
+      // Graph already accepted this send. The wamid exists only in process
+      // memory until this write. A crash here looks the same as a crash before
+      // Graph accepted, so the next tick sends again (at-least-once).
+      await prisma.reminder.update({
+        where: { id: reminder.id },
+        data: { sendStatus: DELIVERY_ACCEPTED, sentAt: now },
+      });
+    }
 
     const watchOnce =
       "watchOnce" in reminder && reminder.watchOnce === true;
@@ -963,6 +1029,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         hadCondition &&
         sendStatus === "sent" &&
         !skipSend,
+      retryWhenFailed:
+        sendStatus === "failed" && reminder.composeAtFire !== true,
     });
   }
 
@@ -996,12 +1064,14 @@ export function startReminderTicker(): void {
   if (process.env.WORKEE_DISABLE_REMINDER_FIRE === "1") {
     return;
   }
-  setInterval(() => {
+  const tick = () => {
     void fireDueReminders().catch((error) => {
       console.error(
         "Reminder tick failed",
         error instanceof Error ? error.message : "unknown",
       );
     });
-  }, 10_000);
+  };
+  tick();
+  setInterval(tick, 10_000);
 }

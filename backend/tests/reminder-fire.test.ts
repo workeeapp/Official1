@@ -54,6 +54,7 @@ vi.mock("../src/services/jobs.service.js", () => ({
 
 import {
   claimDueReminder,
+  ONE_SHOT_DELIVERY_RETRY_MS,
   resolveComposeFireOutbound,
   settleFiredReminder,
 } from "../src/services/reminder-fire.js";
@@ -121,6 +122,80 @@ describe("settleFiredReminder", () => {
     expect(reminderUpdate).toHaveBeenCalledWith({
       where: { id: "clock-1" },
       data: expect.objectContaining({ status: "done", workerItemId: null }),
+    });
+  });
+
+  it("keeps a failed one-shot active and schedules a retry without detaching the task", async () => {
+    const now = new Date("2026-09-28T00:03:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "once",
+        occurrencesFired: 0,
+      },
+      now,
+      "failed",
+      { retryWhenFailed: true },
+    );
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: {
+        status: "active",
+        sendStatus: "failed",
+        sentAt: null,
+        fireAt: new Date(now.getTime() + ONE_SHOT_DELIVERY_RETRY_MS),
+        occurrencesFired: 1,
+      },
+    });
+    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(itemUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("backs off a failed one-shot after the short retries are used", async () => {
+    const now = new Date("2026-09-28T00:03:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "once",
+        occurrencesFired: 6,
+      },
+      now,
+      "failed",
+      { retryWhenFailed: true },
+    );
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: expect.objectContaining({
+        status: "active",
+        sendStatus: "failed",
+        occurrencesFired: 7,
+        fireAt: new Date(now.getTime() + 6 * 60 * 60 * 1000),
+      }),
+    });
+    expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("still closes a one-shot when a compose failure does not ask for a retry", async () => {
+    const now = new Date("2026-09-28T00:03:00.000Z");
+    await settleFiredReminder(
+      {
+        id: "clock-1",
+        fireAt: new Date("2026-09-28T00:00:00.000Z"),
+        repeat: "once",
+      },
+      now,
+      "failed",
+    );
+    expect(reminderUpdate).toHaveBeenCalledWith({
+      where: { id: "clock-1" },
+      data: expect.objectContaining({
+        status: "done",
+        sendStatus: "failed",
+        sentAt: null,
+        workerItemId: null,
+      }),
     });
   });
 
