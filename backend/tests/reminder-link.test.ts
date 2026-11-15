@@ -125,10 +125,15 @@ describe("reminder worker link", () => {
     expect(itemUpdate).not.toHaveBeenCalled();
   });
 
-  it("skips phone destinations and guest recipients", async () => {
-    employeeFindMany.mockResolvedValue([
-      { id: GUEST, name: "אורח", nickname: null },
-    ]);
+  it("skips phone destinations and keeps a guest ping recipient visible", async () => {
+    employeeFindMany.mockResolvedValue([{ id: GUEST }]);
+    itemFindUnique.mockResolvedValue({
+      id: "w1",
+      addedById: AMIT,
+      visibleTo: [AMIT],
+      deletedAt: null,
+    });
+    itemUpdate.mockResolvedValue({});
     await shareWorkerTaskWithPingRecipients({
       workerItemId: "w1",
       ownerId: AMIT,
@@ -137,9 +142,13 @@ describe("reminder worker link", () => {
     expect(employeeFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: { in: [GUEST] }, kind: "human" },
+        select: { id: true },
       }),
     );
-    expect(itemUpdate).not.toHaveBeenCalled();
+    expect(itemUpdate).toHaveBeenCalledWith({
+      where: { id: "w1" },
+      data: { visibleTo: [AMIT, GUEST] },
+    });
   });
 
   it("writes both foreign keys when pairing a clock to a worker task", async () => {

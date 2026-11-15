@@ -1075,7 +1075,7 @@
                   "object",
                   "null"
                 ],
-                "description": "לוסי-אורח only: when the WhatsApp guest gave first name and address gender (male|female), emit register to promote them in place on the host team; from the next message they talk with לוסי. surname optional. null when not registering this turn or name/gender still missing (ask in responses; keep register null). Never collect username or password.",
+                "description": "When this speaker is still a guest shell and gave a first name and address gender (male|female), emit register to promote them in place on this account. surname optional. null when not registering this turn or name/gender still missing (ask in responses; keep register null). Do not withhold other actions. Never collect username or password.",
                 "properties": {
                   "name": {
                     "type": "string",

@@ -217,7 +217,7 @@
     "",
     "--- handoff --- null or { \"worker\": \"<digital name>\" } — conversation switch only. Asking another digital worker = messages to them, not handoff.",
     "",
-    "--- register --- null, or {name, gender} (+ optional surname) for לוסי-אורח guest registration only; gender=male|female; never username/password; otherwise always null.",
+    "--- register --- null, or {name, gender} (+ optional surname) when this speaker is still a guest shell and gave a first name and gender; gender=male|female; never username/password; otherwise null. Do not withhold other actions.",
     "",
     "--- confirm --- boolean|null.",
     "Set true only on the follow-up turn after YOU already asked which item/list/scope (or an explicit yes/no for an ambiguous delete), and you now emit the matching remove/update/delete_list.",

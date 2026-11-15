@@ -375,7 +375,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
     ).toBe(true);
   }, 60_000);
 
-  it("guest gate: planTargetedActions blocks mutate + sendChatMessage writes nothing", async () => {
+  it("a guest speaker's own shopping add is saved on that speaker", async () => {
     account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
     const lucyId = await ensureLucy(account);
     const guestRow = await prisma.employee.create({
@@ -420,8 +420,8 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
       metadata: mutateMeta,
       sharedLists: [],
     });
-    expect(plan.guestMutationBlocked).toBe(true);
-    expect(plan.applications).toEqual([]);
+    expect(plan.guestMutationBlocked).toBe(false);
+    expect(plan.applications.map((row) => row.employeeId)).toEqual([guest.id]);
 
     const before = await prisma.employeeListItem.count({
       where: {
@@ -457,9 +457,9 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         list: { employeeId: { in: [account.employeeId, guest.id] } },
       },
     });
-    expect(after).toBe(before);
-    expect(parseLlmReply(result.reply).response).toMatch(
-      /רק לצפות|בלי להוסיף|בלי לשנות|שותפו|אורחים יכולים/,
+    expect(after).toBe(before + 1);
+    expect(parseLlmReply(result.reply).response).not.toMatch(
+      /רק לצפות|אורחים יכולים/,
     );
   }, 60_000);
 

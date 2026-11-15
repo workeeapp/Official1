@@ -455,7 +455,7 @@ function audienceMatches(
   tipAudience: string,
   speakerIsGuest: boolean,
 ): boolean {
-  if (tipAudience === "any") {
+  if (tipAudience === "any" || tipAudience === "member") {
     return true;
   }
   if (tipAudience === "guest") {

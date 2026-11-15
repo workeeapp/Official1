@@ -1,7 +1,6 @@
 import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
 import {
   addJerusalemDays,
-  isGuestEmployee,
   addReminderInterval,
   anchorRecurrence,
   applyRecurrenceException,
@@ -632,7 +631,8 @@ const UUID_PATTERN =
  * Records the humans a worker task's clock pings in its visible_to, so each
  * recipient is involved in it (sees it in WORKER_SAVED_DATA and may act on it).
  * The task stays the worker's own — never scope=shared, which would put it into
- * people's EMPLOYEE_SAVED_DATA. Phone/contact destinations and guests are skipped.
+ * people's EMPLOYEE_SAVED_DATA. Phone and contact destinations are skipped.
+ * A human ping recipient is included whether or not they are a guest.
  */
 export async function shareWorkerTaskWithPingRecipients(input: {
   workerItemId?: string | null;
@@ -657,12 +657,10 @@ export async function shareWorkerTaskWithPingRecipients(input: {
     return;
   }
   try {
-    const recipients = (
-      await prisma.employee.findMany({
-        where: { id: { in: pingIds }, kind: "human" },
-        select: { id: true, name: true, nickname: true },
-      })
-    ).filter((employee) => !isGuestEmployee({ ...employee, kind: "human" }));
+    const recipients = await prisma.employee.findMany({
+      where: { id: { in: pingIds }, kind: "human" },
+      select: { id: true },
+    });
     if (recipients.length === 0) {
       return;
     }

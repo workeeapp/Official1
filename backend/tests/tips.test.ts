@@ -174,9 +174,74 @@ describe("tips service", () => {
   it("filters audience guest vs member", () => {
     expect(tipAudienceMatchesForTest("guest", true)).toBe(true);
     expect(tipAudienceMatchesForTest("guest", false)).toBe(false);
-    expect(tipAudienceMatchesForTest("member", true)).toBe(false);
+    // Member tips stay available on protected Lucy, including for a guest speaker.
+    expect(tipAudienceMatchesForTest("member", true)).toBe(true);
     expect(tipAudienceMatchesForTest("member", false)).toBe(true);
     expect(tipAudienceMatchesForTest("any", true)).toBe(true);
+  });
+
+  it("offers member tips on protected Lucy and withholds guest_terms", async () => {
+    employeeFindMany.mockResolvedValue([
+      { id: LUCY, name: "לוסי", nickname: "לוסי", isProtected: true },
+      {
+        id: GUEST_LUCY,
+        name: "לוסי-אורח",
+        nickname: "לוסי-אורח",
+        isProtected: false,
+      },
+    ]);
+    tipFindMany.mockImplementation(
+      async (args: { where?: { key?: { in?: string[] } } }) => {
+        const keyIn = args?.where?.key?.in;
+        if (Array.isArray(keyIn)) {
+          return keyIn.map((key) => ({
+            id: `seed-${key}`,
+            key,
+            systemSeed: true,
+          }));
+        }
+        return [
+          tipRow({
+            id: "weather-tip",
+            key: "general_weather",
+            audience: "member",
+            digitalEmployeeId: LUCY,
+            triggerKind: "general",
+            triggerArea: null,
+            triggerOp: null,
+            topic: null,
+            listType: null,
+            text: "לפני שיוצאים אפשר לבדוק אם צפוי גשם.",
+            maxShows: 2,
+            order: 800,
+          }),
+          tipRow({
+            id: "guest-terms-tip",
+            key: "guest_terms",
+            audience: "guest",
+            digitalEmployeeId: GUEST_LUCY,
+            triggerKind: "model",
+            triggerArea: null,
+            triggerOp: null,
+            topic: "guest",
+            listType: null,
+            text: "לידיעתך (תמצית): כאורח אפשר בעיקר לצפות במה ששותף איתך.",
+            order: 50,
+          }),
+        ];
+      },
+    );
+    tipProgressFindMany.mockResolvedValue([]);
+    tipUpdate.mockResolvedValue({});
+    tipDeleteMany.mockResolvedValue({ count: 0 });
+    const available = await formatAvailableTipsContext({
+      userId: USER,
+      speaker: { ...speaker, isGuest: true },
+      digitalEmployeeId: LUCY,
+    });
+    expect(available).toContain("key=general_weather");
+    expect(available).not.toContain("key=guest_terms");
+    expect(available).not.toContain("אפשר בעיקר לצפות");
   });
 
   it("collectAppliedTipOps maps listType to topics", () => {

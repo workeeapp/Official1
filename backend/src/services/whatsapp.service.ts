@@ -1,8 +1,8 @@
 import {
   digitalEmployees,
-  GUEST_LUCY_NAME,
   humanEmployees,
   isGuestEmployee,
+  isGuestLucy,
   parseAttachmentKind,
   parseLlmReply,
   parseReplyMetadata,
@@ -721,6 +721,20 @@ export function batchSpokenText(
   return text || transcripts.map((value) => value.trim()).filter(Boolean).join("\n");
 }
 
+/** Active conversation partner. A guest uses the same Lucy as everyone else. */
+export function whatsAppDigitalForTurn(
+  digitals: PublicEmployee[],
+  sticky: PublicEmployee | undefined,
+): PublicEmployee | undefined {
+  const usableSticky = sticky && !isGuestLucy(sticky) ? sticky : undefined;
+  return (
+    usableSticky ??
+    digitals.find((employee) => employee.protected) ??
+    digitals.find((employee) => !isGuestLucy(employee)) ??
+    digitals[0]
+  );
+}
+
 async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
   const last = incoming[incoming.length - 1];
   if (!last) {
@@ -772,19 +786,11 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
       }
     }
     const employees = await listEmployeesForUser(speaker.userId);
-    const speakerEmployee = employees.find((row) => row.id === speaker.employeeId);
     const digitals = digitalEmployees(employees);
-    const guestLucy = digitals.find(
-      (employee) =>
-        employee.name === GUEST_LUCY_NAME || employee.nickname === GUEST_LUCY_NAME,
+    const digital = whatsAppDigitalForTurn(
+      digitals,
+      sessionDigitalFromSticky(from, digitals),
     );
-    const digital = speakerEmployee && isGuestEmployee(speakerEmployee)
-      ? guestLucy ??
-        digitals.find((employee) => employee.protected) ??
-        digitals[0]
-      : sessionDigitalFromSticky(from, digitals) ??
-        digitals.find((employee) => employee.protected) ??
-        digitals[0];
     if (!digital) {
       throw new ServiceUnavailableError();
     }

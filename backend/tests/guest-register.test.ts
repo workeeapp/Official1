@@ -54,15 +54,15 @@ const guest = {
   teamId: null,
 };
 
-const guestLucy = {
+const familyLucy = {
   id: guestLucyId,
   kind: "digital" as const,
-  name: GUEST_LUCY_NAME,
+  name: "לוסי",
   surname: "",
-  nickname: GUEST_LUCY_NAME,
+  nickname: "לוסי",
   email: null,
   phone: null,
-  protected: false,
+  protected: true,
   isOwner: false,
 };
 
@@ -90,7 +90,7 @@ describe("registerGuestMember", () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
-      digital: guestLucy,
+      digital: familyLucy,
       register: {
         name: "מיכל",
         surname: "כהן",
@@ -128,7 +128,7 @@ describe("registerGuestMember", () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
-      digital: guestLucy,
+      digital: familyLucy,
       register: {
         name: "מיכל",
         gender: "female",
@@ -148,7 +148,7 @@ describe("registerGuestMember", () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
-      digital: guestLucy,
+      digital: familyLucy,
       register: {
         name: "טל",
         gender: "male",
@@ -172,7 +172,7 @@ describe("registerGuestMember", () => {
     const result = await registerGuestMember({
       hostUserId,
       guest: { ...guest, name: "טל", nickname: "טל", isGuest: false },
-      digital: guestLucy,
+      digital: familyLucy,
       register: {
         name: "טל",
         gender: "male",
@@ -182,11 +182,16 @@ describe("registerGuestMember", () => {
     expect(employeeUpdate).not.toHaveBeenCalled();
   });
 
-  it("rejects when digital is not לוסי-אורח", async () => {
+  it("rejects a digital that is not the family Lucy", async () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
-      digital: { ...guestLucy, name: "לוסי", nickname: "לוסי" },
+      digital: {
+        ...familyLucy,
+        name: "דוד",
+        nickname: "דוד",
+        protected: false,
+      },
       register: {
         name: "מיכל",
         gender: "female",
@@ -195,11 +200,30 @@ describe("registerGuestMember", () => {
     expect(result).toEqual({ ok: false, reason: "not_guest_lucy" });
   });
 
+  it("rejects לוסי-אורח as the registration digital", async () => {
+    const result = await registerGuestMember({
+      hostUserId,
+      guest,
+      digital: {
+        ...familyLucy,
+        name: GUEST_LUCY_NAME,
+        nickname: GUEST_LUCY_NAME,
+        protected: false,
+      },
+      register: {
+        name: "מיכל",
+        gender: "female",
+      },
+    });
+    expect(result).toEqual({ ok: false, reason: "not_guest_lucy" });
+    expect(employeeUpdate).not.toHaveBeenCalled();
+  });
+
   it("rejects missing name", async () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
-      digital: guestLucy,
+      digital: familyLucy,
       register: {
         name: "   ",
         gender: "female",
@@ -223,7 +247,7 @@ describe("registerGuestMember", () => {
     const result = await registerGuestMember({
       hostUserId,
       guest,
-      digital: guestLucy,
+      digital: familyLucy,
       register: {
         name: "מיכל",
         gender: "female",

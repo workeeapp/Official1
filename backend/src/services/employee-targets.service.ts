@@ -921,7 +921,7 @@ export function planTargetedActions(input: {
     metadata: LlmMetadata;
     partnerNames: string[];
   }>;
-  /** Guest speakers may view shared data but cannot mutate lists/filings. */
+  /** Kept for callers. isGuest no longer sets this; resource checks decide. */
   guestMutationBlocked: boolean;
 } {
   const applications: Array<{
@@ -935,16 +935,6 @@ export function planTargetedActions(input: {
   >();
   const externalPartners = input.externalPartners ?? [];
   const resolvePool = [...input.employees, ...externalPartners];
-
-  const wantsMutation =
-    input.metadata.lists.length > 0 || input.metadata.filing.length > 0;
-  if (wantsMutation && isGuestEmployee(input.actor)) {
-    return {
-      applications: [],
-      notifications: [],
-      guestMutationBlocked: true,
-    };
-  }
 
   /** Co-partners for a notify, excluding the actor and the recipient (never «לך ומיכל» to מיכל). */
   const partnerLabel = (targets: PublicEmployee[], recipientId: string) =>
@@ -1277,7 +1267,9 @@ export function planTargetedActions(input: {
       continue;
     }
 
-    const mutateTargets = targets.filter((target) => !isGuestEmployee(target));
+    const mutateTargets = targets.filter(
+      (target) => target.id === input.actor.id || !isGuestEmployee(target),
+    );
     const humanTargets = mutateTargets.filter(
       (target) => !isDigitalEmployee(target),
     );
@@ -1474,7 +1466,9 @@ export function planTargetedActions(input: {
     );
     const others = targets.filter((target) => target.id !== input.actor.id);
     const humanTargets = targets.filter(
-      (target) => !isDigitalEmployee(target) && !isGuestEmployee(target),
+      (target) =>
+        !isDigitalEmployee(target) &&
+        (target.id === input.actor.id || !isGuestEmployee(target)),
     );
     // Same as lists: speaker ∈ targets + partner → co-share; partners only → assign.
     const coshare =
@@ -1508,7 +1502,9 @@ export function planTargetedActions(input: {
       continue;
     }
 
-    const mutateTargets = targets.filter((target) => !isGuestEmployee(target));
+    const mutateTargets = targets.filter(
+      (target) => target.id === input.actor.id || !isGuestEmployee(target),
+    );
     for (const target of mutateTargets) {
       applications.push({ employeeId: target.id, metadata, visibility });
       if (!isDigitalEmployee(target)) {

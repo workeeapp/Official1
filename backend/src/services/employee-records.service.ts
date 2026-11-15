@@ -1,6 +1,5 @@
 import { Prisma } from "@prisma/client";
 import {
-  isGuestEmployee,
   llmItemLabel,
   parseAttachmentIds,
   parseJobUrgency,
@@ -1042,24 +1041,19 @@ async function resolveRecordVisibility(
     select: {
       userId: true,
       isOwner: true,
+      isGuest: true,
       kind: true,
       name: true,
       nickname: true,
       shareMirrorEmployeeId: true,
     },
   });
-  const guestMode = Boolean(
-    speaker &&
-      isGuestEmployee({
-        kind: speaker.kind === "digital" ? "digital" : "human",
-        name: speaker.name,
-        nickname: speaker.nickname,
-      }),
-  );
+  // isGuest does not hide this speaker's own lists or clocks. seeAll stays
+  // owner-only, so another member's private rows stay out of the snapshot.
+  const guestMode = false;
   const seeAll =
-    !guestMode &&
-    (options?.accountOwner === true ||
-      (speaker?.kind !== "digital" && speaker?.isOwner === true));
+    options?.accountOwner === true ||
+    (speaker?.kind !== "digital" && speaker?.isOwner === true);
   const scope: HumanRecordScope =
     seeAll && speaker
       ? { employee: { userId: speaker.userId, kind: "human" } }
@@ -1680,6 +1674,11 @@ export async function getEmployeeRecordSnapshot(
     return { lists: [], filing: [], reminders: [] };
   }
 
+  // seeAll already includes every human on this account. A share with someone
+  // on another account still lives on the sender's row, so load those too.
+  // Same-account rows stay out of this query when seeAll, or they would be listed twice.
+  const outsideThisAccount =
+    seeAll && owner ? { userId: { not: owner.userId } } : {};
   // Live data only: soft-deleted list/filing rows stay in DB but are never loaded.
   // Done/cancelled reminder clocks stay in DB but are never injected into context.
   const [ownListsRaw, sharedItems, partnerLists, ownFilings, partnerFilings, reminderRows, people] =
@@ -1692,53 +1691,53 @@ export async function getEmployeeRecordSnapshot(
       },
       orderBy: [{ listType: "asc" }, { name: "asc" }],
     }),
-    seeAll
-      ? Promise.resolve([])
-      : prisma.employeeListItem.findMany({
-          // Digital-worker tasks reach a person only through WORKER_SAVED_DATA.
-          where: {
-            scope: "shared",
-            deletedAt: null,
-            list: { employeeId: { not: employeeId }, employee: { kind: "human" } },
-          },
-          include: {
-            list: {
-              include: { employee: { select: { id: true, name: true, nickname: true } } },
-            },
-          },
-          orderBy: { createdAt: "asc" },
-        }),
-    seeAll
-      ? Promise.resolve([])
-      : prisma.employeeList.findMany({
-          where: {
-            scope: "shared",
-            deletedAt: null,
-            employeeId: { not: employeeId },
-            employee: { kind: "human" },
-          },
-          include: {
-            employee: { select: { id: true, name: true, nickname: true } },
-            items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
-          },
-          orderBy: [{ listType: "asc" }, { name: "asc" }],
-        }),
+    prisma.employeeListItem.findMany({
+      // Digital-worker tasks reach a person only through WORKER_SAVED_DATA.
+      where: {
+        scope: "shared",
+        deletedAt: null,
+        list: {
+          employeeId: { not: employeeId },
+          employee: { kind: "human", ...outsideThisAccount },
+        },
+      },
+      include: {
+        list: {
+          include: { employee: { select: { id: true, name: true, nickname: true } } },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.employeeList.findMany({
+      where: {
+        scope: "shared",
+        deletedAt: null,
+        employeeId: { not: employeeId },
+        employee: { kind: "human", ...outsideThisAccount },
+      },
+      include: {
+        employee: { select: { id: true, name: true, nickname: true } },
+        items: { where: { deletedAt: null }, orderBy: { createdAt: "asc" } },
+      },
+      orderBy: [{ listType: "asc" }, { name: "asc" }],
+    }),
     prisma.employeeFiling.findMany({
       where: { ...filingWhere, deletedAt: null },
       include: { employee: { select: { name: true, nickname: true } } },
       orderBy: { itemName: "asc" },
     }),
-    seeAll
-      ? Promise.resolve([])
-      : prisma.employeeFiling.findMany({
-          where: {
-            scope: "shared",
-            deletedAt: null,
-            employeeId: { not: employeeId },
-          },
-          include: { employee: { select: { name: true, nickname: true } } },
-          orderBy: { itemName: "asc" },
-        }),
+    prisma.employeeFiling.findMany({
+      where: {
+        scope: "shared",
+        deletedAt: null,
+        employeeId: { not: employeeId },
+        ...(seeAll && owner
+          ? { employee: { userId: { not: owner.userId } } }
+          : {}),
+      },
+      include: { employee: { select: { name: true, nickname: true } } },
+      orderBy: { itemName: "asc" },
+    }),
     owner ? listReminderRowsForUser(owner.userId) : Promise.resolve([]),
     owner
       ? prisma.employee.findMany({

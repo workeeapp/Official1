@@ -316,7 +316,11 @@ async function ensureProtectedLucy(
   });
 }
 
-/** WhatsApp guest onboarding worker — not protected; hidden from Chat-with. */
+/**
+ * Legacy לוסי-אורח row. Not used for new accounts or invite bind.
+ * An existing shell that already has this worker still routes to her.
+ * Do not call this to onboard a WhatsApp user.
+ */
 export async function ensureGuestLucy(
   userId: string,
   teamId?: string,
@@ -366,7 +370,6 @@ export async function listEmployeesForUser(
 ): Promise<PublicEmployee[]> {
   const teamId = options?.teamId ?? (await ensureTeamForUser(userId)).id;
   await ensureProtectedLucy(userId, teamId);
-  await ensureGuestLucy(userId, teamId);
   try {
     const { ensureMissionExecutor } = await import("./mission.service.js");
     await ensureMissionExecutor(userId, teamId);

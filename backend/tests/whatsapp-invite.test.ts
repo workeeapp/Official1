@@ -6,14 +6,12 @@ const {
   inviteUpdate,
   employeeFindUnique,
   employeeUpdate,
-  ensureGuestLucy,
 } = vi.hoisted(() => ({
   inviteCreate: vi.fn(),
   inviteFindFirst: vi.fn(),
   inviteUpdate: vi.fn(),
   employeeFindUnique: vi.fn(),
   employeeUpdate: vi.fn(),
-  ensureGuestLucy: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -28,10 +26,6 @@ vi.mock("../src/database/prisma.js", () => ({
       update: employeeUpdate,
     },
   },
-}));
-
-vi.mock("../src/services/employee.service.js", () => ({
-  ensureGuestLucy,
 }));
 
 const envState = vi.hoisted(() => ({
@@ -67,7 +61,6 @@ describe("whatsapp invite helpers", () => {
     inviteUpdate.mockReset();
     employeeFindUnique.mockReset();
     employeeUpdate.mockReset();
-    ensureGuestLucy.mockReset();
   });
 
   it("parses WRK-INV tokens from inbound text", () => {
@@ -177,7 +170,6 @@ describe("whatsapp invite helpers", () => {
         data: { guestEmployeeId: "guest-emp" },
       }),
     );
-    expect(ensureGuestLucy).toHaveBeenCalledWith("asker-user");
   });
 
   it("formats PENDING_INVITE context for לוסי-אורח", () => {

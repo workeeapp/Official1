@@ -3,8 +3,6 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { getEnv } from "../config/env.js";
 import { normalizePhoneDigits, phonesMatch, toWhatsAppAddress } from "../utils/phone.js";
-import { ensureGuestLucy } from "./employee.service.js";
-
 export const INVITE_TOKEN_PREFIX = "WRK-INV-";
 export const INVITE_TOKEN_RE = /\bWRK-INV-([A-Z0-9]{8,16})\b/i;
 export const WHATSAPP_COMPOSE_LABEL = "שלח בוואטסאפ";
@@ -318,8 +316,6 @@ export async function bindInboundToInvite(input: {
   if (invite.payload != null && !phonesMatch(invite.recipientPhone, input.fromPhone)) {
     return null;
   }
-
-  await ensureGuestLucy(invite.userId);
 
   const employeeId = input.currentEmployeeId;
   const userId = input.currentUserId;

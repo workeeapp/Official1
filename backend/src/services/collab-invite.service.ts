@@ -119,7 +119,7 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
     return "";
   }
   const lines = [
-    "COLLAB INVITE (pending share or assign — ask before applying):",
+    "COLLAB INVITE (pending assign — ask before applying):",
     "Ask in warm Hebrew whether to take this activity. Do not say it is already saved.",
     "To accept one invitation, emit metadata.collab_invite set to that invite_id and leave lists, filing, reminders, directory, jobs, and messages empty.",
     "To decline one invitation, emit metadata.decline_invite set to that invite_id the same way.",
@@ -181,25 +181,14 @@ export async function loadPresentedCollabInvites(
     return [];
   }
   const rows = await findPendingCollabInvites(phone);
-  const presented: PresentedCollabInvite[] = [];
   for (const row of rows) {
-    const payload = parseCollabInvitePayload(row.payload);
-    if (!payload) {
+    // Share and assign activate before this load. A broken payload is failed
+    // here too, so it cannot sit pending forever if activation skipped it.
+    if (!parseCollabInvitePayload(row.payload)) {
       await markCollabInviteFailed(row.id);
-      continue;
     }
-    const asker = await prisma.employee.findUnique({
-      where: { id: row.askerEmployeeId },
-      select: { name: true, nickname: true },
-    });
-    presented.push({
-      inviteId: row.id,
-      askerName: asker?.nickname?.trim() || asker?.name?.trim() || "מישהו",
-      askSummary: row.askSummary,
-      kind: payload.kind,
-    });
   }
-  return presented;
+  return [];
 }
 
 async function markCollabInviteFailed(inviteId: string): Promise<void> {
@@ -279,6 +268,42 @@ export async function createDeferredCollabInvites(input: {
 }
 
 export type ConfirmCollabResult = "consumed" | "lost" | "failed" | "rolled_back";
+
+/**
+ * Apply every pending share or assign for this phone, oldest first.
+ * Each invite is its own claim-and-insert. A failure leaves that invite pending
+ * and does not stop the next one. Share stays on the sender with the recipient
+ * in visibleTo. Assign lands on the recipient with addedById set to the sender.
+ * Neither waits for an acceptance id.
+ */
+export async function applyPendingCollabInvites(input: {
+  recipient: PublicEmployee;
+  sharedLists: SharedListRef[];
+}): Promise<void> {
+  if (isGuestEmployee(input.recipient) || !input.recipient.phone?.trim()) {
+    return;
+  }
+  const rows = await findPendingCollabInvites(input.recipient.phone);
+  for (const row of rows) {
+    const payload = parseCollabInvitePayload(row.payload);
+    if (!payload) {
+      await markCollabInviteFailed(row.id);
+      continue;
+    }
+    if (payload.kind !== "share" && payload.kind !== "assign") {
+      continue;
+    }
+    try {
+      await confirmCollabInvite({
+        inviteId: row.id,
+        recipient: input.recipient,
+        sharedLists: input.sharedLists,
+      });
+    } catch {
+      // confirmCollabInvite already rolls a failed insert back to pending.
+    }
+  }
+}
 
 /**
  * pending → consumed and the planned row, in one transaction.

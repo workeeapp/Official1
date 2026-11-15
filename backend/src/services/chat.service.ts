@@ -172,7 +172,10 @@ import {
   listContactsForEmployee,
   resolveExternalSharePartners,
 } from "./contact.service.js";
-import { registerGuestMember } from "./guest-register.service.js";
+import {
+  digitalAcceptsGuestRegister,
+  registerGuestMember,
+} from "./guest-register.service.js";
 import {
   consumeWhatsAppInvite,
   createWhatsAppInvite,
@@ -186,6 +189,7 @@ import {
 import {
   cancelCollabInvite,
   collabMutationsAreEmpty,
+  applyPendingCollabInvites,
   confirmCollabInvite,
   createDeferredCollabInvites,
   formatCollabInviteContext,
@@ -1051,10 +1055,12 @@ export function buildLucyInstructions(input: {
     employees,
     speaker,
     speakerIsOwner,
-    guestSpeaker,
     pendingInvite,
     consultFrom,
   } = input;
+  // isGuest does not drop the catalog or switch Lucy to a view-only persona.
+  const guestSpeaker = false;
+  void input.guestSpeaker;
   const config = llmConfigForDigital(digital);
   const consultEnvelope = consultFrom
     ? [
@@ -1679,7 +1685,7 @@ export function planInvolvedChangeNotices(input: {
   }
   return [...linesByTarget.entries()].flatMap(([id, lines]) => {
     const target = input.humans.find((row) => row.id === id);
-    return target && !isDigitalEmployee(target) && !isGuestEmployee(target)
+    return target && !isDigitalEmployee(target)
       ? [{ target, text: lines.join("\n") }]
       : [];
   });
@@ -2287,7 +2293,10 @@ export interface TurnContextParts {
  * LIVE_FULL eval harness so the two can never drift.
  */
 export function composeTurnContext(parts: TurnContextParts): string {
-  const guest = parts.guestSpeaker;
+  // Same fact blocks for a guest and a regular speaker. Resource loaders
+  // already limit rows to this speaker.
+  const guest = false;
+  void parts.guestSpeaker;
   const factsOnly = { rulesInInstructions: parts.rulesInInstructions === true };
   return [
     formatSessionClockContext(parts.now ?? new Date(), factsOnly),
@@ -2310,11 +2319,9 @@ export function composeTurnContext(parts: TurnContextParts): string {
     guest ? "" : formatPendingLocationContext(parts.pendingLocation),
     guest ? "" : formatLastLiveLocationContext(parts.lastLiveLocation),
     parts.pendingInvite
-      ? parts.guestSpeaker
-        ? formatPendingInviteContext(parts.pendingInvite)
-        : formatInviteOpeningContext(parts.pendingInvite)
+      ? formatInviteOpeningContext(parts.pendingInvite)
       : "",
-    parts.guestSpeaker ? "" : (parts.collabInvites ?? ""),
+    parts.collabInvites ?? "",
     parts.tipsContext,
   ]
     .filter(Boolean)
@@ -2502,7 +2509,9 @@ export async function sendChatMessage(input: {
     conversationOwnerId,
     digital.id,
   );
-  const guestSpeaker = isGuestEmployee(employee);
+  const isGuestSpeaker = isGuestEmployee(employee);
+  // Capability pipeline is the regular one. isGuest is not a view-only mode.
+  const guestSpeaker = false;
   const speakerContacts = guestSpeaker
     ? []
     : await listContactsForEmployee(input.employeeId);
@@ -2576,6 +2585,17 @@ export async function sendChatMessage(input: {
   const lastLiveLocationCtx = guestSpeaker
     ? null
     : await loadLastLiveLocationForConversation(conversation.id);
+  // Deferred share and assign apply before facts, so this turn already sees the row.
+  if (!guestSpeaker && employee.phone) {
+    const shareLists = await listSharedCustomListsForActor(
+      input.userId,
+      employee.id,
+    );
+    await applyPendingCollabInvites({
+      recipient: employee,
+      sharedLists: shareLists,
+    });
+  }
   // Same snapshots injected into EMPLOYEE_SAVED_DATA / WORKER_SAVED_DATA — reused
   // later for stage-2 saved_data membership (thisTurnVisibleRefs), not a fresh DB exists check.
   const speakerSnapshot = await withAttachmentRefsSafe(
@@ -3151,8 +3171,8 @@ export async function sendChatMessage(input: {
     let pendingInviteContinue: Awaited<
       ReturnType<typeof continueInviteAfterRegister>
     > | null = null;
-    if (guestSpeaker && metadata.register) {
-      if (!isGuestLucy(digital)) {
+    if (isGuestSpeaker && metadata.register) {
+      if (!digitalAcceptsGuestRegister(digital)) {
         registerNotice = "";
       } else {
         const registerResult = await registerGuestMember({
@@ -3162,7 +3182,7 @@ export async function sendChatMessage(input: {
           register: metadata.register,
         });
         if (registerResult.ok) {
-          registerNotice = `נרשמת בהצלחה, ${registerResult.displayName}. מעכשיו אפשר לדבר עם לוסי ישירות.`;
+          registerNotice = `נרשמת בהצלחה, ${registerResult.displayName}.`;
           recordWhatsAppEvent(
             "guest_register",
             `ok employee=${registerResult.employeeId.slice(0, 8)}`,

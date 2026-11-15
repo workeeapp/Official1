@@ -25,10 +25,23 @@ export type GuestRegisterResult =
       detail?: string;
     };
 
+/** Registration is accepted on the family's Lucy, not on לוסי-אורח. */
+export function digitalAcceptsGuestRegister(digital: PublicEmployee): boolean {
+  if (digital.kind !== "digital" || isGuestLucy(digital)) {
+    return false;
+  }
+  if (digital.protected) {
+    return true;
+  }
+  const name = (digital.name ?? "").trim();
+  const nickname = digital.nickname?.trim() ?? "";
+  return name === "לוסי" || nickname === "לוסי";
+}
+
 /**
  * Promote a WhatsApp guest in place on the host account.
  * Same employee id keeps phone; joins shared "New Registered 30 days" team.
- * Next WhatsApp turn talks with לוסי (not לוסי-אורח) on a new conversation.
+ * isOwner stays false. No second User is created.
  */
 export async function registerGuestMember(input: {
   hostUserId: string;
@@ -39,7 +52,7 @@ export async function registerGuestMember(input: {
   if (!isGuestEmployee(input.guest)) {
     return { ok: false, reason: "not_guest" };
   }
-  if (!isGuestLucy(input.digital)) {
+  if (!digitalAcceptsGuestRegister(input.digital)) {
     return { ok: false, reason: "not_guest_lucy" };
   }
 

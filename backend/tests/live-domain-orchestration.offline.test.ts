@@ -199,7 +199,8 @@ async function applyChatLiveDomainPass(input: {
   pendingLoc?: { lat: number; lng: number } | null;
   weatherNow?: Date;
 }): Promise<string> {
-  const guestSpeaker = input.guestSpeaker === true;
+  const guestSpeaker = false;
+  void input.guestSpeaker;
   let workingReply = input.workingReply;
   const metadata = input.metadata;
 
@@ -417,7 +418,7 @@ describe("live-domain orchestration (offline, post-model)", () => {
     expect(parseLlmReply(reply).response).not.toMatch(/\d+\s*°C/);
   });
 
-  it("guest: skips weather resolve — no provider call, original spoken unchanged", async () => {
+  it("guest: weather resolve runs the same way as a regular speaker", async () => {
     const fetchImpl = openMeteoFetchImpl();
     const stub = modelReply(["שלום אורח"], {
       weather: {
@@ -437,9 +438,9 @@ describe("live-domain orchestration (offline, post-model)", () => {
       composeWeatherTip: async () => "should-not-run",
     });
 
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(parseLlmReply(reply).responses).toEqual(["שלום אורח"]);
-    expect(parseLlmReply(reply).response).not.toMatch(/\d+\s*°C/);
+    expect(fetchImpl).toHaveBeenCalled();
+    expect(parseLlmReply(reply).responses[0]).toBe("שלום אורח");
+    expect(parseLlmReply(reply).response).toMatch(/\d/);
   });
 
   it("places: maps query+city into Google search and formats phone/address", async () => {

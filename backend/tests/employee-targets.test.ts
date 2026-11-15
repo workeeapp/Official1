@@ -5120,7 +5120,7 @@ describe("employee targets", () => {
     expect(buttons.some((row) => row.command === "הצג תיוקים")).toBe(true);
   });
 
-  it("blocks list and filing mutations from guest speakers", () => {
+  it("plans a guest speaker's own list add on that speaker", () => {
     const guest: PublicEmployee = {
       id: "guest-1",
       kind: "human",
@@ -5149,8 +5149,8 @@ describe("employee targets", () => {
         ],
       },
     });
-    expect(plan.guestMutationBlocked).toBe(true);
-    expect(plan.applications).toEqual([]);
+    expect(plan.guestMutationBlocked).toBe(false);
+    expect(plan.applications.map((row) => row.employeeId)).toEqual(["guest-1"]);
     expect(plan.notifications).toEqual([]);
   });
 

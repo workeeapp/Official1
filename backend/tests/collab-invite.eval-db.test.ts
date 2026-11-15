@@ -1,6 +1,7 @@
 /**
- * Phase 2: a share or assign aimed at an unregistered contact phone is stored
- * on the invite and applied once, on the recipient's later explicit confirm.
+ * Phase 2: an unregistered contact phone does not become a personal stand-in.
+ * Share and assign both apply on that phone's first chat turn. Neither waits
+ * for an acceptance id. Assign still lands on the recipient.
  *
  * Real Prisma on workee_test. Model is stubbed. No WhatsApp send, no OpenAI.
  *
@@ -184,6 +185,24 @@ describe("share/assign invitation continuity (eval-db)", () => {
     return rows.filter((row) => JSON.stringify(row.data).includes(label));
   }
 
+  async function say(
+    who: { userId: string; employeeId: string; digitalEmployeeId: string },
+    message: string,
+    metadata: Record<string, unknown>,
+    sink?: { facts: string },
+  ) {
+    installStub(
+      { responses: [{ text: "בסדר.", buttons: [] }], metadata },
+      sink,
+    );
+    return sendChatMessage({
+      userId: who.userId,
+      employeeId: who.employeeId,
+      digitalEmployeeId: who.digitalEmployeeId,
+      message,
+    });
+  }
+
   async function recipientOf(phone: string): Promise<{
     userId: string;
     employeeId: string;
@@ -217,7 +236,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
   });
 
   it(
-    "shares onto a new Lucy account only after an explicit confirm",
+    "applies a deferred share on the recipient's first chat turn",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -230,11 +249,12 @@ describe("share/assign invitation continuity (eval-db)", () => {
         share: true,
       });
       const recipient = await recipientOf(phone);
+      expect(recipient.userId).not.toBe(asker.userId);
       const facts = { facts: "" };
       installStub(
         {
-          responses: [{ text: "ראיתי הזמנה.", buttons: [] }],
-          metadata: { confirm: false, lists: [] },
+          responses: [{ text: "היי.", buttons: [] }],
+          metadata: { confirm: true, lists: [] },
         },
         facts,
       );
@@ -244,34 +264,11 @@ describe("share/assign invitation continuity (eval-db)", () => {
         digitalEmployeeId: recipient.digitalEmployeeId,
         message: "היי",
       });
-      expect(facts.facts).toContain("COLLAB INVITE");
-      expect(facts.facts).toContain(invite.id);
+      expect(facts.facts).toContain(label);
+      expect(facts.facts).toContain(rowId);
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      expect(facts.facts).not.toContain(invite.id);
       expect(facts.facts).not.toContain("GUEST MODE");
-      expect(await rowsWithLabel(label)).toHaveLength(0);
-      const stillPending = await prisma.whatsAppInvite.findUnique({
-        where: { id: invite.id },
-      });
-      expect(stillPending?.status).toBe("pending");
-
-      installStub({
-        responses: [{ text: "כן, תשימי את זה.", buttons: [] }],
-        metadata: {
-          confirm: false,
-          collab_invite: invite.id,
-          lists: [],
-          filing: [],
-          reminders: [],
-          directory: [],
-          jobs: [],
-          messages: [],
-        },
-      });
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "כן",
-      });
       const consumed = await prisma.whatsAppInvite.findUnique({
         where: { id: invite.id },
       });
@@ -286,22 +283,25 @@ describe("share/assign invitation continuity (eval-db)", () => {
       expect(rows[0]?.list.employeeId).not.toBe(recipient.employeeId);
 
       installStub({
-        responses: [{ text: "שוב כן.", buttons: [] }],
+        responses: [{ text: "שוב.", buttons: [] }],
         metadata: { confirm: false, collab_invite: invite.id, lists: [] },
       });
       await sendChatMessage({
         userId: recipient.userId,
         employeeId: recipient.employeeId,
         digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "כן שוב",
+        message: "היי שוב",
       });
       expect(await rowsWithLabel(label)).toHaveLength(1);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("consumed");
     },
     120_000,
   );
 
   it(
-    "assigns onto the new account only after an explicit confirm",
+    "applies a deferred assign on the recipient's first chat turn",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -314,51 +314,45 @@ describe("share/assign invitation continuity (eval-db)", () => {
         share: false,
       });
       const recipient = await recipientOf(phone);
+      expect(recipient.userId).not.toBe(asker.userId);
       const facts = { facts: "" };
-      installStub(
-        {
-          responses: [{ text: "ראיתי הזמנה.", buttons: [] }],
-          metadata: { confirm: false },
-        },
+      await say(
+        recipient,
+        "היי",
+        { confirm: true, lists: [] },
         facts,
       );
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "היי",
-      });
-      expect(facts.facts).toContain(invite.id);
-      expect(await rowsWithLabel(label)).toHaveLength(0);
-
-      installStub({
-        responses: [{ text: "אקח את זה.", buttons: [] }],
-        metadata: { collab_invite: invite.id, lists: [] },
-      });
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "כן",
-      });
+      expect(facts.facts).toContain(label);
+      expect(facts.facts).toContain(rowId);
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      expect(facts.facts).not.toContain(invite.id);
       const rows = await rowsWithLabel(label);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.id).toBe(rowId);
       expect(rows[0]?.list.employeeId).toBe(recipient.employeeId);
       expect(rows[0]?.addedById).toBe(asker.employeeId);
-      const stored = await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } });
-      expect(stored?.status).toBe("consumed");
+      expect(rows[0]?.list.employeeId).not.toBe(asker.employeeId);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("consumed");
+
+      await say(recipient, "היי שוב", {
+        confirm: false,
+        collab_invite: invite.id,
+        lists: [],
+      });
+      expect(await rowsWithLabel(label)).toHaveLength(1);
     },
     120_000,
   );
 
   it(
-    "cancels on an explicit decline and leaves the row unwritten",
+    "does not let decline_invite cancel a deferred share",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
       const label = `סירוב-${randomUUID().slice(0, 8)}`;
-      const { invite } = await deferItem({
+      const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
         listType: "shopping",
@@ -377,8 +371,11 @@ describe("share/assign invitation continuity (eval-db)", () => {
         message: "לא",
       });
       const stored = await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } });
-      expect(stored?.status).toBe("cancelled");
-      expect(await rowsWithLabel(label)).toHaveLength(0);
+      expect(stored?.status).toBe("consumed");
+      const rows = await rowsWithLabel(label);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(rowId);
+      expect(rows[0]?.list.employeeId).toBe(asker.employeeId);
     },
     120_000,
   );
@@ -491,50 +488,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       expect(
         (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
       ).toBe("pending");
-
-      const otherId = randomUUID();
-      const recipient = await recipientOf(phone);
-      installStub({
-        responses: [{ text: "משהו אחר.", buttons: [] }],
-        metadata: { collab_invite: otherId, lists: [] },
-      });
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "מה השעה",
-      });
-      expect(
-        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
-      ).toBe("pending");
-
-      const personalLabel = `פרטי-נפרד-${randomUUID().slice(0, 8)}`;
-      installStub({
-        responses: [{ text: "גם חלב וגם הזמנה.", buttons: [] }],
-        metadata: {
-          collab_invite: invite.id,
-          lists: [
-            {
-              action: "add",
-              list_type: "shopping",
-              list_name: "",
-              items: [{ "שם פריט": personalLabel }],
-              targets: [],
-            },
-          ],
-        },
-      });
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "תוסיפי חלב לי",
-      });
-      expect(
-        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
-      ).toBe("pending");
       expect(await rowsWithLabel(label)).toHaveLength(0);
-      expect(await rowsWithLabel(personalLabel)).toHaveLength(1);
 
       const guestPhone = await unusedPhone();
       const guestLabel = `אורח-${randomUUID().slice(0, 8)}`;
@@ -572,6 +526,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       ).toBe("pending");
       expect(await rowsWithLabel(guestLabel)).toHaveLength(0);
 
+      const recipient = await recipientOf(phone);
       const nullInvite = await prisma.whatsAppInvite.create({
         data: {
           token: `${INVITE_TOKEN_PREFIX}NULL${randomUUID().slice(0, 8).toUpperCase()}`,
@@ -624,6 +579,37 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const live = await prisma.employeeListItem.findUnique({ where: { id: rowId } });
       expect(live?.deletedAt ?? null).toBeNull();
       expect(await rowsWithLabel(label)).toHaveLength(0);
+
+      const personalLabel = `פרטי-נפרד-${randomUUID().slice(0, 8)}`;
+      installStub({
+        responses: [{ text: "גם חלב וגם הזמנה.", buttons: [] }],
+        metadata: {
+          collab_invite: randomUUID(),
+          lists: [
+            {
+              action: "add",
+              list_type: "shopping",
+              list_name: "",
+              items: [{ "שם פריט": personalLabel }],
+              targets: [],
+            },
+          ],
+        },
+      });
+      await sendChatMessage({
+        userId: recipient.userId,
+        employeeId: recipient.employeeId,
+        digitalEmployeeId: recipient.digitalEmployeeId,
+        message: "תוסיפי חלב לי",
+      });
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("consumed");
+      expect(await rowsWithLabel(label)).toHaveLength(1);
+      expect(await rowsWithLabel(personalLabel)).toHaveLength(1);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: nullInvite.id } }))?.status,
+      ).toBe("pending");
     },
     180_000,
   );
@@ -715,6 +701,407 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const legacyFound = await findPendingMessageInviteByPhone(phone);
       expect(legacyFound?.id).toBe(legacy.id);
       expect(legacyFound?.payload).toBeNull();
+    },
+    120_000,
+  );
+
+  it(
+    "does not let decline_invite cancel a deferred assign",
+    async () => {
+      const phone = await unusedPhone();
+      const asker = await openAsker("נועה", phone);
+      const label = `סירוב-הטלה-${randomUUID().slice(0, 8)}`;
+      const { invite, rowId } = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "tasks",
+        label,
+        share: false,
+      });
+      const recipient = await recipientOf(phone);
+      const facts = { facts: "" };
+      await say(
+        recipient,
+        "לא",
+        { decline_invite: invite.id, confirm: false, lists: [] },
+        facts,
+      );
+      expect(facts.facts).toContain(label);
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      const stored = await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } });
+      expect(stored?.status).toBe("consumed");
+      const rows = await rowsWithLabel(label);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(rowId);
+      expect(rows[0]?.list.employeeId).toBe(recipient.employeeId);
+      expect(rows[0]?.addedById).toBe(asker.employeeId);
+    },
+    120_000,
+  );
+
+  it(
+    "applies every pending share once on the first chat turn",
+    async () => {
+      const phone = await unusedPhone();
+      const asker = await openAsker("נועה", phone);
+      const firstLabel = `ממתין-${randomUUID().slice(0, 8)}`;
+      const secondLabel = `נבחר-${randomUUID().slice(0, 8)}`;
+      const first = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "shopping",
+        label: firstLabel,
+        share: true,
+      });
+      const second = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "shopping",
+        label: secondLabel,
+        share: true,
+      });
+      expect(first.invite.id).not.toBe(second.invite.id);
+      const recipient = await recipientOf(phone);
+      const facts = { facts: "" };
+      await say(
+        recipient,
+        "היי",
+        { confirm: false, lists: [] },
+        facts,
+      );
+      expect(facts.facts).toContain(firstLabel);
+      expect(facts.facts).toContain(secondLabel);
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: first.invite.id } }))?.status,
+      ).toBe("consumed");
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: second.invite.id } }))?.status,
+      ).toBe("consumed");
+      expect((await rowsWithLabel(firstLabel))[0]?.id).toBe(first.rowId);
+      expect((await rowsWithLabel(secondLabel))[0]?.id).toBe(second.rowId);
+
+      await say(recipient, "היי שוב", { confirm: false, lists: [] });
+      expect(await rowsWithLabel(firstLabel)).toHaveLength(1);
+      expect(await rowsWithLabel(secondLabel)).toHaveLength(1);
+    },
+    180_000,
+  );
+
+  it(
+    "continues after one deferred share fails and retries that same row id",
+    async () => {
+      const phone = await unusedPhone();
+      const asker = await openAsker("נועה", phone);
+      const failedLabel = `נכשל-${randomUUID().slice(0, 8)}`;
+      const keptLabel = `המשיך-${randomUUID().slice(0, 8)}`;
+      const failed = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "shopping",
+        label: failedLabel,
+        share: true,
+      });
+      const kept = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "shopping",
+        label: keptLabel,
+        share: true,
+      });
+      const recipient = await recipientOf(phone);
+      const facts = { facts: "" };
+      const spy = vi
+        .spyOn(records, "applyEmployeeRecords")
+        .mockRejectedValueOnce(new Error("insert_failed"));
+      await say(recipient, "היי", { confirm: true, lists: [] }, facts);
+      spy.mockRestore();
+
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      expect(facts.facts).toContain(keptLabel);
+      expect(facts.facts).not.toContain(failedLabel);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: failed.invite.id } }))
+          ?.status,
+      ).toBe("pending");
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: kept.invite.id } }))?.status,
+      ).toBe("consumed");
+      expect(await rowsWithLabel(failedLabel)).toHaveLength(0);
+      expect((await rowsWithLabel(keptLabel))[0]?.id).toBe(kept.rowId);
+      expect((await rowsWithLabel(keptLabel))[0]?.list.employeeId).toBe(
+        asker.employeeId,
+      );
+
+      await say(recipient, "היי שוב", { decline_invite: failed.invite.id, lists: [] });
+      const restored = await rowsWithLabel(failedLabel);
+      expect(restored).toHaveLength(1);
+      expect(restored[0]?.id).toBe(failed.rowId);
+      expect(restored[0]?.list.employeeId).toBe(asker.employeeId);
+      expect(restored[0]?.visibleTo).toEqual(
+        expect.arrayContaining([asker.employeeId, recipient.employeeId]),
+      );
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: failed.invite.id } }))
+          ?.status,
+      ).toBe("consumed");
+      expect(await rowsWithLabel(keptLabel)).toHaveLength(1);
+    },
+    180_000,
+  );
+
+  it(
+    "continues after one deferred assign fails and retries that same row id",
+    async () => {
+      const phone = await unusedPhone();
+      const asker = await openAsker("נועה", phone);
+      const failedLabel = `הטלה-נכשלה-${randomUUID().slice(0, 8)}`;
+      const keptLabel = `הטלה-המשיכה-${randomUUID().slice(0, 8)}`;
+      const failed = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "tasks",
+        label: failedLabel,
+        share: false,
+      });
+      const kept = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "tasks",
+        label: keptLabel,
+        share: false,
+      });
+      const recipient = await recipientOf(phone);
+      const facts = { facts: "" };
+      const spy = vi
+        .spyOn(records, "applyEmployeeRecords")
+        .mockRejectedValueOnce(new Error("insert_failed"));
+      await say(recipient, "היי", { confirm: true, lists: [] }, facts);
+      spy.mockRestore();
+
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      expect(facts.facts).toContain(keptLabel);
+      expect(facts.facts).not.toContain(failedLabel);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: failed.invite.id } }))
+          ?.status,
+      ).toBe("pending");
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: kept.invite.id } }))?.status,
+      ).toBe("consumed");
+      expect(await rowsWithLabel(failedLabel)).toHaveLength(0);
+      const keptRows = await rowsWithLabel(keptLabel);
+      expect(keptRows).toHaveLength(1);
+      expect(keptRows[0]?.id).toBe(kept.rowId);
+      expect(keptRows[0]?.list.employeeId).toBe(recipient.employeeId);
+      expect(keptRows[0]?.addedById).toBe(asker.employeeId);
+
+      await say(recipient, "היי שוב", { decline_invite: failed.invite.id, lists: [] });
+      const restored = await rowsWithLabel(failedLabel);
+      expect(restored).toHaveLength(1);
+      expect(restored[0]?.id).toBe(failed.rowId);
+      expect(restored[0]?.list.employeeId).toBe(recipient.employeeId);
+      expect(restored[0]?.addedById).toBe(asker.employeeId);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: failed.invite.id } }))
+          ?.status,
+      ).toBe("consumed");
+      expect(await rowsWithLabel(keptLabel)).toHaveLength(1);
+    },
+    180_000,
+  );
+
+  it(
+    "does not assign to the wrong phone, a host shell, a null payload, or an invalid payload",
+    async () => {
+      const phone = await unusedPhone();
+      const asker = await openAsker("נועה", phone);
+      const label = `הטלה-זר-${randomUUID().slice(0, 8)}`;
+      const { invite, rowId } = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "tasks",
+        label,
+        share: false,
+      });
+      const stranger = await recipientOf(await unusedPhone());
+      await say(stranger, "היי", { confirm: true, lists: [] });
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("pending");
+      expect(await rowsWithLabel(label)).toHaveLength(0);
+
+      const guestPhone = await unusedPhone();
+      const guestLabel = `הטלה-מעטפת-${randomUUID().slice(0, 8)}`;
+      const guestAsker = await openAsker("נועה", guestPhone);
+      const guestInvite = await deferItem({
+        asker: guestAsker,
+        contactName: "נועה",
+        listType: "tasks",
+        label: guestLabel,
+        share: false,
+      });
+      const guest = await prisma.employee.create({
+        data: {
+          userId: guestAsker.userId,
+          kind: "human",
+          name: "אורח",
+          surname: "",
+          isGuest: true,
+          phone: guestPhone,
+        },
+      });
+      await say(
+        {
+          userId: guestAsker.userId,
+          employeeId: guest.id,
+          digitalEmployeeId: guestAsker.digitalEmployeeId!,
+        },
+        "היי",
+        { decline_invite: guestInvite.invite.id, confirm: true, lists: [] },
+      );
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: guestInvite.invite.id } }))
+          ?.status,
+      ).toBe("pending");
+      expect(await rowsWithLabel(guestLabel)).toHaveLength(0);
+
+      const recipient = await recipientOf(phone);
+      const nullInvite = await prisma.whatsAppInvite.create({
+        data: {
+          token: `${INVITE_TOKEN_PREFIX}ANULL${randomUUID().slice(0, 8).toUpperCase()}`,
+          userId: asker.userId,
+          askerEmployeeId: asker.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId!,
+          recipientPhone: phone,
+          recipientLabel: "נועה",
+          askSummary: "הודעה",
+          draftText: "draft",
+          status: "pending",
+        },
+      });
+      const invalid = await prisma.whatsAppInvite.create({
+        data: {
+          token: `${INVITE_TOKEN_PREFIX}ABAD${randomUUID().slice(0, 8).toUpperCase()}`,
+          userId: asker.userId,
+          askerEmployeeId: asker.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId!,
+          recipientPhone: phone,
+          recipientLabel: "נועה",
+          askSummary: "שבור",
+          draftText: "draft",
+          status: "pending",
+          payload: { v: 1, kind: "assign" },
+        },
+      });
+      const facts = { facts: "" };
+      await say(recipient, "היי", { confirm: false, lists: [] }, facts);
+      expect(facts.facts).toContain(label);
+      expect(facts.facts).not.toContain("COLLAB INVITE");
+      const rows = await rowsWithLabel(label);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(rowId);
+      expect(rows[0]?.list.employeeId).toBe(recipient.employeeId);
+      expect(rows[0]?.addedById).toBe(asker.employeeId);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("consumed");
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: nullInvite.id } }))?.status,
+      ).toBe("pending");
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invalid.id } }))?.status,
+      ).toBe("failed");
+      expect(await rowsWithLabel(guestLabel)).toHaveLength(0);
+    },
+    180_000,
+  );
+
+  it(
+    "still assigns immediately onto a registered recipient",
+    async () => {
+      const partner = await createHarnessAccount("עמית", { digitalWorker: true });
+      harnesses.push(partner);
+      const partnerPhone = await unusedPhone();
+      await prisma.employee.update({
+        where: { id: partner.employeeId },
+        data: { phone: partnerPhone },
+      });
+      const asker = await openAsker("עמית", partnerPhone);
+      const label = `הטלה-רשום-${randomUUID().slice(0, 8)}`;
+      installStub({
+        responses: [{ text: "שמתי על עמית.", buttons: [] }],
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "tasks",
+              list_name: "",
+              items: [{ "שם משימה": label }],
+              targets: ["עמית"],
+            },
+          ],
+        },
+      });
+      await sendChatMessage({
+        userId: asker.userId,
+        employeeId: asker.employeeId,
+        digitalEmployeeId: asker.digitalEmployeeId!,
+        message: "תשימי את זה על עמית",
+      });
+      const rows = await rowsWithLabel(label);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.list.employeeId).toBe(partner.employeeId);
+      expect(rows[0]?.addedById).toBe(asker.employeeId);
+      const invites = await prisma.whatsAppInvite.findMany({
+        where: { userId: asker.userId },
+      });
+      expect(invites.filter((row) => row.payload != null)).toHaveLength(0);
+    },
+    120_000,
+  );
+
+  it(
+    "keeps one assign row when two first turns arrive together",
+    async () => {
+      const phone = await unusedPhone();
+      const asker = await openAsker("נועה", phone);
+      const label = `הטלה-מרוץ-${randomUUID().slice(0, 8)}`;
+      const { invite, rowId } = await deferItem({
+        asker,
+        contactName: "נועה",
+        listType: "tasks",
+        label,
+        share: false,
+      });
+      const recipient = await recipientOf(phone);
+      installStub({
+        responses: [{ text: "היי.", buttons: [] }],
+        metadata: { confirm: true, lists: [] },
+      });
+      const results = await Promise.allSettled([
+        sendChatMessage({
+          userId: recipient.userId,
+          employeeId: recipient.employeeId,
+          digitalEmployeeId: recipient.digitalEmployeeId,
+          message: "היי",
+        }),
+        sendChatMessage({
+          userId: recipient.userId,
+          employeeId: recipient.employeeId,
+          digitalEmployeeId: recipient.digitalEmployeeId,
+          message: "היי שוב",
+        }),
+      ]);
+      expect(results.map((row) => row.status)).toEqual(["fulfilled", "fulfilled"]);
+      const rows = await rowsWithLabel(label);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.id).toBe(rowId);
+      expect(rows[0]?.list.employeeId).toBe(recipient.employeeId);
+      expect(rows[0]?.addedById).toBe(asker.employeeId);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("consumed");
     },
     120_000,
   );

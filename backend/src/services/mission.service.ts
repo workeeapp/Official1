@@ -1,10 +1,6 @@
 import type { Mission, Prisma } from "@prisma/client";
 import type { LlmMissionAction, PublicEmployee } from "@workee/shared";
-import {
-  isAccountOwner,
-  isGuestEmployee,
-  MISSION_EXECUTOR_NAME,
-} from "@workee/shared";
+import { isAccountOwner, MISSION_EXECUTOR_NAME } from "@workee/shared";
 import { prisma } from "../database/prisma.js";
 import { resolveRelativeDateLabel } from "../utils/relative-date.js";
 import { recordAuditEvent } from "./audit.service.js";
@@ -1571,11 +1567,6 @@ export async function applyMissionActions(input: {
     refused: [],
   };
   if (!input.actions.length) {
-    return result;
-  }
-
-  if (isGuestEmployee(input.speaker)) {
-    result.refused.push("missions refused for guest speaker");
     return result;
   }
 

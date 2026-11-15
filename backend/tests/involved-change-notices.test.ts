@@ -17,7 +17,7 @@ const human = (id: string, name: string): PublicEmployee => ({
 const amit = human("amit", "עמית");
 const tal = human("tal", "טל");
 const eran = human("eran", "ערן");
-const guest = human("guest", "אורח");
+const guest = { ...human("guest", "אורח"), isGuest: true };
 const humans = [amit, tal, eran, guest];
 
 describe("planInvolvedChangeNotices", () => {
@@ -38,7 +38,11 @@ describe("planInvolvedChangeNotices", () => {
       ],
       reminderChanges: [],
     });
-    expect(notices.map((row) => row.target.id)).toEqual(["amit", "eran"]);
+    expect(notices.map((row) => row.target.id)).toEqual([
+      "amit",
+      "eran",
+      "guest",
+    ]);
     expect(notices[0]?.text).toBe(
       "התזכורת «להזכיר לטל לבדוק את התזכורת» בוטלה על ידי טל.",
     );
@@ -64,6 +68,39 @@ describe("planInvolvedChangeNotices", () => {
         text: "התזכורת «לבדוק את התזכורת» עודכנה על ידי עמית — עכשיו ל-2026-10-09 21:00.",
       },
     ]);
+  });
+
+  it("notifies a guest who is involved in a reminder update or cancellation", () => {
+    const update = planInvolvedChangeNotices({
+      actor: tal,
+      humans,
+      listMutations: [],
+      reminderChanges: [
+        {
+          action: "update",
+          label: "לקנות חלב",
+          fireAt: "2026-10-09 21:00",
+          involvedIds: ["tal", "guest"],
+        },
+      ],
+    });
+    expect(update.map((row) => row.target.id)).toEqual(["guest"]);
+    expect(update[0]?.text).toContain("עודכנה");
+    const cancel = planInvolvedChangeNotices({
+      actor: tal,
+      humans,
+      listMutations: [],
+      reminderChanges: [
+        {
+          action: "remove",
+          label: "לקנות חלב",
+          fireAt: "2026-10-09 21:00",
+          involvedIds: ["tal", "guest", "eran"],
+        },
+      ],
+    });
+    expect(cancel.map((row) => row.target.id)).toEqual(["guest", "eran"]);
+    expect(cancel[0]?.text).toContain("בוטלה");
   });
 
   it("sends nothing for a self-nudge only the actor is involved in", () => {

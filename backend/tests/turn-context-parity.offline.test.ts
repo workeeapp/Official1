@@ -79,12 +79,20 @@ describe("composeTurnContext", () => {
     expect(text).toContain("gender: male");
   });
 
-  it("guest: only clock + shared data (+ tips); consult: no PENDING_ATTACHMENTS", () => {
-    const guest = composeTurnContext(parts({ guestSpeaker: true, tipsContext: "TIPS" }));
-    for (const hidden of ["gender: male", "רשימת-לוסי", '"item-1"', '"att-1"']) {
-      expect(guest).not.toContain(hidden);
-    }
+  it("guest receives the same fact blocks as a regular speaker", () => {
+    const now = new Date("2026-11-15T02:00:00.000Z");
+    const guest = composeTurnContext(
+      parts({ guestSpeaker: true, tipsContext: "TIPS", now }),
+    );
+    const member = composeTurnContext(
+      parts({ guestSpeaker: false, tipsContext: "TIPS", now }),
+    );
+    expect(guest).toBe(member);
+    expect(guest).toContain("gender: male");
     expect(guest).toContain("רשימת-דובר");
+    expect(guest).toContain("רשימת-לוסי");
+    expect(guest).toContain('"item-1"');
+    expect(guest).toContain('"att-1"');
     expect(guest.endsWith("TIPS")).toBe(true);
     const consult = composeTurnContext(parts({ consultFrom: true }));
     expect(consult).not.toContain('"att-1"');

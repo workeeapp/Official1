@@ -21,7 +21,14 @@ import {
 } from "../src/eval/run-multi-turn.js";
 import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 import { buildLucyInstructions, sendChatMessage } from "../src/services/chat.service.js";
-import { listEmployeesForUser } from "../src/services/employee.service.js";
+import {
+  applyEmployeeRecords,
+  getEmployeeRecordSnapshot,
+} from "../src/services/employee-records.service.js";
+import {
+  createEmployeeForUser,
+  listEmployeesForUser,
+} from "../src/services/employee.service.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
 import * as whatsappSend from "../src/services/whatsapp-send.js";
 import * as reminderFire from "../src/services/reminder-fire.js";
@@ -133,6 +140,7 @@ describe("WhatsApp independent identity (eval-db)", () => {
       const speakerPublic = employees.find((row) => row.id === human.id);
       const lucy = employees.find((row) => row.protected === true);
       expect(speakerPublic && isGuestEmployee(speakerPublic)).toBe(false);
+      expect(employees.some((row) => row.name === GUEST_LUCY_NAME)).toBe(false);
       expect(lucy?.name).toBe("לוסי");
       expect(lucy?.kind).toBe("digital");
 
@@ -170,6 +178,221 @@ describe("WhatsApp independent identity (eval-db)", () => {
       });
       expect(plan.guestMutationBlocked).toBe(false);
       expect(plan.applications.length).toBeGreaterThan(0);
+    },
+    120_000,
+  );
+
+  it(
+    "shows a new independent user's own lists and clocks on the next chat turn",
+    async () => {
+      const phone = await unusedPhone();
+      const speaker = await resolveWhatsAppSpeaker(phone);
+      extraUserIds.push(speaker.userId);
+      const human = await prisma.employee.findUniqueOrThrow({
+        where: { id: speaker.employeeId },
+      });
+      expect(human.isGuest).toBe(false);
+      expect(human.name).toBe("אורח");
+      expect(human.nickname ?? "").toMatch(/^אורח/);
+
+      const employees = await listEmployeesForUser(speaker.userId);
+      const lucy = employees.find((row) => row.protected === true);
+      expect(lucy?.name).toBe("לוסי");
+      const itemName = `חלב-עצמאי-${phone.slice(-4)}`;
+      const clockName = `שעון-עצמאי-${phone.slice(-4)}`;
+      const seen: Array<{ instructions: string; liveFacts: string }> = [];
+      let turn = 0;
+      vi.spyOn(whatsappSend, "sendWhatsAppText").mockResolvedValue("sent" as never);
+      vi.spyOn(whatsappSend, "sendWhatsAppButtons").mockResolvedValue(
+        "sent" as never,
+      );
+      vi.spyOn(reminderFire, "fireDueReminders").mockResolvedValue(0 as never);
+      vi.spyOn(reminderFire, "scheduleSoon").mockImplementation(() => undefined);
+      setLlmClientForTests({
+        async createConversation() {
+          return `conv-${randomUUID()}`;
+        },
+        async createResponse(input) {
+          seen.push({
+            instructions: input.instructions,
+            liveFacts: input.liveFacts ?? "",
+          });
+          turn += 1;
+          if (turn === 1) {
+            return {
+              reply: JSON.stringify({
+                responses: [{ text: "שמרתי." }],
+                metadata: {
+                  lists: [
+                    {
+                      action: "add",
+                      list_type: "shopping",
+                      list_name: "",
+                      targets: [],
+                      items: [{ "שם פריט": itemName }],
+                    },
+                  ],
+                  reminders: [
+                    {
+                      action: "add",
+                      item: clockName,
+                      date: "2031-06-15",
+                      time: "09:00",
+                      ping: [human.name],
+                      text: clockName,
+                    },
+                  ],
+                },
+              }),
+              raw: {},
+            };
+          }
+          return {
+            reply: JSON.stringify({
+              responses: [{ text: "הנה מה ששמור." }],
+              metadata: {},
+            }),
+            raw: {},
+          };
+        },
+      });
+
+      await sendChatMessage({
+        userId: speaker.userId,
+        employeeId: speaker.employeeId,
+        digitalEmployeeId: lucy!.id,
+        message: "תוסיפי חלב לקניות ותזכירי לי",
+      });
+      const savedItem = await prisma.employeeListItem.findFirst({
+        where: {
+          deletedAt: null,
+          list: { employeeId: speaker.employeeId, deletedAt: null },
+        },
+      });
+      const savedClock = await prisma.reminder.findFirst({
+        where: {
+          ownerId: speaker.employeeId,
+          status: "active",
+          itemLabel: clockName,
+        },
+      });
+      expect(savedItem).toBeTruthy();
+      expect(JSON.stringify(savedItem?.data)).toContain(itemName);
+      expect(savedClock?.id).toBeTruthy();
+
+      await sendChatMessage({
+        userId: speaker.userId,
+        employeeId: speaker.employeeId,
+        digitalEmployeeId: lucy!.id,
+        message: "מה שמור לי?",
+      });
+
+      expect(seen).toHaveLength(2);
+      const next = seen[1]!;
+      expect(next.instructions).not.toContain("GUEST MODE");
+      expect(next.liveFacts).not.toContain("GUEST MODE");
+      expect(next.liveFacts).toContain(itemName);
+      expect(next.liveFacts).toContain(clockName);
+      expect(next.liveFacts).toContain(savedClock!.id);
+    },
+    120_000,
+  );
+
+  it(
+    "a guest sees their own lists and clocks and not another member's private list",
+    async () => {
+      const host = await createHarnessAccount("מארח", { digitalWorker: true });
+      harnesses.push(host);
+      const phone = await unusedPhone();
+      const shell = await createEmployeeForUser(
+        host.userId,
+        {
+          kind: "human",
+          name: "אורח",
+          surname: "",
+          nickname: `אורח …${phone.slice(-4)}`,
+          email: null,
+          phone,
+          isOwner: false,
+        },
+        { isGuest: true },
+      );
+      expect(shell.isGuest).toBe(true);
+      const privateItem = `פרטי-מעטפת-${phone.slice(-4)}`;
+      const privateClock = `שעון-מעטפת-${phone.slice(-4)}`;
+      await prisma.employeeList.create({
+        data: {
+          employeeId: shell.id,
+          listType: "shopping",
+          name: "",
+          scope: "personal",
+          items: {
+            create: {
+              itemKey: privateItem,
+              data: { "שם פריט": privateItem },
+            },
+          },
+        },
+      });
+      await prisma.reminder.create({
+        data: {
+          userId: host.userId,
+          ownerId: shell.id,
+          actorId: shell.id,
+          itemKey: privateClock,
+          itemLabel: privateClock,
+          listType: "shopping",
+          fireAt: new Date("2031-06-15T06:00:00.000Z"),
+          pingIds: [shell.id],
+        },
+      });
+      const siblingItem = `פרטי-אח-${phone.slice(-4)}`;
+      await prisma.employeeList.create({
+        data: {
+          employeeId: host.employeeId,
+          listType: "shopping",
+          name: "",
+          scope: "personal",
+          items: {
+            create: {
+              itemKey: siblingItem,
+              data: { "שם פריט": siblingItem },
+            },
+          },
+        },
+      });
+
+      const snapshot = await getEmployeeRecordSnapshot(shell.id);
+      const blob = JSON.stringify(snapshot);
+      expect(blob).toContain(privateItem);
+      expect(blob).toContain(privateClock);
+      expect(blob).not.toContain(siblingItem);
+
+      const employees = await listEmployeesForUser(host.userId);
+      const lucy = employees.find((row) => row.protected === true);
+      const guestPublic = employees.find((row) => row.id === shell.id);
+      const guestInstructions = buildLucyInstructions({
+        digital: lucy!,
+        employees,
+        speaker: guestPublic!.name,
+        speakerIsOwner: false,
+        guestSpeaker: true,
+        pendingInvite: null,
+        consultFrom: "",
+      });
+      const memberInstructions = buildLucyInstructions({
+        digital: lucy!,
+        employees,
+        speaker: guestPublic!.name,
+        speakerIsOwner: false,
+        guestSpeaker: false,
+        pendingInvite: null,
+        consultFrom: "",
+      });
+      expect(guestInstructions).toBe(memberInstructions);
+      expect(guestInstructions).toContain("FULL catalog");
+      expect(guestInstructions).not.toContain("GUEST MODE");
+      expect(guestInstructions).not.toContain("לוסי-אורח");
     },
     120_000,
   );
@@ -341,9 +564,11 @@ describe("WhatsApp independent identity (eval-db)", () => {
       });
       const employees = await listEmployeesForUser(host.userId);
       const guestPublic = employees.find((row) => row.id === guest.id);
-      const guestLucy = employees.find((row) => row.name === GUEST_LUCY_NAME);
+      const lucy = employees.find(
+        (row) => row.protected === true && row.kind === "digital",
+      );
       expect(guestPublic && isGuestEmployee(guestPublic)).toBe(true);
-      expect(guestLucy).toBeTruthy();
+      expect(lucy?.name).toBe("לוסי");
 
       const registeredBefore = await prisma.employee.findUniqueOrThrow({
         where: { id: registered.employeeId },
@@ -351,7 +576,7 @@ describe("WhatsApp independent identity (eval-db)", () => {
       const registeredResult = await registerGuestMember({
         hostUserId: host.userId,
         guest: guestPublic!,
-        digital: guestLucy!,
+        digital: lucy!,
         register: { name: "נועה", gender: "female" },
       });
       expect(registeredResult.ok).toBe(true);
@@ -424,7 +649,7 @@ describe("WhatsApp independent identity (eval-db)", () => {
   );
 
   it(
-    "still assigns across two independent accounts and still blocks a guest mutate",
+    "still assigns across two independent accounts and a guest can mutate their own list",
     async () => {
       const asker = await createHarnessAccount("טל", { digitalWorker: true });
       harnesses.push(asker);
@@ -478,13 +703,68 @@ describe("WhatsApp independent identity (eval-db)", () => {
       const guestPublic = (await listEmployeesForUser(asker.userId)).find(
         (row) => row.id === guest.id,
       );
-      const blocked = planTargetedActions({
-        actor: guestPublic!,
-        employees: askerEmployees,
-        metadata,
+      const ownMeta = emptyLlmMetadata();
+      ownMeta.lists.push({
+        action: "add",
+        listType: "shopping",
+        listName: "",
+        items: [{ "שם פריט": `חלב-אורח-${guestPhone.slice(-4)}` }],
+        targets: [],
       });
-      expect(blocked.guestMutationBlocked).toBe(true);
-      expect(blocked.applications).toEqual([]);
+      const own = planTargetedActions({
+        actor: guestPublic!,
+        employees: [...askerEmployees, guestPublic!],
+        metadata: ownMeta,
+      });
+      expect(own.guestMutationBlocked).toBe(false);
+      expect(own.applications.map((row) => row.employeeId)).toEqual([guest.id]);
+      await applyEmployeeRecords(guest.id, ownMeta, undefined, guest.id);
+      const guestSaved = await prisma.employeeListItem.findFirst({
+        where: {
+          deletedAt: null,
+          list: { employeeId: guest.id, deletedAt: null },
+          itemKey: { contains: guestPhone.slice(-4) },
+        },
+      });
+      expect(guestSaved).toBeTruthy();
+      const siblingPrivate = `פרטי-מארח-${guestPhone.slice(-4)}`;
+      await prisma.employeeList.create({
+        data: {
+          employeeId: asker.employeeId,
+          listType: "shopping",
+          name: "",
+          scope: "personal",
+          items: {
+            create: {
+              itemKey: siblingPrivate,
+              data: { "שם פריט": siblingPrivate },
+            },
+          },
+        },
+      });
+      const guestSnapshot = await getEmployeeRecordSnapshot(guest.id);
+      expect(JSON.stringify(guestSnapshot)).not.toContain(siblingPrivate);
+      const siblingRow = await prisma.employeeListItem.findFirstOrThrow({
+        where: { itemKey: siblingPrivate, deletedAt: null },
+      });
+      const steal = emptyLlmMetadata();
+      steal.lists.push({
+        action: "remove",
+        listType: "shopping",
+        listName: "",
+        items: [{ item_id: siblingRow.id }],
+        targets: [],
+      });
+      await applyEmployeeRecords(
+        asker.employeeId,
+        steal,
+        undefined,
+        guest.id,
+      );
+      const siblingAfter = await prisma.employeeListItem.findUniqueOrThrow({
+        where: { id: siblingRow.id },
+      });
+      expect(siblingAfter.deletedAt).toBeNull();
       const guestRow = await prisma.employee.findUniqueOrThrow({
         where: { id: guest.id },
       });
@@ -540,13 +820,12 @@ describe("WhatsApp independent identity (eval-db)", () => {
 
       const guestLucy = await prisma.employee.findFirst({
         where: {
-          userId: asker.userId,
+          userId: { in: [asker.userId, created.userId] },
           kind: "digital",
           OR: [{ name: GUEST_LUCY_NAME }, { nickname: GUEST_LUCY_NAME }],
         },
       });
-      expect(guestLucy?.userId).toBe(asker.userId);
-      expect(guestLucy?.id).not.toBe(created.employeeId);
+      expect(guestLucy).toBeNull();
 
       const employees = await listEmployeesForUser(created.userId);
       const lucy = employees.find((row) => row.protected === true);
