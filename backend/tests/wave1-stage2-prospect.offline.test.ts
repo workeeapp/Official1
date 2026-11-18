@@ -12,12 +12,30 @@ const {
   pendingCreate,
   pendingFindFirst,
   pendingUpdateMany,
+  pendingProspectDeleteMany,
   employeeFindFirst,
   employeeFindMany,
   employeeUpdate,
+  employeeUpdateMany,
   employeeDeleteMany,
   userDelete,
   auditCreate,
+  auditDeleteMany,
+  reminderDeleteMany,
+  deliveryAttemptDeleteMany,
+  pendingHighRiskDeleteMany,
+  whatsAppInviteDeleteMany,
+  chatMessageDeleteMany,
+  chatConversationDeleteMany,
+  contactDeleteMany,
+  contactBookDeleteMany,
+  missionDeleteMany,
+  tipProgressDeleteMany,
+  tipDeleteMany,
+  employeeFilingDeleteMany,
+  employeeListDeleteMany,
+  attachmentDeleteMany,
+  secretVaultDeleteMany,
   whatsAppInboundDeleteMany,
 } = vi.hoisted(() => ({
   userFindUnique: vi.fn(),
@@ -28,12 +46,30 @@ const {
   pendingCreate: vi.fn(),
   pendingFindFirst: vi.fn(),
   pendingUpdateMany: vi.fn(),
+  pendingProspectDeleteMany: vi.fn(),
   employeeFindFirst: vi.fn(),
   employeeFindMany: vi.fn(),
   employeeUpdate: vi.fn(),
+  employeeUpdateMany: vi.fn(),
   employeeDeleteMany: vi.fn(),
   userDelete: vi.fn(),
   auditCreate: vi.fn(),
+  auditDeleteMany: vi.fn(),
+  reminderDeleteMany: vi.fn(),
+  deliveryAttemptDeleteMany: vi.fn(),
+  pendingHighRiskDeleteMany: vi.fn(),
+  whatsAppInviteDeleteMany: vi.fn(),
+  chatMessageDeleteMany: vi.fn(),
+  chatConversationDeleteMany: vi.fn(),
+  contactDeleteMany: vi.fn(),
+  contactBookDeleteMany: vi.fn(),
+  missionDeleteMany: vi.fn(),
+  tipProgressDeleteMany: vi.fn(),
+  tipDeleteMany: vi.fn(),
+  employeeFilingDeleteMany: vi.fn(),
+  employeeListDeleteMany: vi.fn(),
+  attachmentDeleteMany: vi.fn(),
+  secretVaultDeleteMany: vi.fn(),
   whatsAppInboundDeleteMany: vi.fn(),
 }));
 
@@ -44,26 +80,39 @@ vi.mock("../src/database/prisma.js", () => ({
       updateMany: userUpdateMany,
       delete: userDelete,
     },
-    chatMessage: { count: messageCount },
+    chatMessage: { count: messageCount, deleteMany: chatMessageDeleteMany },
+    chatConversation: { deleteMany: chatConversationDeleteMany },
     whatsAppInvite: {
       findMany: inviteFindMany,
       updateMany: inviteUpdateMany,
+      deleteMany: whatsAppInviteDeleteMany,
     },
     pendingProspectAction: {
       create: pendingCreate,
       findFirst: pendingFindFirst,
       updateMany: pendingUpdateMany,
-      deleteMany: vi.fn(),
+      deleteMany: pendingProspectDeleteMany,
     },
     employee: {
       findFirst: employeeFindFirst,
       findMany: employeeFindMany,
       update: employeeUpdate,
+      updateMany: employeeUpdateMany,
       deleteMany: employeeDeleteMany,
     },
-    auditEvent: { create: auditCreate },
-    deliveryAttempt: { deleteMany: vi.fn() },
-    pendingHighRiskConfirm: { deleteMany: vi.fn() },
+    auditEvent: { create: auditCreate, deleteMany: auditDeleteMany },
+    reminder: { deleteMany: reminderDeleteMany },
+    deliveryAttempt: { deleteMany: deliveryAttemptDeleteMany },
+    pendingHighRiskConfirm: { deleteMany: pendingHighRiskDeleteMany },
+    contact: { deleteMany: contactDeleteMany },
+    contactBook: { deleteMany: contactBookDeleteMany },
+    mission: { deleteMany: missionDeleteMany },
+    tipProgress: { deleteMany: tipProgressDeleteMany },
+    tip: { deleteMany: tipDeleteMany },
+    employeeFiling: { deleteMany: employeeFilingDeleteMany },
+    employeeList: { deleteMany: employeeListDeleteMany },
+    attachment: { deleteMany: attachmentDeleteMany },
+    secretVault: { deleteMany: secretVaultDeleteMany },
     whatsAppInbound: {
       deleteMany: whatsAppInboundDeleteMany,
       findUnique: vi.fn(),
@@ -403,10 +452,53 @@ describe("Dev /as-prospect, /reset-me, /reset-cold", () => {
     employeeFindFirst.mockReset();
     employeeFindMany.mockReset();
     employeeUpdate.mockReset();
+    employeeUpdateMany.mockReset();
     employeeDeleteMany.mockReset();
     userDelete.mockReset();
+    reminderDeleteMany.mockReset();
+    pendingProspectDeleteMany.mockReset();
+    deliveryAttemptDeleteMany.mockReset();
+    pendingHighRiskDeleteMany.mockReset();
+    whatsAppInviteDeleteMany.mockReset();
+    chatMessageDeleteMany.mockReset();
+    chatConversationDeleteMany.mockReset();
+    contactDeleteMany.mockReset();
+    contactBookDeleteMany.mockReset();
+    missionDeleteMany.mockReset();
+    tipProgressDeleteMany.mockReset();
+    tipDeleteMany.mockReset();
+    employeeFilingDeleteMany.mockReset();
+    employeeListDeleteMany.mockReset();
+    attachmentDeleteMany.mockReset();
+    secretVaultDeleteMany.mockReset();
+    auditDeleteMany.mockReset();
     whatsAppInboundDeleteMany.mockReset();
     whatsAppInboundDeleteMany.mockResolvedValue({ count: 1 });
+    employeeFindMany.mockResolvedValue([{ id: "e-temp" }]);
+    for (const fn of [
+      reminderDeleteMany,
+      pendingProspectDeleteMany,
+      deliveryAttemptDeleteMany,
+      pendingHighRiskDeleteMany,
+      whatsAppInviteDeleteMany,
+      chatMessageDeleteMany,
+      chatConversationDeleteMany,
+      contactDeleteMany,
+      contactBookDeleteMany,
+      missionDeleteMany,
+      tipProgressDeleteMany,
+      tipDeleteMany,
+      employeeFilingDeleteMany,
+      employeeListDeleteMany,
+      attachmentDeleteMany,
+      secretVaultDeleteMany,
+      auditDeleteMany,
+      employeeUpdateMany,
+      employeeDeleteMany,
+      userDelete,
+    ]) {
+      fn.mockResolvedValue({ count: 1 });
+    }
   });
 
   it("allows only DEV_TEST_PHONES outside production", () => {
@@ -471,6 +563,71 @@ describe("Dev /as-prospect, /reset-me, /reset-cold", () => {
     expect(out.reply).toContain("972501111111");
     expect(out.reply).toMatch(/חלון 24|Cold/i);
     expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
+  });
+
+  it("reset-me deletes reminders and pending outbound before employees when temp Prospect has deps", async () => {
+    const callOrder: string[] = [];
+    reminderDeleteMany.mockImplementation(async () => {
+      callOrder.push("reminder");
+      return { count: 1 };
+    });
+    deliveryAttemptDeleteMany.mockImplementation(async () => {
+      callOrder.push("deliveryAttempt");
+      return { count: 1 };
+    });
+    whatsAppInviteDeleteMany.mockImplementation(async () => {
+      callOrder.push("whatsAppInvite");
+      return { count: 1 };
+    });
+    employeeListDeleteMany.mockImplementation(async () => {
+      callOrder.push("employeeList");
+      return { count: 1 };
+    });
+    employeeDeleteMany.mockImplementation(async () => {
+      callOrder.push("employee");
+      return { count: 1 };
+    });
+
+    employeeFindFirst
+      .mockResolvedValueOnce({
+        id: "e-temp",
+        userId: "u-temp",
+        phone: "972501111111",
+      })
+      .mockResolvedValueOnce({
+        id: "e-bak",
+        userId: "u-bak",
+        phone: `972501111111${PHONE_BACKUP_SUFFIX}`,
+      });
+    employeeFindMany.mockResolvedValue([{ id: "e-temp" }, { id: "e-temp-lucy" }]);
+    employeeUpdate.mockResolvedValue({});
+
+    const out = await handleDevProspectTool({
+      phone: "972501111111",
+      text: "/reset-me",
+    });
+
+    expect(out.handled).toBe(true);
+    expect(out.reply).toMatch(/שוחזר|reset-me/i);
+    expect(out.reply).not.toMatch(/נכשל/);
+    expect(reminderDeleteMany).toHaveBeenCalled();
+    expect(deliveryAttemptDeleteMany).toHaveBeenCalledWith({
+      where: { userId: "u-temp" },
+    });
+    expect(whatsAppInviteDeleteMany).toHaveBeenCalledWith({
+      where: { userId: "u-temp" },
+    });
+    expect(employeeListDeleteMany).toHaveBeenCalled();
+    expect(employeeDeleteMany).toHaveBeenCalledWith({ where: { userId: "u-temp" } });
+    expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
+
+    const reminderIdx = callOrder.indexOf("reminder");
+    const employeeIdx = callOrder.indexOf("employee");
+    expect(reminderIdx).toBeGreaterThanOrEqual(0);
+    expect(employeeIdx).toBeGreaterThan(reminderIdx);
+    expect(callOrder.indexOf("deliveryAttempt")).toBeLessThan(employeeIdx);
+    expect(callOrder.indexOf("whatsAppInvite")).toBeLessThan(employeeIdx);
+    expect(callOrder.indexOf("employeeList")).toBeLessThan(employeeIdx);
   });
 
   it("ignores /as-prospect, /reset-me, and /reset-cold in production", async () => {
