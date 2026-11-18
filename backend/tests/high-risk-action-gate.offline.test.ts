@@ -13,7 +13,10 @@ import {
   messageTargetsOnlySpeaker,
   targetsOnlyHouseholdDigitalWorkers,
 } from "../src/services/high-risk-action-gate.js";
-import { formatHighRiskConfirmOfferReply } from "../src/services/pending-high-risk-confirm.service.js";
+import {
+  formatHighRiskConfirmOfferReply,
+  summarizeHighRiskSnapshot,
+} from "../src/services/pending-high-risk-confirm.service.js";
 import {
   applyProspectWriteGate,
   formatProspectJoinOfferText,
@@ -333,10 +336,226 @@ describe("applyHighRiskActionGate", () => {
           },
         ],
       }),
-      { speaker },
+      {
+        speaker,
+        openJobs: [
+          {
+            id: "job-1",
+            askerId: "asker-other",
+            subjectId: speaker.id,
+            askerName: "עמית",
+          },
+        ],
+      },
     );
     expect(result.metadata.jobs).toEqual([]);
     expect(result.stripped.some((s) => s.kind === "job_outbound")).toBe(true);
+  });
+
+  it("allows self-job answer with empty reportText (overdue סגירה) — no Class V", () => {
+    const result = applyHighRiskActionGate(
+      meta({
+        jobs: [
+          {
+            action: "answer",
+            jobId: "self-overdue",
+            answerText: "סגירה",
+            reportText: "",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      {
+        speaker,
+        openJobs: [
+          {
+            id: "self-overdue",
+            askerId: speaker.id,
+            subjectId: speaker.id,
+            askerName: "טל",
+            subjectName: "טל",
+            ask: "משימות שעבר המועד",
+          },
+        ],
+      },
+    );
+    expect(result.didStrip).toBe(false);
+    expect(result.metadata.jobs).toHaveLength(1);
+    expect(result.stripped).toEqual([]);
+  });
+
+  it("allows self-job answer even when reportText is non-empty (addReport no-ops)", () => {
+    const result = applyHighRiskActionGate(
+      meta({
+        jobs: [
+          {
+            action: "answer",
+            jobId: "self-2",
+            answerText: "סגירה",
+            reportText: "לא אמור להישלח",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      {
+        speaker,
+        openJobs: [
+          {
+            id: "self-2",
+            askerId: speaker.id,
+            subjectId: speaker.id,
+          },
+        ],
+      },
+    );
+    expect(result.didStrip).toBe(false);
+    expect(result.metadata.jobs).toHaveLength(1);
+  });
+
+  it("still strips third-party answer with empty reportText (defaultReport to asker)", () => {
+    const result = applyHighRiskActionGate(
+      meta({
+        jobs: [
+          {
+            action: "answer",
+            jobId: "other-1",
+            answerText: "כן",
+            reportText: "",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      {
+        speaker,
+        openJobs: [
+          {
+            id: "other-1",
+            askerId: "amit-id",
+            subjectId: speaker.id,
+            askerName: "עמית",
+          },
+        ],
+      },
+    );
+    expect(result.didStrip).toBe(true);
+    expect(result.stripped.some((s) => s.kind === "job_outbound")).toBe(true);
+  });
+
+  it("keeps decline/counter/close/clear_clock Class V (unchanged)", () => {
+    const openJobs = [
+      {
+        id: "self-overdue",
+        askerId: speaker.id,
+        subjectId: speaker.id,
+      },
+      {
+        id: "other-job",
+        askerId: "amit-id",
+        subjectId: speaker.id,
+        askerName: "עמית",
+      },
+    ];
+    for (const action of ["decline", "counter", "close", "clear_clock"] as const) {
+      const result = applyHighRiskActionGate(
+        meta({
+          jobs: [
+            {
+              action,
+              jobId: action === "counter" ? "other-job" : "self-overdue",
+              answerText: action === "counter" ? "21:00" : "לא",
+              reportText: "",
+              time: action === "counter" ? "21:00" : "",
+              in: null,
+              ...(action === "counter" ? { date: "2026-11-20" } : {}),
+            },
+          ],
+        }),
+        { speaker, openJobs },
+      );
+      expect(result.didStrip, action).toBe(true);
+      expect(
+        result.stripped.some((s) => s.kind === "job_outbound"),
+        action,
+      ).toBe(true);
+    }
+  });
+
+  it("matches the answered jobId among multiple openJobs (not a random self-job)", () => {
+    const result = applyHighRiskActionGate(
+      meta({
+        jobs: [
+          {
+            action: "answer",
+            jobId: "third-party",
+            answerText: "כן",
+            reportText: "",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      {
+        speaker,
+        openJobs: [
+          {
+            id: "self-a",
+            askerId: speaker.id,
+            subjectId: speaker.id,
+          },
+          {
+            id: "third-party",
+            askerId: "amit-id",
+            subjectId: speaker.id,
+            askerName: "עמית",
+          },
+          {
+            id: "self-b",
+            askerId: speaker.id,
+            subjectId: speaker.id,
+          },
+        ],
+      },
+    );
+    expect(result.didStrip).toBe(true);
+    expect(result.strippedSnapshot.jobs?.[0]?.jobId).toBe("third-party");
+  });
+});
+
+describe("summarizeHighRiskSnapshot / confirm copy", () => {
+  it("never leaks job action enums into user-facing summary", () => {
+    const summary = summarizeHighRiskSnapshot(
+      meta({
+        jobs: [
+          {
+            action: "answer",
+            jobId: "j1",
+            answerText: "כן",
+            reportText: "טל מגיע הערב.",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      "job_outbound",
+      [
+        {
+          id: "j1",
+          askerId: "amit-id",
+          subjectId: speaker.id,
+          askerName: "עמית",
+        },
+      ],
+    );
+    const text = formatHighRiskConfirmOfferReply(summary);
+    expect(text).toContain("דיווח אל עמית");
+    expect(text).toContain("טל מגיע הערב.");
+    expect(text).not.toMatch(/\banswer\b/);
+    expect(text).not.toMatch(/\bdecline\b/);
+    expect(text).not.toMatch(/\bcounter\b/);
+    expect(text).not.toMatch(/\bjob_outbound\b/);
   });
 });
 

@@ -85,7 +85,7 @@ npm run add:live-case -w backend -- --bulk docs/qa/studio/bulk-example.jsonl
 |-------|--------|--------|
 | `LIVE_MODEL` single-turn | `docs/qa/phase-4-corpus.json` | `npm run test:model-eval -w backend` |
 | `LIVE_MODEL` multi-turn | `docs/qa/phase-4-multi-turn-corpus.json` | `npm run test:model-eval-mt -w backend` |
-| `LIVE_FULL` | `docs/qa/live-full-corpus.json` | `npm run test:model-eval-full -w backend` |
+| `LIVE_FULL` | `docs/qa/live-full-corpus.json` | `npm run test:model-eval-full -w backend`. Default is `sendChatMessage` on `workee_test`. `MODEL_EVAL_LIVE_FULL_PATH=harness` keeps harness apply |
 
 ### Run one case (or a tag subset)
 

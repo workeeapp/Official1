@@ -581,7 +581,7 @@
                               "object",
                               "null"
                             ],
-                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / smartschool_new / market_change_compare / expr / field_changed / bus_eta / flight_eta / flight_changed)."
+                            "description": "list_type reminders: conditional watch at fire (market_price / weather_rain / weather_changed / mashov_new / smartschool_new / market_change_compare / expr / field_changed / bus_eta / flight_eta / flight_changed / sports_match / web_monitor). web_monitor = open-domain generic monitor: {type:\"web_monitor\",intent,canonical_query,constraints?,objectives:[{id,kind:discover_new|detect_change|time_before_event,minutes_before?,change_aspects?,match_predicate?}],preferred_sources?,evidence_min?}. Multiple objectives in one Watch OK."
                           },
                           "watch_once": {
                             "type": "boolean",
@@ -593,6 +593,13 @@
                               "type": "string"
                             },
                             "description": "list_type reminders: plugin aspects at fire (e.g. mashov grades/…; smartschool homework/behavior/timetable/messages)."
+                          },
+                          "on_trigger_actions": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "description": "P0 Watch deferred Actions nested under this compose_condition clock only. Shape: {lists:[{action:\"add\"|\"update\",list_type,list_id?,list_name,items,targets:[],mode?:\"static\"|\"event_bound\",binds?}]}. Owner-self lists.add|update only. Omit/null for notify-only Watches. FORBIDDEN duplicating those mutates as top-level lists entries this turn. FORBIDDEN share/assign/messages/reminders/missions here."
                           },
                           "schedule_anchor": {
                             "type": "string",

@@ -83,6 +83,21 @@ export type HighRiskGateContext = {
   isButtonCommand?: boolean;
   /** Override env HIGH_RISK_P_OUT_MODE (tests). */
   pOutMode?: HighRiskPOutMode;
+  /**
+   * Open jobs visible this turn (asker/subject). Used to decide whether a
+   * jobs.answer actually delivers a report to someone other than the speaker.
+   */
+  openJobs?: HighRiskOpenJobRef[];
+};
+
+/** Minimal open-job identity for Gate effect checks (no full JobMeta). */
+export type HighRiskOpenJobRef = {
+  id: string;
+  askerId: string;
+  subjectId: string;
+  askerName?: string;
+  subjectName?: string;
+  ask?: string;
 };
 
 /** Soft Class V opener — only shown when Gate still strips. */
@@ -356,6 +371,34 @@ const JOB_OUTBOUND_ACTIONS = new Set<LlmJobAction["action"]>([
   "close",
   "clear_clock",
 ]);
+
+/**
+ * True when applying this job action would deliver a report / notify someone
+ * other than the speaker (matches jobs.service addReport: no-op when
+ * askerId === speakerId).
+ *
+ * For `answer` only: a self-job (asker === speaker), including overdue
+ * «סגירה», has no external recipient — even if reportText is empty or filled.
+ * Unknown jobId stays conservative (treat as external) so we never weaken
+ * third-party reporting when OPEN_JOBS was not passed in.
+ */
+export function jobActionHasExternalEffect(
+  row: LlmJobAction,
+  ctx: Pick<HighRiskGateContext, "speaker" | "openJobs">,
+): boolean {
+  if (row.action === "answer") {
+    const job = ctx.openJobs?.find((j) => j.id === row.jobId);
+    if (job) {
+      return job.askerId !== ctx.speaker.id;
+    }
+    // No open-job context: empty reportText can still defaultReport to asker.
+    return true;
+  }
+  if (JOB_OUTBOUND_ACTIONS.has(row.action) || row.reportText.trim()) {
+    return true;
+  }
+  return false;
+}
 
 function itemHasUnshare(item: Record<string, unknown>): boolean {
   const raw = item.unshare_with ?? item.unshareWith;
@@ -647,6 +690,11 @@ export function applyHighRiskActionGate(
   const jobsIn = metadata.jobs ?? [];
   const jobs: LlmJobAction[] = [];
   for (const row of jobsIn) {
+    // Self-job answer (e.g. overdue «סגירה») closes locally — no Class V.
+    if (row.action === "answer" && !jobActionHasExternalEffect(row, ctx)) {
+      jobs.push(row);
+      continue;
+    }
     if (JOB_OUTBOUND_ACTIONS.has(row.action) || row.reportText.trim()) {
       // Explicit answer/decline in speaker channel → allow under signal.
       if (

@@ -678,6 +678,21 @@
               "type": "directory_has_action",
               "action": "add",
               "nameIncludes": "מיכל"
+            },
+            {
+              "type": "response_mentions_all",
+              "needles": [
+                "מיכל",
+                "אנשי קשר"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לא הצלחתי לאמת",
+                "הרשימה",
+                "בוצע."
+              ]
             }
           ],
           "stateAfter": {
@@ -713,6 +728,21 @@
             {
               "type": "directory_has_action",
               "action": "remove"
+            },
+            {
+              "type": "response_mentions_all",
+              "needles": [
+                "מיכל",
+                "אנשי קשר"
+              ]
+            },
+            {
+              "type": "response_forbids_any",
+              "needles": [
+                "לא הצלחתי לאמת",
+                "הרשימה",
+                "בוצע."
+              ]
             }
           ],
           "stateAfter": {

@@ -16,6 +16,7 @@
     "test:model-eval-full": "vitest run --config vitest.model-eval.config.ts tests/model-eval-full.live.test.ts",
     "test:attachment-intent-model": "vitest run --config vitest.model-eval.config.ts tests/attachment-intent-model.live.test.ts",
     "test:decision-core-gate": "vitest run --config vitest.model-eval.config.ts tests/decision-core-gate.live.test.ts",
+    "test:voice-naturalness": "vitest run --config vitest.model-eval.config.ts tests/voice-naturalness.live.test.ts",
     "add:live-case": "tsx scripts/add-live-case.ts",
     "expand:live-coverage": "tsx scripts/expand-live-coverage.ts"
   },

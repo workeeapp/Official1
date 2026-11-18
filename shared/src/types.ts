@@ -160,6 +160,12 @@ export interface TeamUsagePurposeBreakdown {
   imageUsd: number;
   /** Hidden mission executor turns, purpose=mission_turn. */
   missionTurnUsd: number;
+  /** UWM hosted web search (purpose=web_monitor_search). */
+  webMonitorSearchUsd: number;
+  /** UWM normalize/extract (purpose=web_monitor_normalize). */
+  webMonitorNormalizeUsd: number;
+  /** UWM residual match (purpose=web_monitor_match). */
+  webMonitorMatchUsd: number;
 }
 
 export interface TeamUsageMonth {

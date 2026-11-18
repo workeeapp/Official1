@@ -394,7 +394,67 @@ export type LlmComposeCondition =
       team: string;
       minutesBefore: number;
       competition: string;
-    };
+    }
+  | LlmWebMonitorCondition;
+
+/** Open-ended semantic web monitor objective kinds (UWM Phase 1+). */
+export type LlmWebMonitorObjectiveKind =
+  | "discover_new"
+  | "detect_change"
+  | "time_before_event";
+
+export type LlmWebMonitorEvidenceMin = "observed" | "corroborated";
+
+export interface LlmWebMonitorObjective {
+  id: string;
+  kind: LlmWebMonitorObjectiveKind;
+  /** Required for time_before_event (minutes before eventAt). */
+  minutesBefore?: number;
+  /** Optional field/aspect labels for detect_change. */
+  changeAspects?: string[];
+  /** Residual NL predicate for this objective. */
+  matchPredicate?: string;
+}
+
+/**
+ * Generic open-domain Watch — not a closed list of product domains.
+ * Poll/normalize land in later phases; Phase 1 is capture + persist.
+ */
+export interface LlmWebMonitorCondition {
+  type: "web_monitor";
+  intent: string;
+  canonicalQuery: string;
+  constraints?: {
+    entities?: string[];
+    geo?: string | null;
+    timeWindow?: string | null;
+    language?: string | null;
+  };
+  objectives: LlmWebMonitorObjective[];
+  preferredSources?: string[];
+  evidenceMin?: LlmWebMonitorEvidenceMin;
+}
+
+/**
+ * Model-facing deferred Watch Actions (nested under reminders[].on_trigger_actions).
+ * P0: lists.add | lists.update only. mode defaults to static when omitted.
+ */
+export type LlmOnTriggerActionMode = "static" | "event_bound";
+
+export interface LlmOnTriggerListAction extends LlmListAction {
+  /** static = identity frozen at capture; event_bound = declared binds only. */
+  mode?: LlmOnTriggerActionMode;
+  /**
+   * Declared fact→field binds for event_bound Actions.
+   * Keys are paths into the list action (e.g. "items.0.מחיר");
+   * values are verified fact paths (e.g. "market.price").
+   */
+  binds?: Record<string, string>;
+}
+
+export interface LlmOnTriggerActions {
+  lists: LlmOnTriggerListAction[];
+}
 
 export interface LlmReminderAction {
   action: LlmReminderActionName;
@@ -486,6 +546,12 @@ export interface LlmReminderAction {
    * absences, messages, weather/market aspects. Empty = plugin defaults.
    */
   composeAspects?: string[];
+  /**
+   * P0 Watch→Action: deferred Actions to run when compose_condition matches.
+   * Captured with the Watch; executed headlessly from reminder-fire (no LLM).
+   * Null/omit = notify-only. Server allowlists owner-only lists.add|update.
+   */
+  onTriggerActions?: LlmOnTriggerActions | null;
   /** Copy from this turn's EMPLOYEE_SAVED_DATA reminders[].reminder_id on remove/update. */
   reminderId: string;
   /**
@@ -2844,6 +2910,9 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
     composeAspects: parseComposeAspectsList(
       record.compose_aspects ?? record.composeAspects,
     ),
+    onTriggerActions: parseOnTriggerActions(
+      record.on_trigger_actions ?? record.onTriggerActions,
+    ),
     reminderId,
     ...(itemId ? { itemId } : {}),
     ...(occurrenceChange ? { occurrenceChange } : {}),
@@ -2853,6 +2922,78 @@ function toReminderAction(value: unknown): LlmReminderAction | null {
       record.detach_attachment_ids ?? record.detachAttachmentIds,
     ),
   };
+}
+
+/**
+ * Parse reminders[].on_trigger_actions. Invalid / empty → undefined (omit).
+ * Explicit null clears on update (engine maps to DbNull).
+ */
+export function parseOnTriggerActions(
+  raw: unknown,
+): LlmOnTriggerActions | null | undefined {
+  if (raw === null) {
+    return null;
+  }
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const record = raw as Record<string, unknown>;
+  const listsRaw = record.lists;
+  if (!Array.isArray(listsRaw)) {
+    return undefined;
+  }
+  const lists: LlmOnTriggerListAction[] = [];
+  for (const entry of listsRaw) {
+    const base = toListAction(entry);
+    if (!base) {
+      continue;
+    }
+    if (base.action !== "add" && base.action !== "update") {
+      continue;
+    }
+    const row =
+      entry && typeof entry === "object" && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>)
+        : {};
+    const modeRaw = String(row.mode ?? "").trim().toLowerCase();
+    const mode: LlmOnTriggerActionMode | undefined =
+      modeRaw === "event_bound"
+        ? "event_bound"
+        : modeRaw === "static"
+          ? "static"
+          : undefined;
+    const binds = parseOnTriggerBinds(row.binds);
+    lists.push({
+      ...base,
+      ...(mode ? { mode } : {}),
+      ...(binds ? { binds } : {}),
+    });
+  }
+  if (lists.length === 0) {
+    return undefined;
+  }
+  return { lists };
+}
+
+function parseOnTriggerBinds(
+  raw: unknown,
+): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return undefined;
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const k = String(key ?? "").trim().slice(0, 120);
+    const v = String(value ?? "").trim().slice(0, 120);
+    if (!k || !v) {
+      continue;
+    }
+    out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function parseComposeLookbackHours(record: Record<string, unknown>): number {
@@ -3138,6 +3279,191 @@ export function parseComposeAspectsList(raw: unknown): string[] {
     if (out.length >= 12) {
       break;
     }
+  }
+  return out;
+}
+
+const WEB_MONITOR_OBJECTIVE_KINDS = new Set<LlmWebMonitorObjectiveKind>([
+  "discover_new",
+  "detect_change",
+  "time_before_event",
+]);
+
+function parseWebMonitorMinutes(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw !== 0) {
+    return Math.abs(Math.round(raw));
+  }
+  if (typeof raw === "string" && /^-?\d+(\.\d+)?$/.test(raw.trim())) {
+    const n = Number(raw.trim());
+    if (Number.isFinite(n) && n !== 0) {
+      return Math.abs(Math.round(n));
+    }
+  }
+  return null;
+}
+
+function parseWebMonitorObjective(
+  raw: unknown,
+  index: number,
+): LlmWebMonitorObjective | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const kindRaw = String(record.kind ?? record.type ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, "_");
+  const kindAliases: Record<string, LlmWebMonitorObjectiveKind> = {
+    discover_new: "discover_new",
+    discover: "discover_new",
+    new_items: "discover_new",
+    detect_change: "detect_change",
+    change: "detect_change",
+    changes: "detect_change",
+    time_before_event: "time_before_event",
+    before_event: "time_before_event",
+    relative_time: "time_before_event",
+  };
+  const kind = kindAliases[kindRaw];
+  if (!kind || !WEB_MONITOR_OBJECTIVE_KINDS.has(kind)) {
+    return null;
+  }
+  const idRaw = readText(record, ["id", "objective_id", "objectiveId"]).slice(
+    0,
+    64,
+  );
+  const id = idRaw || `o${index}_${kind}`;
+  const objective: LlmWebMonitorObjective = { id, kind };
+  if (kind === "time_before_event") {
+    const minutesBefore = parseWebMonitorMinutes(
+      record.minutes_before ??
+        record.minutesBefore ??
+        record.offset_minutes ??
+        record.offsetMinutes ??
+        record.minutes,
+    );
+    if (minutesBefore == null || minutesBefore <= 0) {
+      return null;
+    }
+    objective.minutesBefore = minutesBefore;
+  }
+  if (kind === "detect_change") {
+    const aspectsRaw =
+      record.change_aspects ?? record.changeAspects ?? record.aspects;
+    if (Array.isArray(aspectsRaw)) {
+      const aspects = aspectsRaw
+        .map((entry) => String(entry ?? "").trim())
+        .filter(Boolean)
+        .slice(0, 12);
+      if (aspects.length > 0) {
+        objective.changeAspects = aspects;
+      }
+    }
+  }
+  const predicate = readText(record, [
+    "match_predicate",
+    "matchPredicate",
+    "predicate",
+  ]).slice(0, 500);
+  if (predicate) {
+    objective.matchPredicate = predicate;
+  }
+  return objective;
+}
+
+/** Parse compose_condition type web_monitor — null when invalid. */
+export function parseWebMonitorCondition(
+  raw: unknown,
+): LlmWebMonitorCondition | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const intent = readText(record, ["intent", "brief", "goal"]).slice(0, 500);
+  const canonicalQuery = readText(record, [
+    "canonical_query",
+    "canonicalQuery",
+    "query",
+    "search_query",
+    "searchQuery",
+  ]).slice(0, 500);
+  if (!intent || !canonicalQuery) {
+    return null;
+  }
+  const objectivesRaw = record.objectives ?? record.Goals ?? record.goals;
+  if (!Array.isArray(objectivesRaw) || objectivesRaw.length === 0) {
+    return null;
+  }
+  const objectives: LlmWebMonitorObjective[] = [];
+  for (let i = 0; i < objectivesRaw.length && objectives.length < 8; i++) {
+    const parsed = parseWebMonitorObjective(objectivesRaw[i], i);
+    if (!parsed) {
+      return null;
+    }
+    objectives.push(parsed);
+  }
+  if (objectives.length === 0) {
+    return null;
+  }
+  const out: LlmWebMonitorCondition = {
+    type: "web_monitor",
+    intent,
+    canonicalQuery,
+    objectives,
+  };
+  const constraintsRaw = record.constraints ?? record.Filters ?? record.filters;
+  if (constraintsRaw && typeof constraintsRaw === "object" && !Array.isArray(constraintsRaw)) {
+    const c = constraintsRaw as Record<string, unknown>;
+    const entitiesRaw = c.entities ?? c.entity;
+    const entities = Array.isArray(entitiesRaw)
+      ? entitiesRaw
+          .map((entry) => String(entry ?? "").trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : [];
+    const geoRaw = c.geo ?? c.place ?? c.region ?? c.location;
+    const geo =
+      geoRaw == null || geoRaw === ""
+        ? null
+        : String(geoRaw).trim().slice(0, 200) || null;
+    const timeWindowRaw = c.time_window ?? c.timeWindow ?? c.window;
+    const timeWindow =
+      timeWindowRaw == null || timeWindowRaw === ""
+        ? null
+        : String(timeWindowRaw).trim().slice(0, 200) || null;
+    const languageRaw = c.language ?? c.lang;
+    const language =
+      languageRaw == null || languageRaw === ""
+        ? null
+        : String(languageRaw).trim().slice(0, 32) || null;
+    if (entities.length > 0 || geo || timeWindow || language) {
+      out.constraints = {
+        ...(entities.length > 0 ? { entities } : {}),
+        ...(geo !== undefined ? { geo } : {}),
+        ...(timeWindow !== undefined ? { timeWindow } : {}),
+        ...(language !== undefined ? { language } : {}),
+      };
+    }
+  }
+  const preferredRaw =
+    record.preferred_sources ?? record.preferredSources ?? record.sources;
+  if (Array.isArray(preferredRaw)) {
+    const preferredSources = preferredRaw
+      .map((entry) => String(entry ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (preferredSources.length > 0) {
+      out.preferredSources = preferredSources;
+    }
+  }
+  const evidenceRaw = String(
+    record.evidence_min ?? record.evidenceMin ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  if (evidenceRaw === "observed" || evidenceRaw === "corroborated") {
+    out.evidenceMin = evidenceRaw;
   }
   return out;
 }
@@ -3469,6 +3795,14 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
       minutesBefore: Math.abs(minutesBefore),
       competition,
     };
+  }
+  if (
+    type === "web_monitor" ||
+    type === "webmonitor" ||
+    type === "semantic_monitor" ||
+    type === "universal_monitor"
+  ) {
+    return parseWebMonitorCondition(record);
   }
   if (type === "expr" || type === "expression" || type === "numeric") {
     return parseExprCondition(record);

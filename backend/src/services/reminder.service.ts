@@ -1,4 +1,8 @@
-import type { LlmReminderAction, PublicEmployee } from "@workee/shared";
+import type {
+  LlmReminderAction,
+  LlmWebMonitorCondition,
+  PublicEmployee,
+} from "@workee/shared";
 import {
   addJerusalemDays,
   addReminderInterval,
@@ -58,6 +62,12 @@ import {
 import { fetchQuote } from "./market.js";
 import { scheduleSoon } from "./reminder-fire.js";
 import { seedWatchBaseline } from "./watch-baseline.js";
+import {
+  normalizeWatchTriggerPackage,
+  packageToPrismaJson,
+  parseWatchTriggerPackage,
+} from "./watch-trigger-actions.service.js";
+import { selectSourcesForWatch } from "./uwm-source-selector.js";
 import { sanitizeReminderPingFields } from "./worker-tracking-title.js";
 import {
   decideCreateOrReuseClock,
@@ -184,6 +194,34 @@ export function resolveWatchOnceForMarketCondition(input: {
     return true;
   }
   return input.proposedWatchOnce;
+}
+
+/** Ongoing open-domain monitors default to level (not one-shot). */
+export function resolveWatchOnceForWebMonitor(input: {
+  condition: { type: string } | null | undefined;
+  proposedWatchOnce: boolean;
+  watchOnceExplicit: boolean;
+}): boolean {
+  if (input.condition?.type !== "web_monitor") {
+    return input.proposedWatchOnce;
+  }
+  if (input.watchOnceExplicit) {
+    return input.proposedWatchOnce;
+  }
+  return false;
+}
+
+/** Minimal monitorState shell; Phase 2 may stamp sourcePlan on capture. */
+export function emptyWebMonitorState(sourcePlan?: unknown): {
+  version: 1;
+  items: Record<string, never>;
+  sourcePlan?: unknown;
+} {
+  return {
+    version: 1,
+    items: {},
+    ...(sourcePlan != null ? { sourcePlan } : {}),
+  };
 }
 
 /** A new / changed clock that repeats too often (refused). */
@@ -3504,9 +3542,14 @@ export async function applyReminders(input: {
         resolvedCondition !== Prisma.DbNull
           ? conditionFromReminderJson(resolvedCondition)
           : null;
-      const nextWatchOnce = resolveWatchOnceForMarketCondition({
+      const nextWatchOnce = resolveWatchOnceForWebMonitor({
         condition: rawMarketGate,
-        proposedWatchOnce,
+        proposedWatchOnce: resolveWatchOnceForMarketCondition({
+          condition: rawMarketGate,
+          proposedWatchOnce,
+        }),
+        watchOnceExplicit:
+          reminder.watchOnce === true || reminder.watchOnce === false,
       });
       if (rawMarketGate?.type === "market_price") {
         const place = (nextPlace || reminder.composePlace || "")
@@ -3569,6 +3612,92 @@ export async function applyReminders(input: {
       const authStamp = input.highRiskAuthorized
         ? { highRiskAuthorizedAt: new Date() }
         : {};
+      // P0 Watch→Action package: only with a compose condition; owner-only.
+      const existingPackage =
+        existing && "onTriggerActions" in existing
+          ? parseWatchTriggerPackage(
+              (existing as { onTriggerActions?: unknown }).onTriggerActions,
+            )
+          : null;
+      let nextOnTriggerActions: Prisma.InputJsonValue | typeof Prisma.DbNull =
+        Prisma.DbNull;
+      let resetOnTriggerExec = false;
+      if (resolvedCondition === Prisma.DbNull) {
+        nextOnTriggerActions = Prisma.DbNull;
+        resetOnTriggerExec = Boolean(existingPackage);
+      } else if (reminder.onTriggerActions === null) {
+        nextOnTriggerActions = Prisma.DbNull;
+        resetOnTriggerExec = Boolean(existingPackage);
+      } else if (reminder.onTriggerActions !== undefined) {
+        const normalized = await normalizeWatchTriggerPackage({
+          raw: reminder.onTriggerActions,
+          actorEmployeeId: input.actor.id,
+          ownerEmployeeId: ownerId,
+        });
+        if (!normalized.ok) {
+          skipped.push({
+            item: reminder.item.trim() || label,
+            reason: "db",
+            dest: `on_trigger:${normalized.reason}`,
+          });
+          continue;
+        }
+        nextOnTriggerActions = packageToPrismaJson(normalized.package);
+        // Preserve incomplete event ledger across package edits — never wipe
+        // outstanding fingerprints silently. Clear only when package/condition
+        // is removed (branches above).
+        resetOnTriggerExec = false;
+      } else if (canReuseClock && existingPackage) {
+        nextOnTriggerActions = packageToPrismaJson(existingPackage);
+      } else {
+        nextOnTriggerActions = Prisma.DbNull;
+      }
+      const parsedCondition =
+        resolvedCondition !== Prisma.DbNull
+          ? conditionFromReminderJson(resolvedCondition)
+          : null;
+      const isWebMonitor = parsedCondition?.type === "web_monitor";
+      const existingMonitorState =
+        existing &&
+        "monitorState" in existing &&
+        (existing as { monitorState?: unknown }).monitorState != null &&
+        typeof (existing as { monitorState?: unknown }).monitorState ===
+          "object"
+          ? ((existing as { monitorState: unknown }).monitorState as Record<
+              string,
+              unknown
+            >)
+          : null;
+      let nextMonitorState: Prisma.InputJsonValue | typeof Prisma.DbNull =
+        Prisma.DbNull;
+      if (isWebMonitor && parsedCondition?.type === "web_monitor") {
+        let sourcePlan: unknown =
+          existingMonitorState && "sourcePlan" in existingMonitorState
+            ? existingMonitorState.sourcePlan
+            : undefined;
+        // Fresh create or missing plan → run SourceSelector (Phase 2).
+        if (!existing || sourcePlan == null) {
+          try {
+            sourcePlan = await selectSourcesForWatch(
+              parsedCondition as LlmWebMonitorCondition,
+            );
+          } catch {
+            sourcePlan = undefined;
+          }
+        }
+        nextMonitorState = {
+          version: 1,
+          items:
+            existingMonitorState &&
+            existingMonitorState.items &&
+            typeof existingMonitorState.items === "object"
+              ? existingMonitorState.items
+              : {},
+          ...(sourcePlan != null ? { sourcePlan } : {}),
+        } as Prisma.InputJsonValue;
+      } else if (existing && !isWebMonitor) {
+        nextMonitorState = Prisma.DbNull;
+      }
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -3590,6 +3719,11 @@ export async function applyReminders(input: {
               composeCondition: resolvedCondition,
               watchOnce: nextWatchOnce,
               composeAspects: nextAspectsJson,
+              onTriggerActions: nextOnTriggerActions,
+              monitorState: nextMonitorState,
+              ...(resetOnTriggerExec
+                ? { onTriggerExec: Prisma.DbNull }
+                : {}),
               ...authStamp,
             },
           })
@@ -3616,6 +3750,8 @@ export async function applyReminders(input: {
               composeCondition: resolvedCondition,
               watchOnce: nextWatchOnce,
               composeAspects: nextAspectsJson,
+              onTriggerActions: nextOnTriggerActions,
+              monitorState: nextMonitorState,
               ...authStamp,
             },
           });

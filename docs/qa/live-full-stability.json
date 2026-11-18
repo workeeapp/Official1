@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-11-10T00:45:20.741Z",
+  "filter": "cases=p3-standing-delete-asks-task-or-clock,p3-one-occurrence-or-series-asks",
+  "contextMode": "production",
+  "executionScope": "production-path",
+  "runs": 3,
+  "cases": 2,
+  "totalExecutions": 6,
+  "totalPassed": 6,
+  "overallPassRate": 1,
+  "counts": {
+    "stable-pass": 2,
+    "intermittent": 0,
+    "consistent-fail": 0
+  },
+  "rows": [
+    {
+      "id": "p3-standing-delete-asks-task-or-clock",
+      "runs": 3,
+      "passed": 3,
+      "failed": 0,
+      "passRate": 1,
+      "classification": "stable-pass",
+      "failureReasons": {},
+      "samples": []
+    },
+    {
+      "id": "p3-one-occurrence-or-series-asks",
+      "runs": 3,
+      "passed": 3,
+      "failed": 0,
+      "passRate": 1,
+      "classification": "stable-pass",
+      "failureReasons": {},
+      "samples": []
+    }
+  ]
+}

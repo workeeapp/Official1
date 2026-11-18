@@ -92,6 +92,9 @@ describe("getTeamUsageSummary", () => {
       deleteCelebrationUsd: 0,
       imageUsd: 0,
       missionTurnUsd: 0.02,
+        webMonitorSearchUsd: 0,
+        webMonitorNormalizeUsd: 0,
+        webMonitorMatchUsd: 0,
     });
     expect(summary.totalUsd).toBeCloseTo(0.3);
     expect(summary.guestsUsd).toBeCloseTo(0.12);

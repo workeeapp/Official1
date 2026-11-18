@@ -9,7 +9,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../database/prisma.js";
 import { phonesMatch, toWhatsAppAddress } from "../utils/phone.js";
 import type { HighRiskActionKind } from "./high-risk-action-gate.js";
-import { HIGH_RISK_NEEDS_CONFIRM } from "./high-risk-action-gate.js";
+import {
+  HIGH_RISK_NEEDS_CONFIRM,
+  type HighRiskOpenJobRef,
+} from "./high-risk-action-gate.js";
 
 export const PENDING_CONFIRM_TTL_MS = 15 * 60 * 1000;
 
@@ -132,6 +135,7 @@ export function buildPendingConfirmRow(input: {
 export function summarizeHighRiskSnapshot(
   snapshot: LlmMetadata,
   actionKind: HighRiskActionKind | string,
+  openJobs?: HighRiskOpenJobRef[],
 ): string {
   const lines: string[] = [];
   for (const msg of snapshot.messages ?? []) {
@@ -167,10 +171,60 @@ export function summarizeHighRiskSnapshot(
     lines.push(`ספר טלפונים: ${row.action} ${row.name}`.trim());
   }
   for (const row of snapshot.jobs ?? []) {
-    lines.push(`עדכון משימה (${row.action})`);
+    const report = row.reportText.trim();
+    const said = row.answerText.trim();
+    const job = openJobs?.find((j) => j.id === row.jobId);
+    const asker =
+      job?.askerName?.trim() ||
+      (job && job.askerId !== job.subjectId ? "השואל" : "");
+    if (report) {
+      const toWhom = asker ? `אל ${asker}` : "לאדם אחר";
+      lines.push(
+        said
+          ? `דיווח ${toWhom}: «${report.slice(0, 120)}» (על בסיס: «${said.slice(0, 80)}»)`
+          : `דיווח ${toWhom}: «${report.slice(0, 120)}»`,
+      );
+      continue;
+    }
+    // No technical enum names (answer/decline/counter/…) in user-facing copy.
+    if (row.action === "counter") {
+      lines.push(
+        said
+          ? `הצעת מועד חלופי שתישלח לאישור: «${said.slice(0, 120)}»`
+          : "הצעת מועד חלופי שתישלח לאישור",
+      );
+    } else if (row.action === "decline" || row.action === "close") {
+      const who = asker ? ` אל ${asker}` : " לשואל";
+      lines.push(
+        said
+          ? `סיום בדיקה עם עדכון${who}: «${said.slice(0, 120)}»`
+          : `סיום בדיקה עם עדכון${who}`,
+      );
+    } else if (row.action === "clear_clock") {
+      lines.push("ביטול תזכורת מעקב לבדיקה פתוחה");
+    } else {
+      const who = asker ? ` אל ${asker}` : " לשואל";
+      lines.push(
+        said
+          ? `עדכון${who} על התשובה: «${said.slice(0, 120)}»`
+          : `עדכון${who} על תשובה לבדיקה פתוחה`,
+      );
+    }
   }
   if (lines.length === 0) {
-    lines.push(`פעולה: ${actionKind}`);
+    const kindLabel =
+      actionKind === "job_outbound"
+        ? "עדכון לשואל על בדיקה פתוחה"
+        : actionKind === "send"
+          ? "שליחת הודעה לאדם אחר"
+          : actionKind === "schedule_foreign"
+            ? "תזכורת לאדם אחר"
+            : actionKind === "share" || actionKind === "assign"
+              ? "שיתוף או הקצאה"
+              : actionKind === "multi_remove" || actionKind === "delete_list"
+                ? "מחיקה מרובה"
+                : "פעולה שדורשת אישור";
+    lines.push(kindLabel);
   }
   return lines.slice(0, 6).join("\n");
 }
@@ -198,6 +252,7 @@ export async function stageHighRiskConfirm(input: {
   conversationId: string;
   actionKind: HighRiskActionKind | string;
   snapshot: LlmMetadata;
+  openJobs?: HighRiskOpenJobRef[];
 }): Promise<{
   id: string;
   summaryText: string;
@@ -216,6 +271,7 @@ export async function stageHighRiskConfirm(input: {
   const summaryText = summarizeHighRiskSnapshot(
     input.snapshot,
     input.actionKind,
+    input.openJobs,
   );
   const built = buildPendingConfirmRow({
     ...input,

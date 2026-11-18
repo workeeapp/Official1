@@ -19,6 +19,7 @@ import {
 } from "../src/eval/run-multi-turn.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
 import { sendChatMessage } from "../src/services/chat.service.js";
+import { JOB_META_KEY } from "../src/services/job-meta.js";
 
 const SPEAKER = "טל";
 const PARTNER = "עמית";
@@ -425,6 +426,377 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
         where: { id: pending!.id },
       });
       expect(again?.status).toBe("consumed");
+    },
+    90_000,
+  );
+
+  it(
+    "self-job overdue סגירה: jobs.answer applies without High Risk confirm",
+    async () => {
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const lucyId = await ensureLucy(account);
+      await prisma.employee.update({
+        where: { id: account.employeeId },
+        data: { phone: "972501000099" },
+      });
+
+      const tasksList =
+        (await prisma.employeeList.findFirst({
+          where: {
+            employeeId: lucyId,
+            listType: "tasks",
+            name: "",
+            deletedAt: null,
+          },
+        })) ??
+        (await prisma.employeeList.create({
+          data: {
+            employeeId: lucyId,
+            listType: "tasks",
+            name: "",
+            scope: "personal",
+            visibleTo: [lucyId],
+          },
+        }));
+
+      const job = await prisma.employeeListItem.create({
+        data: {
+          listId: tasksList.id,
+          itemKey: `overdue-self-${randomUUID().slice(0, 8)}`,
+          data: {
+            "שם משימה": "לבדוק משימות שעבר המועד",
+            [JOB_META_KEY]: {
+              kind: "job",
+              askerId: account.employeeId,
+              askerName: SPEAKER,
+              subjectId: account.employeeId,
+              subjectName: SPEAKER,
+              ask: "משימות שעבר המועד",
+              state: "open",
+              createdAt: new Date().toISOString(),
+              overdueItemIds: [],
+              overdueTitles: ["להזכיר לטל לקבוע תור"],
+            },
+          },
+          scope: "personal",
+          addedById: lucyId,
+          visibleTo: [lucyId],
+        },
+      });
+
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "סגרתי.", buttons: [] }],
+          metadata: {
+            jobs: [
+              {
+                action: "answer",
+                job_id: job.id,
+                answer_text: "סגירה",
+                report_text: "",
+              },
+            ],
+            lists: [],
+          },
+        }),
+      );
+
+      const result = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message:
+          '[בתשובה להודעה: "יש לך משימה שעבר המועד. לסגור אותה או לעדכן להיום?"] סגירה',
+      });
+
+      expect(result.reply).not.toMatch(/אישור מפורש/);
+      expect(result.reply).toMatch(/סגרתי/);
+      const pending = await prisma.pendingHighRiskConfirm.findFirst({
+        where: {
+          userId: account.userId,
+          speakerEmployeeId: account.employeeId,
+          status: { in: ["offered", "pending_offer"] },
+        },
+      });
+      expect(pending).toBeNull();
+
+      const closed = await prisma.employeeListItem.findFirst({
+        where: { id: job.id },
+      });
+      expect(closed?.deletedAt).not.toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "third-party jobs.answer with reportText still requires High Risk confirm",
+    async () => {
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const lucyId = await ensureLucy(account);
+      const amit = await prisma.employee.findFirstOrThrow({
+        where: { userId: account.userId, name: PARTNER, kind: "human" },
+      });
+      await prisma.employee.update({
+        where: { id: account.employeeId },
+        data: { phone: "972501000098" },
+      });
+
+      const tasksList =
+        (await prisma.employeeList.findFirst({
+          where: {
+            employeeId: lucyId,
+            listType: "tasks",
+            name: "",
+            deletedAt: null,
+          },
+        })) ??
+        (await prisma.employeeList.create({
+          data: {
+            employeeId: lucyId,
+            listType: "tasks",
+            name: "",
+            scope: "personal",
+            visibleTo: [lucyId],
+          },
+        }));
+
+      const job = await prisma.employeeListItem.create({
+        data: {
+          listId: tasksList.id,
+          itemKey: `ask-other-${randomUUID().slice(0, 8)}`,
+          data: {
+            "שם משימה": "לבדוק עם טל: מה שלומך?",
+            [JOB_META_KEY]: {
+              kind: "job",
+              askerId: amit.id,
+              askerName: PARTNER,
+              subjectId: account.employeeId,
+              subjectName: SPEAKER,
+              ask: "מה שלומך?",
+              state: "open",
+              createdAt: new Date().toISOString(),
+            },
+          },
+          scope: "personal",
+          addedById: lucyId,
+          visibleTo: [lucyId],
+        },
+      });
+
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "עדכנתי.", buttons: [] }],
+          metadata: {
+            jobs: [
+              {
+                action: "answer",
+                job_id: job.id,
+                answer_text: "הכל טוב",
+                report_text: "טל מוסר שהכול טוב.",
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "הכל טוב",
+      });
+
+      expect(result.reply).toMatch(/אישור מפורש/);
+      expect(result.reply).toMatch(/דיווח אל עמית|דיווח לאדם אחר/);
+      expect(result.reply).toMatch(/טל מוסר שהכול טוב/);
+      expect(result.reply).not.toMatch(/עדכנתי/);
+      const pending = await prisma.pendingHighRiskConfirm.findFirst({
+        where: {
+          userId: account.userId,
+          speakerEmployeeId: account.employeeId,
+          status: "offered",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(pending).toBeTruthy();
+      expect(pending!.summaryText).not.toMatch(/\b(answer|decline|counter)\b/);
+      expect(pending!.summaryText).toMatch(/דיווח אל עמית/);
+      expect(pending!.summaryText).toMatch(/טל מוסר שהכול טוב/);
+      expect(pending!.actionKind).toBe("job_outbound");
+
+      const stillOpen = await prisma.employeeListItem.findFirst({
+        where: { id: job.id, deletedAt: null },
+      });
+      expect(stillOpen).toBeTruthy();
+
+      const deliveries = await prisma.deliveryAttempt.count({
+        where: { userId: account.userId, confirmId: pending!.id },
+      });
+      expect(deliveries).toBe(0);
+    },
+    60_000,
+  );
+
+  it(
+    "multi openJobs: answers the named jobId — self closes, third-party stays gated",
+    async () => {
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const lucyId = await ensureLucy(account);
+      const amit = await prisma.employee.findFirstOrThrow({
+        where: { userId: account.userId, name: PARTNER, kind: "human" },
+      });
+      await prisma.employee.update({
+        where: { id: account.employeeId },
+        data: { phone: "972501000097" },
+      });
+
+      const tasksList =
+        (await prisma.employeeList.findFirst({
+          where: {
+            employeeId: lucyId,
+            listType: "tasks",
+            name: "",
+            deletedAt: null,
+          },
+        })) ??
+        (await prisma.employeeList.create({
+          data: {
+            employeeId: lucyId,
+            listType: "tasks",
+            name: "",
+            scope: "personal",
+            visibleTo: [lucyId],
+          },
+        }));
+
+      const selfJob = await prisma.employeeListItem.create({
+        data: {
+          listId: tasksList.id,
+          itemKey: `self-multi-${randomUUID().slice(0, 8)}`,
+          data: {
+            "שם משימה": "לבדוק משימות שעבר המועד",
+            [JOB_META_KEY]: {
+              kind: "job",
+              askerId: account.employeeId,
+              askerName: SPEAKER,
+              subjectId: account.employeeId,
+              subjectName: SPEAKER,
+              ask: "משימות שעבר המועד",
+              state: "open",
+              createdAt: new Date().toISOString(),
+            },
+          },
+          scope: "personal",
+          addedById: lucyId,
+          visibleTo: [lucyId],
+        },
+      });
+      const otherJob = await prisma.employeeListItem.create({
+        data: {
+          listId: tasksList.id,
+          itemKey: `other-multi-${randomUUID().slice(0, 8)}`,
+          data: {
+            "שם משימה": "לבדוק עם טל: מה שלומך?",
+            [JOB_META_KEY]: {
+              kind: "job",
+              askerId: amit.id,
+              askerName: PARTNER,
+              subjectId: account.employeeId,
+              subjectName: SPEAKER,
+              ask: "מה שלומך?",
+              state: "open",
+              createdAt: new Date().toISOString(),
+            },
+          },
+          scope: "personal",
+          addedById: lucyId,
+          visibleTo: [lucyId],
+        },
+      });
+
+      // 1) Answer the self job by explicit id while third-party job is also open.
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "סגרתי את האיחור.", buttons: [] }],
+          metadata: {
+            jobs: [
+              {
+                action: "answer",
+                job_id: selfJob.id,
+                answer_text: "סגירה",
+                report_text: "",
+              },
+            ],
+          },
+        }),
+      );
+      const selfResult = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "סגירה",
+      });
+      expect(selfResult.reply).not.toMatch(/אישור מפורש/);
+      expect(selfResult.reply).toMatch(/סגרתי/);
+      expect(
+        (
+          await prisma.employeeListItem.findFirst({ where: { id: selfJob.id } })
+        )?.deletedAt,
+      ).not.toBeNull();
+      expect(
+        await prisma.employeeListItem.findFirst({
+          where: { id: otherJob.id, deletedAt: null },
+        }),
+      ).toBeTruthy();
+      expect(
+        await prisma.pendingHighRiskConfirm.findFirst({
+          where: {
+            userId: account.userId,
+            status: { in: ["offered", "pending_offer"] },
+          },
+        }),
+      ).toBeNull();
+
+      // 2) Answer the third-party job by id — must gate, must not close it yet.
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "מסרתי.", buttons: [] }],
+          metadata: {
+            jobs: [
+              {
+                action: "answer",
+                job_id: otherJob.id,
+                answer_text: "הכל טוב",
+                report_text: "טל מוסר שהכול טוב.",
+              },
+            ],
+          },
+        }),
+      );
+      const otherResult = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "הכל טוב",
+      });
+      expect(otherResult.reply).toMatch(/אישור מפורש/);
+      expect(otherResult.reply).toMatch(/דיווח אל עמית/);
+      expect(otherResult.reply).toMatch(/טל מוסר שהכול טוב/);
+      expect(
+        await prisma.employeeListItem.findFirst({
+          where: { id: otherJob.id, deletedAt: null },
+        }),
+      ).toBeTruthy();
+      const pending = await prisma.pendingHighRiskConfirm.findFirst({
+        where: {
+          userId: account.userId,
+          status: "offered",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(pending?.summaryText).toMatch(/דיווח אל עמית/);
+      expect(JSON.stringify(pending?.snapshot)).toContain(otherJob.id);
+      expect(JSON.stringify(pending?.snapshot)).not.toContain(selfJob.id);
     },
     90_000,
   );

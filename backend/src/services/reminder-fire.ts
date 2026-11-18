@@ -65,6 +65,39 @@ import {
   completeDeliveryAttempt,
 } from "./delivery-attempt.service.js";
 import { shouldSuppressLegacyForeignClock } from "./reminder-high-risk-auth.js";
+import {
+  executeWatchTriggerActions,
+  listIncompleteWatchFingerprints,
+  markWatchTriggerNotified,
+  parseWatchTriggerExecLedger,
+  parseWatchTriggerPackage,
+  watchTriggerNeedsActionRecovery,
+  watchTriggerNeedsNotifyRecovery,
+} from "./watch-trigger-actions.service.js";
+import type { ComposeEvalFacts } from "./compose-condition.js";
+import {
+  parseMonitorState,
+  pollWebMonitor,
+  type PollWebMonitorInput,
+  type PollWebMonitorResult,
+} from "./semantic-web-monitor.service.js";
+import {
+  dualFireAt,
+  isPreciseArmDue,
+} from "./uwm-schedule.js";
+import { uwmApplyGate } from "./uwm-apply-gate.js";
+import { recordUwmMetric } from "./uwm-retrieval-metrics.js";
+
+/** Test seam for UWM poll (Phase 3). */
+let webMonitorPollImpl: (
+  input: PollWebMonitorInput,
+) => Promise<PollWebMonitorResult> = pollWebMonitor;
+
+export function setWebMonitorPollImplForTests(
+  impl: typeof webMonitorPollImpl | null,
+): void {
+  webMonitorPollImpl = impl ?? pollWebMonitor;
+}
 
 /** ChatConversations row for actor×digital so reminder_compose can FK LlmUsages. */
 async function getOrCreateBillingConversation(input: {
@@ -321,13 +354,20 @@ export async function settleFiredReminder(
   },
   now: Date,
   sendStatus: "sent" | "failed",
-  options?: { forceDone?: boolean; retryWhenFailed?: boolean },
+  options?: {
+    forceDone?: boolean;
+    retryWhenFailed?: boolean;
+    /** UWM Phase 4 dual schedule: override recurrence next when set. */
+    nextFireAtOverride?: Date | null;
+  },
 ): Promise<void> {
   const sentAt = sendStatus === "sent" ? now : null;
   const firedCount = (reminder.occurrencesFired ?? 0) + 1;
   const nextAt = options?.forceDone
     ? null
-    : await resolveNextFireAt(reminder, now, firedCount);
+    : options?.nextFireAtOverride !== undefined
+      ? options.nextFireAtOverride
+      : await resolveNextFireAt(reminder, now, firedCount);
   const rule = parseRecurrence(reminder.recurrence);
   const hasRule = Boolean(rule);
   if (
@@ -594,10 +634,33 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     let busEtaDefaultBody: string | null = null;
     let flightDefaultBody: string | null = null;
     let sportsDefaultBody: string | null = null;
+    let webMonitorDefaultBody: string | null = null;
+    /** UWM Phase 4: dual schedule override for settleFiredReminder. */
+    let uwmNextFireAtOverride: Date | null | undefined = undefined;
+    const settleReminder = async (
+      status: "sent" | "failed",
+      extra?: { forceDone?: boolean; retryWhenFailed?: boolean },
+    ) => {
+      await settleFiredReminder(reminder, now, status, {
+        ...extra,
+        ...(uwmNextFireAtOverride !== undefined
+          ? { nextFireAtOverride: uwmNextFireAtOverride }
+          : {}),
+      });
+    };
     let skipSend = false;
     let conditionShaAfterSend: string | undefined;
     /** Persistent bus_eta poll failure: send honesty once; skip condition gate. */
     let forceBusEtaPollFailNotify = false;
+    const watchPackage = parseWatchTriggerPackage(
+      "onTriggerActions" in reminder ? reminder.onTriggerActions : null,
+    );
+    let watchLedger = parseWatchTriggerExecLedger(
+      "onTriggerExec" in reminder ? reminder.onTriggerExec : null,
+    );
+    let watchEventFingerprint = "";
+    let watchEvalFacts: ComposeEvalFacts = {};
+    let watchNotifyRecovery = false;
     if (reminder.composeAtFire) {
       const firstDest = dests[0] ?? "";
       const firstTarget =
@@ -776,6 +839,71 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             sportsDefaultBody = `משחק של ${condition.team} נגד ${match.opponent} בעוד כ־${mins} דקות.`;
           }
         }
+        if (condition.type === "web_monitor") {
+          const priorState = parseMonitorState(
+            "monitorState" in reminder ? reminder.monitorState : null,
+          );
+          const preciseDue = isPreciseArmDue({
+            state: priorState,
+            now,
+          });
+          const poll = await webMonitorPollImpl({
+            reminderId: reminder.id,
+            userId: reminder.userId,
+            composeCondition: reminder.composeCondition,
+            monitorState:
+              "monitorState" in reminder ? reminder.monitorState : null,
+            watchOnce: Boolean(
+              "watchOnce" in reminder && reminder.watchOnce,
+            ),
+            lastReportSha: reminder.lastReportSha,
+            now,
+            preciseOnly: preciseDue,
+          });
+          await prisma.reminder.update({
+            where: { id: reminder.id },
+            data: {
+              monitorState: poll.monitorState as Prisma.InputJsonValue,
+            },
+          });
+          const discoveryNext = await resolveNextFireAt(
+            reminder,
+            now,
+            (reminder.occurrencesFired ?? 0) + 1,
+          );
+          uwmNextFireAtOverride = dualFireAt(
+            discoveryNext,
+            poll.nextPrecise ?? poll.monitorState.nextPrecise ?? null,
+            now,
+          );
+          const notifyItem = poll.notify.item;
+          evalFacts = {
+            ...evalFacts,
+            webMonitor: {
+              shouldNotify: poll.notify.shouldNotify,
+              fingerprint: poll.notify.fingerprint,
+              bodyHe: poll.notify.bodyHe,
+              reason: poll.notify.reason,
+              evidenceGrade: notifyItem?.evidenceGrade,
+              evidenceMin: condition.evidenceMin,
+              retrievedAt: notifyItem?.retrievedAt,
+              itemId: notifyItem?.itemId,
+              phase: poll.notify.phase,
+              stale: poll.notify.reason === "stale",
+              fresh:
+                poll.notify.shouldNotify &&
+                poll.notify.reason !== "stale" &&
+                Boolean(notifyItem?.retrievalOk !== false),
+            },
+          };
+          if (poll.notify.shouldNotify && poll.notify.bodyHe) {
+            webMonitorDefaultBody = poll.notify.bodyHe;
+          }
+          recordWhatsAppEvent(
+            "uwm_poll",
+            `discovery=${poll.discoveryUsed} bound=${poll.boundPageUsed} found=${poll.itemsFound} matched=${poll.itemsMatched} notify=${poll.notify.shouldNotify} precise=${preciseDue} nextPrecise=${poll.nextPrecise?.fireAtIso ?? ""} dual=${uwmNextFireAtOverride?.toISOString() ?? ""}`,
+          );
+        }
         if (
           condition.type === "expr" ||
           condition.type === "field_changed"
@@ -806,6 +934,10 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             alertWhileHolding:
               "watchOnce" in reminder && reminder.watchOnce === false,
           });
+          watchEvalFacts = evalFacts;
+          watchEventFingerprint = String(
+            gate.shaAfterSend ?? gate.immediateSha ?? "",
+          ).slice(0, 64);
           if (gate.immediateSha) {
             await prisma.reminder.update({
               where: { id: reminder.id },
@@ -813,11 +945,159 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             });
           }
           if (gate.skipSend) {
-            // Quiet skip — clock advances; never send «עדיין לא».
-            await settleFiredReminder(reminder, now, "sent");
-            continue;
+            // Quiet skip — unless a prior matched event still needs Action or
+            // notification recovery (independent ledgers).
+            if (watchPackage) {
+              const recoveryFp = String(
+                reminder.lastReportSha ||
+                  gate.immediateSha ||
+                  watchEventFingerprint ||
+                  "",
+              ).slice(0, 64);
+              if (recoveryFp) {
+                if (
+                  watchTriggerNeedsActionRecovery(
+                    watchLedger,
+                    watchPackage,
+                    recoveryFp,
+                  )
+                ) {
+                  const ran = await executeWatchTriggerActions({
+                    reminderId: reminder.id,
+                    userId: reminder.userId,
+                    package: watchPackage,
+                    ledger: watchLedger,
+                    fingerprint: recoveryFp,
+                    facts: evalFacts,
+                    now,
+                  });
+                  watchLedger = ran.ledger;
+                }
+                if (
+                  watchTriggerNeedsNotifyRecovery(watchLedger, recoveryFp)
+                ) {
+                  // Prior match recorded; WhatsApp still outstanding.
+                  skipSend = false;
+                  watchNotifyRecovery = true;
+                  watchEventFingerprint = recoveryFp;
+                  conditionShaAfterSend = gate.shaAfterSend ?? recoveryFp;
+                } else {
+                  await settleReminder("sent");
+                  continue;
+                }
+              } else {
+                await settleReminder("sent");
+                continue;
+              }
+            } else {
+              // Quiet skip — clock advances; never send «עדיין לא».
+              await settleReminder("sent");
+              continue;
+            }
+          } else {
+            conditionShaAfterSend = gate.shaAfterSend;
           }
-          conditionShaAfterSend = gate.shaAfterSend;
+        }
+      }
+
+      // P0: run deferred owner-only Actions after a successful condition match
+      // (or Action recovery). Independent of WhatsApp success.
+      // UWM Phase 5: web_monitor uses the same Apply path after evidence gate.
+      if (
+        watchPackage &&
+        watchEventFingerprint &&
+        (!skipSend || watchNotifyRecovery)
+      ) {
+        const isUwm = condition?.type === "web_monitor";
+        const applyGate = isUwm
+          ? uwmApplyGate(watchEvalFacts, now)
+          : ({ ok: true } as const);
+        if (isUwm) {
+          recordUwmMetric("action", {
+            op: "checked",
+            fingerprint: watchEventFingerprint.slice(0, 40),
+            ok: applyGate.ok,
+            reason: applyGate.ok ? "pass" : applyGate.reason,
+          });
+        }
+        if (!applyGate.ok) {
+          recordUwmMetric("action", {
+            op: "skipped",
+            reason: applyGate.reason,
+            fingerprint: watchEventFingerprint.slice(0, 40),
+          });
+        } else {
+          try {
+            // Also retry any older incomplete fingerprints without touching notify.
+            for (const fp of listIncompleteWatchFingerprints(
+              watchLedger,
+              watchPackage,
+            )) {
+              if (fp === watchEventFingerprint) {
+                continue;
+              }
+              if (
+                !watchTriggerNeedsActionRecovery(watchLedger, watchPackage, fp)
+              ) {
+                continue;
+              }
+              const older = await executeWatchTriggerActions({
+                reminderId: reminder.id,
+                userId: reminder.userId,
+                package: watchPackage,
+                ledger: watchLedger,
+                fingerprint: fp,
+                facts: watchEvalFacts,
+                now,
+              });
+              watchLedger = older.ledger;
+              if (isUwm) {
+                recordUwmMetric("action", {
+                  op: "recovered",
+                  fingerprint: fp.slice(0, 40),
+                });
+              }
+            }
+            const ran = await executeWatchTriggerActions({
+              reminderId: reminder.id,
+              userId: reminder.userId,
+              package: watchPackage,
+              ledger: watchLedger,
+              fingerprint: watchEventFingerprint,
+              facts: watchEvalFacts,
+              now,
+            });
+            watchLedger = ran.ledger;
+            if (isUwm) {
+              const failed = ran.actionResults.filter(
+                (r) => r.status === "failed",
+              );
+              const done = ran.actionResults.filter((r) => r.status === "done");
+              recordUwmMetric("action", {
+                op: failed.length && !done.length ? "failed" : "executed",
+                fingerprint: watchEventFingerprint.slice(0, 40),
+                done: done.length,
+                failed: failed.length,
+                reason: failed[0]?.error ?? null,
+              });
+            }
+          } catch (triggerError) {
+            if (isUwm) {
+              recordUwmMetric("action", {
+                op: "failed",
+                reason: "exception",
+                fingerprint: watchEventFingerprint.slice(0, 40),
+              });
+            }
+            recordWhatsAppEvent(
+              "watch_trigger_error",
+              `id=${reminder.id} ${
+                triggerError instanceof Error
+                  ? triggerError.message.slice(0, 80)
+                  : "unknown"
+              }`,
+            );
+          }
         }
       }
 
@@ -869,7 +1149,10 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         fixedBody: factsBundle?.fixedBody,
       });
       const conditionDefaultBody =
-        busEtaDefaultBody || flightDefaultBody || sportsDefaultBody;
+        busEtaDefaultBody ||
+        flightDefaultBody ||
+        sportsDefaultBody ||
+        webMonitorDefaultBody;
       const preferConditionDefault =
         Boolean(conditionDefaultBody) &&
         (forceBusEtaPollFailNotify ||
@@ -1138,6 +1421,29 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       });
     }
 
+    // Independent notification ledger for Watch→Action packages.
+    if (watchPackage && watchEventFingerprint) {
+      try {
+        watchLedger = await markWatchTriggerNotified({
+          reminderId: reminder.id,
+          ledger: watchLedger,
+          package: watchPackage,
+          fingerprint: watchEventFingerprint,
+          notified: sendStatus === "sent",
+          now,
+        });
+      } catch (notifyLedgerError) {
+        recordWhatsAppEvent(
+          "watch_trigger_notify_ledger_error",
+          `id=${reminder.id} ${
+            notifyLedgerError instanceof Error
+              ? notifyLedgerError.message.slice(0, 80)
+              : "unknown"
+          }`,
+        );
+      }
+    }
+
     const watchOnce =
       "watchOnce" in reminder && reminder.watchOnce === true;
     const hadCondition = Boolean(
@@ -1145,7 +1451,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         "composeCondition" in reminder ? reminder.composeCondition : null,
       ),
     );
-    await settleFiredReminder(reminder, now, sendStatus, {
+    await settleReminder(sendStatus, {
       forceDone:
         watchOnce &&
         hadCondition &&

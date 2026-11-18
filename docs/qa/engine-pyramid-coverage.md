@@ -72,7 +72,7 @@ Loader/meta tests (suite discovery, fixture-required, spies) are **not** counted
 | **LIVE_MODEL / MT** | Real NL → ACTION constraints | Canonical: shop add/remove, clarify, filing remove, dated task, share |
 | **LIVE_FULL** | Model + apply + DB on `workee_test` | Small critical set: cascade 24a/24b, clarify-delete, event link, reminder cancel, multi-add-then-buy |
 
-**LIVE_ONLY** (not authored as ENGINE): directory/contacts (harness has no directory apply), `show_dump` Chat replace, WA delivery, reminder fire, Lucy2 DB prompt, jobs/handoff.
+**Outside this ENGINE pack.** The ENGINE runner still does not apply directory, show-dump replacement, WhatsApp delivery, reminder firing, a saved Lucy prompt, or jobs. Narrower suites exist for some of those and are described in [`test-layer-contract.md`](test-layer-contract.md#what-specific-suites-exercise). Still without a production-path suite: jobs/handoff, show-pack apply, custom-lists-pack apply, and WhatsApp Graph delivery. `show-button-dump.test.ts` is a formatter unit test.
 
 ---
 
@@ -80,7 +80,7 @@ Loader/meta tests (suite discovery, fixture-required, spies) are **not** counted
 
 | Proposed | Reason |
 |----------|--------|
-| Directory add/remove | `applyFixtureTurn` does not apply `metadata.directory`; `contactNames*` not passed in ENGINE runner |
+| Directory add/remove | `applyFixtureTurn` does not apply `metadata.directory`. Four stub-model apply cases live in `directory-pack-model-apply.db.test.ts`; the rest of the directory pack has no apply runner |
 | Assign-to-partner (`targets`) | No clear ENGINE fixture contract in apply path (targets stripped from item data); needs harness/product confirmation before authoring |
 | Incomplete filing that throws ValidationError | Would fail the harness catch path; empty-ACTION ask covered by `g1-empty-mutate-ask` |
 | Personal-vs-shared dual-owner visibility | Needs richer multi-account snapshot asserts than current `stateAfter` helpers |

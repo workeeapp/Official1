@@ -159,6 +159,9 @@ const EMPTY_PURPOSES = (): TeamUsagePurposeBreakdown => ({
   deleteCelebrationUsd: 0,
   imageUsd: 0,
   missionTurnUsd: 0,
+  webMonitorSearchUsd: 0,
+  webMonitorNormalizeUsd: 0,
+  webMonitorMatchUsd: 0,
 });
 
 function addPurposeCost(
@@ -187,6 +190,15 @@ function addPurposeCost(
       break;
     case "mission_turn":
       purposes.missionTurnUsd += cost;
+      break;
+    case "web_monitor_search":
+      purposes.webMonitorSearchUsd += cost;
+      break;
+    case "web_monitor_normalize":
+      purposes.webMonitorNormalizeUsd += cost;
+      break;
+    case "web_monitor_match":
+      purposes.webMonitorMatchUsd += cost;
       break;
     case "chat":
     default:
@@ -314,7 +326,13 @@ export type LlmUsagePurpose =
   | "live_select"
   | "delete_celebration"
   | "image"
-  | "mission_turn";
+  | "mission_turn"
+  /** UWM hosted web search (Phase 2+). */
+  | "web_monitor_search"
+  /** UWM normalize/extract (Phase 3+). */
+  | "web_monitor_normalize"
+  /** UWM residual match judge (Phase 3+). */
+  | "web_monitor_match";
 
 /** Billing context for ephemeral compose LLM calls (not the main chat turn). */
 export type ComposeLlmBilling = {

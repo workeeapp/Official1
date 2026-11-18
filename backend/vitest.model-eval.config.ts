@@ -14,6 +14,7 @@ export default defineConfig({
       "tests/model-eval-full.live.test.ts",
       "tests/attachment-intent-model.live.test.ts",
       "tests/decision-core-gate.live.test.ts",
+      "tests/voice-naturalness.live.test.ts",
     ],
     fileParallelism: false,
     testTimeout: 900_000,

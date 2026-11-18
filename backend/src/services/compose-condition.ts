@@ -37,6 +37,21 @@ export type ComposeEvalFacts = {
   sportsMatchFingerprint?: string;
   /** Resolved catalog field values for expr / field_changed. */
   exprFieldValues?: Record<string, number | null>;
+  /** UWM Phase 3–5 gate payload from pollWebMonitor. */
+  webMonitor?: {
+    shouldNotify: boolean;
+    fingerprint: string;
+    bodyHe?: string;
+    reason?: string;
+    /** Phase 5 Apply gate */
+    evidenceGrade?: "unverified" | "observed" | "corroborated" | "disputed";
+    evidenceMin?: "observed" | "corroborated";
+    retrievedAt?: string;
+    itemId?: string;
+    phase?: string;
+    stale?: boolean;
+    fresh?: boolean;
+  };
 };
 
 export type ComposeConditionFireGate = {
@@ -436,6 +451,22 @@ export function evaluateComposeCondition(input: {
     };
   }
 
+  // UWM Phase 3+: gate from pollWebMonitor facts (fail-closed when missing).
+  if (input.condition.type === "web_monitor") {
+    const wm = input.facts.webMonitor;
+    if (!wm || !wm.shouldNotify || !wm.fingerprint) {
+      return { skipSend: true };
+    }
+    const fp = String(wm.fingerprint).slice(0, 64);
+    if (fp && fp === last) {
+      return { skipSend: true };
+    }
+    return {
+      skipSend: false,
+      shaAfterSend: fp,
+    };
+  }
+
   return { skipSend: false };
 }
 
@@ -515,6 +546,9 @@ export function baselineShaForWatch(input: {
       return null;
     }
     return encodeFieldValueSha(current);
+  }
+  if (input.condition.type === "web_monitor") {
+    return null;
   }
   return null;
 }

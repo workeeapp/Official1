@@ -114,6 +114,9 @@ describe("Dashboard page", () => {
         deleteCelebrationUsd: 0,
         imageUsd: 0.0021,
         missionTurnUsd: 0.0035,
+        webMonitorSearchUsd: 0,
+        webMonitorNormalizeUsd: 0,
+        webMonitorMatchUsd: 0,
       },
       months: [
         {
@@ -131,6 +134,9 @@ describe("Dashboard page", () => {
             deleteCelebrationUsd: 0,
             imageUsd: 0.0015,
             missionTurnUsd: 0.002,
+        webMonitorSearchUsd: 0,
+        webMonitorNormalizeUsd: 0,
+        webMonitorMatchUsd: 0,
           },
         },
         {
@@ -148,6 +154,9 @@ describe("Dashboard page", () => {
             deleteCelebrationUsd: 0,
             imageUsd: 0.0006,
             missionTurnUsd: 0.0015,
+        webMonitorSearchUsd: 0,
+        webMonitorNormalizeUsd: 0,
+        webMonitorMatchUsd: 0,
           },
         },
       ],

@@ -479,6 +479,23 @@ model Reminder {
    * ["grades","behavior","homework","absences","messages"].
    */
   composeAspects Json? @map("compose_aspects")
+  /**
+   * P0 Watch→Action: server-validated deferred Action package (owner-only
+   * lists.add|update). Null = notify-only Watch. See watch-trigger-actions.
+   */
+  onTriggerActions Json? @map("on_trigger_actions")
+  /**
+   * P0 Watch→Action: durable per-event execution ledger (multiple fingerprints,
+   * per-action status, independent notification state). Never overwrite an
+   * incomplete event when a newer fingerprint arrives.
+   */
+  onTriggerExec Json? @map("on_trigger_exec")
+  /**
+   * UWM per-user monitor ledger (items, phases, sourcePlan, nextPrecise).
+   * Phase 1: empty shell {version:1,items:{}} on web_monitor create.
+   * Shared ExternalDataCache must never hold this.
+   */
+  monitorState Json? @map("monitor_state")
   lastComposedText String @default("") @map("last_composed_text") @db.Text
   /**
    * HEAD sha after the last git digest fire; also market edge state

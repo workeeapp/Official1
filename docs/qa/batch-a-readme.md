@@ -2,7 +2,7 @@
 
 **Labels (required):** `evalPath: "thin"` · `productionParity: false`
 
-This suite is **not** production `sendChatMessage` parity. It uses `buildLucyModelEvalInstructions` (system + targeting + OPEN_JOBS + short filing lines). Default fixtures match LIVE_FULL shape (`includeMichal: false`) via `buildDefaultEvalFixtures` — not `resolveEvalPrompt` (see [`test-layer-contract.md`](test-layer-contract.md)).
+This suite is **not** production `sendChatMessage` parity. It uses `buildLucyModelEvalInstructions` (system + targeting + OPEN_JOBS + short filing lines). Default fixtures use `buildDefaultEvalFixtures` with `includeMichal: false` and do not call `resolveEvalPrompt`. That fixture shape is the harness eval shape. The default LIVE_FULL runner calls `buildLucyInstructions` instead (see [`test-layer-contract.md`](test-layer-contract.md)).
 
 ## Tracks (keep separate)
 
