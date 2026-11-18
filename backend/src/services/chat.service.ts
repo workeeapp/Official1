@@ -2756,6 +2756,10 @@ export async function sendChatMessage(input: {
   let authorizedCollabInviteId: string | null = null;
   let authorizedCollabDecision: "accept" | "decline" | null = null;
   let authorizedCollabSummary: string | null = null;
+  /** Prospect clicked Assign Accept → join CTA must not be overwritten by Accept/Decline. */
+  let prospectAssignJoinGated = false;
+  /** Pre-LLM circuit breaker turn must not be overwritten by collab offer buttons. */
+  let prospectCircuitBreakerTripped = false;
   const inboundCommand = stripWhatsAppReplyPrefix(input.message).trim();
   if (
     !guestSpeaker &&
@@ -2873,6 +2877,7 @@ export async function sendChatMessage(input: {
         }),
         raw: { prospect_assign_join_gate: true },
       };
+      prospectAssignJoinGated = true;
       // Prevent later confirmCollabInvite for this Prospect Accept.
       authorizedCollabDecision = null;
     } else if (authorizedCollabDecision === "decline") {
@@ -2936,6 +2941,7 @@ export async function sendChatMessage(input: {
         }),
         raw: { prospect_circuit_breaker: true },
       };
+      prospectCircuitBreakerTripped = true;
     }
 
     if (
@@ -3422,7 +3428,9 @@ export async function sendChatMessage(input: {
       presentedCollab.length > 0 &&
       !authorizedCollabDecision &&
       !authorizedHighRiskConfirmId &&
-      !highRiskDidStrip
+      !highRiskDidStrip &&
+      !prospectAssignJoinGated &&
+      !prospectCircuitBreakerTripped
     ) {
       const staged: typeof collabInviteOffers = [];
       for (const invite of presentedCollab) {
@@ -4560,6 +4568,8 @@ export async function sendChatMessage(input: {
     // Stage 5a: engine collab invite offer + opaque Accept/Decline buttons.
     if (
       !prospectJoinOffer &&
+      !prospectAssignJoinGated &&
+      !prospectCircuitBreakerTripped &&
       collabInviteOffers.length > 0 &&
       !authorizedCollabDecision
     ) {
