@@ -203,7 +203,7 @@ export async function ensureDefaultTips(userId: string): Promise<void> {
       listType: seed.listType,
       unlockAfterKey: seed.unlockAfterKey,
       systemSeed: true,
-      outputMode: "static",
+      outputMode: seed.outputMode === "dynamic" ? "dynamic" : "static",
       minIntervalMinutes:
         typeof seed.minIntervalMinutes === "number"
           ? seed.minIntervalMinutes
@@ -506,6 +506,7 @@ function tipOutputMode(tip: Tip): TipOutputMode {
 
 function buildComposeFactsFromTurn(
   factItems: TipTurnFactItem[] | undefined,
+  extra?: TipComposeFacts | null,
 ): TipComposeFacts {
   const items = (factItems ?? [])
     .map((row) => row.itemLabel.trim())
@@ -514,12 +515,31 @@ function buildComposeFactsFromTurn(
   const label = items[0] ?? null;
   const key = primary?.itemKey?.trim() || label;
   return {
-    list_type: primary?.listType?.trim() || null,
-    op: primary?.op?.trim() || null,
-    item_label: label,
-    item_key: key,
-    items,
+    list_type: primary?.listType?.trim() || extra?.list_type?.trim() || null,
+    op: primary?.op?.trim() || extra?.op?.trim() || null,
+    item_label: label || extra?.item_label?.trim() || null,
+    item_key: key || extra?.item_key?.trim() || null,
+    items: items.length > 0 ? items : extra?.items,
+    reminder_title: extra?.reminder_title?.trim() || null,
+    assignee_name: extra?.assignee_name?.trim() || null,
+    search_topic: extra?.search_topic?.trim() || null,
   };
+}
+
+/** Skip generic basic intros when the turn already executed that capability with entity facts. */
+function isRedundantIntroTip(tip: Tip, facts: TipComposeFacts): boolean {
+  const hasEntity =
+    Boolean(facts.item_label?.trim()) ||
+    Boolean(facts.reminder_title?.trim()) ||
+    Boolean(facts.search_topic?.trim());
+  if (!hasEntity) {
+    return false;
+  }
+  if (!/_basic_(add|store|show|ask)\b/.test(tip.key)) {
+    return false;
+  }
+  // Prefer entity-aware / dynamic tips over generic intros for the just-used capability.
+  return tip.outputMode !== "dynamic" && !/\{[a-z_]+\}/.test(tip.text);
 }
 
 /** Build applied ops from this turn's engine results. */
@@ -857,6 +877,8 @@ export async function resolveAndRecordTipsForTurn(input: {
     enabled: boolean;
     inboundTurnCount: number;
   };
+  /** Extra tip FACTS (reminder title, web lookup topic, assignee). */
+  tipExtraFacts?: TipComposeFacts | null;
 }): Promise<TipTurnResult> {
   await ensureDefaultTips(input.userId);
   const now = input.now ?? new Date();
@@ -925,7 +947,17 @@ export async function resolveAndRecordTipsForTurn(input: {
     contextual.push(tip);
   }
 
-  let chosen = pickSortedTip(contextual);
+  const facts = buildComposeFactsFromTurn(
+    input.turnFactItems,
+    input.tipExtraFacts,
+  );
+
+  const contextualFiltered = contextual.filter(
+    (tip) => !isRedundantIntroTip(tip, facts),
+  );
+  let chosen = pickSortedTip(
+    contextualFiltered.length > 0 ? contextualFiltered : contextual,
+  );
   if (!chosen) {
     const generals: Tip[] = [];
     for (const tip of eligible) {
@@ -947,9 +979,29 @@ export async function resolveAndRecordTipsForTurn(input: {
       ) {
         continue;
       }
+      if (isRedundantIntroTip(tip, facts)) {
+        continue;
+      }
       generals.push(tip);
     }
     chosen = pickSortedTip(generals);
+  }
+
+  // After a verified web/places lookup — entity tip (not a generic capability intro).
+  if (!chosen && facts.search_topic?.trim()) {
+    const webTips: Tip[] = [];
+    for (const tip of eligible) {
+      if (tip.key !== "web_lookup_followup") {
+        continue;
+      }
+      if (
+        !tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip, now)
+      ) {
+        continue;
+      }
+      webTips.push(tip);
+    }
+    chosen = pickSortedTip(webTips);
   }
 
   // Prospect first-exposure: engine may pick onboard tips without model keys.
@@ -990,8 +1042,6 @@ export async function resolveAndRecordTipsForTurn(input: {
   if (!instructions) {
     return { texts: [], tipIds: [] };
   }
-
-  const facts = buildComposeFactsFromTurn(input.turnFactItems);
   let body: string | null;
   if (tipOutputMode(chosen) === "dynamic") {
     body = await composeCatalogTip({

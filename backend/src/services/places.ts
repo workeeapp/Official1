@@ -13,6 +13,11 @@ import {
 } from "@workee/shared";
 import { createHash } from "node:crypto";
 import { getEnv } from "../config/env.js";
+import {
+  burnExternalLookupQuota,
+  detectForceRefreshIntent,
+} from "./external-lookup.service.js";
+import { withExternalCache } from "./external-cache.service.js";
 import type { ComposeLlmBilling } from "./llm-usage.service.js";
 import {
   formatLiveSelectFailureReply,
@@ -894,6 +899,12 @@ export async function fetchPlacesFacts(input: {
   radiusExplicit?: boolean;
   fetchImpl?: typeof fetch;
   apiKey?: string | null;
+  /** Bypass ExternalDataCache (or force a fresh provider call). */
+  forceRefresh?: boolean;
+  /** Internal: skip cache wrap when already inside fetcher. */
+  skipExternalCache?: boolean;
+  /** Quota user for uncached Places calls (HIT burns 0). */
+  userId?: string | null;
 }): Promise<PlacesFacts> {
   const query = String(input.query ?? "").trim();
   const place = String(input.place ?? "").trim();
@@ -979,6 +990,49 @@ export async function fetchPlacesFacts(input: {
     (input.apiKey ?? getEnv().GOOGLE_PLACES_API_KEY ?? "").trim() || null;
   if (!apiKey) {
     throw new Error(PLACES_API_KEY_MISSING);
+  }
+
+  // Multi-domain ExternalDataCache — STATIC (14d) for local business/hours.
+  // Cache HIT burns 0 quota; MISS/forceRefresh burns 1 when userId set.
+  if (!input.skipExternalCache) {
+    const forceRefresh = input.forceRefresh === true;
+    const cacheQuery = [
+      query,
+      place,
+      nearSpeaker ? "near" : "",
+      areaRestrict ? "area" : "",
+      aspects.slice().sort().join(","),
+      intent,
+      openNowFilter === true ? "open" : "",
+      minRating != null ? `r${minRating}` : "",
+      includedType ?? "",
+    ].join("|");
+    let quotaBurnedForMiss = false;
+    const cached = await withExternalCache<PlacesFacts>({
+      provider: "places",
+      scope: "local_search",
+      query: cacheQuery,
+      region: "IL",
+      lat,
+      lng,
+      ttlTier: "STATIC",
+      forceRefresh,
+      fetcher: async () => {
+        if (input.userId && !quotaBurnedForMiss) {
+          const gate = await burnExternalLookupQuota(input.userId);
+          quotaBurnedForMiss = true;
+          if (!gate.allowed) {
+            return { ...facts, results: [] };
+          }
+        }
+        return fetchPlacesFacts({
+          ...input,
+          skipExternalCache: true,
+          forceRefresh: false,
+        });
+      },
+    });
+    return cached.payload;
   }
 
   const fetchImpl = input.fetchImpl ?? fetch;
@@ -1538,6 +1592,8 @@ export async function resolvePlacesReplyDetailed(input: {
   contacts?: SavedLocationContactRef[] | null;
   pending?: PendingLocation | null;
   providers?: GeographicProvider[];
+  userId?: string | null;
+  forceRefresh?: boolean;
 }): Promise<PlacesReplyResult> {
   const query = String(input.query ?? "").trim();
   let place = String(input.place ?? "").trim();
@@ -1717,6 +1773,10 @@ export async function resolvePlacesReplyDetailed(input: {
       lng: areaRestrict ? null : lng,
       areaRestrict,
       areaViewport,
+      userId: input.userId,
+      forceRefresh:
+        input.forceRefresh === true ||
+        detectForceRefreshIntent(input.speakerAsk ?? ""),
     });
     let finalFacts = facts;
     let text: string;

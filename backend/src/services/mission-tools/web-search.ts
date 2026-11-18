@@ -1,7 +1,5 @@
-import {
-  HOSTED_WEB_SEARCH_MODEL,
-  runHostedWebSearch,
-} from "../llm-client.js";
+import { HOSTED_WEB_SEARCH_MODEL } from "../llm-client.js";
+import { cachedHostedWebSearch } from "../external-lookup.service.js";
 import type { MissionToolHandler } from "./types.js";
 
 /** Mission tool name for OpenAI hosted web_search. */
@@ -9,7 +7,7 @@ export const WEB_SEARCH_TOOL = "web.search";
 
 /**
  * Hosted web search → TOOL_RESULTS evidence (citations + answer text).
- * Does not browse or fill forms; executor may still browser.navigate to a source URL.
+ * Read-through ExternalDataCache (HIT burns 0 user quota; mission path omits userId).
  */
 export const webSearchTool: MissionToolHandler = async (args) => {
   const query =
@@ -25,25 +23,48 @@ export const webSearchTool: MissionToolHandler = async (args) => {
     typeof args.model === "string" && args.model.trim()
       ? args.model.trim()
       : HOSTED_WEB_SEARCH_MODEL;
+  const forceRefresh =
+    args.force_refresh === true ||
+    args.forceRefresh === true ||
+    args.refresh === true;
+  const userId =
+    typeof args.userId === "string" && args.userId.trim()
+      ? args.userId.trim()
+      : typeof args.user_id === "string" && args.user_id.trim()
+        ? args.user_id.trim()
+        : null;
 
   try {
-    const result = await runHostedWebSearch({ query, model });
-    const text = result.text.trim();
-    if (!text && result.sources.length === 0) {
+    const result = await cachedHostedWebSearch({
+      query,
+      model,
+      forceRefresh,
+      userId,
+    });
+    if (result.quotaBlocked) {
+      return {
+        ok: false,
+        summary: `web.search quota blocked for «${query}»`,
+        data: { query, sources: [], quotaBlocked: true },
+      };
+    }
+    const text = result.payload.text.trim();
+    if (!text && result.payload.sources.length === 0) {
       return {
         ok: false,
         summary: `web.search empty for «${query}»`,
-        data: { query, sources: [] },
+        data: { query, sources: [], cacheHit: result.cacheHit },
       };
     }
     const sourcesBlock =
-      result.sources.length > 0
-        ? `SOURCES:\n${result.sources
+      result.payload.sources.length > 0
+        ? `SOURCES:\n${result.payload.sources
             .slice(0, 8)
             .map((s) => `- ${s}`)
             .join("\n")}`
         : "";
-    const summary = [`web.search: ${query}`, text, sourcesBlock]
+    const cacheNote = result.cacheHit ? "cache=HIT" : "cache=MISS";
+    const summary = [`web.search: ${query} (${cacheNote})`, text, sourcesBlock]
       .filter(Boolean)
       .join("\n\n")
       .slice(0, 4000);
@@ -52,8 +73,10 @@ export const webSearchTool: MissionToolHandler = async (args) => {
       summary,
       data: {
         query,
-        sources: result.sources.slice(0, 8),
+        sources: result.payload.sources.slice(0, 8),
         model,
+        cacheHit: result.cacheHit,
+        ageSeconds: result.ageSeconds,
       },
     };
   } catch (err) {

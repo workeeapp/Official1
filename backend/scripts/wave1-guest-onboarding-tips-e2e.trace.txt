@@ -1,5 +1,5 @@
 Wave 1 Guest → Member onboarding + tips E2E — execution trace
-Generated: 2026-11-18T14:09:22.382Z
+Generated: 2026-11-18T15:06:39.392Z
 DATABASE_URL port must be 5436 (eval). Never 5435.
 
 ======== STEP 1: Member assigns to unregistered Prospect (AskerNotice draft) ========
@@ -25,11 +25,11 @@ Reply:
   https://wa.me/972509998887?text=%D7%94%D7%99%D7%99%2C%20%D7%9B%D7%90%D7%9F%20%D7%9C%D7%95%D7%A1%D7%99%0A%D7%94%D7%A2%D7%95%D7%96%D7%A8%D7%AA%20%D7%94%D7%90%D7%99%D7%A9%D7%99%D7%AA%20%D7%A9%D7%9C%20%D7%9E%D7%99%D7%9B%D7%9C%0A%D7%94%D7%95%D7%A7%D7%A6%D7%AA%D7%94%20%D7%9C%D7%9A%20%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C%20%D7%91%D7%9C%D7%95%D7%A1%D7%99%3A%20%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%0A%0Ahttps%3A%2F%2Fwa.me%2F972501111111%3Ftext%3D%25D7%2594%25D7%2599%25D7%2599%2520%25D7%259C%25D7%2595%25D7%25A1%25D7%2599%252C%2520%25D7%25A0%25D7%259B%25D7%25A0%25D7%25A1%25D7%25AA%25D7%2599%2520%25D7%259C%25D7%25A8%25D7%2590%25D7%2595%25D7%25AA%2520%25D7%2590%25D7%25AA%2520%25D7%2594%25D7%259E%25D7%25A9%25D7%2599%25D7%259E%25D7%2594%2520%25C2%25AB%25D7%259C%25D7%2594%25D7%2591%25D7%2599%25D7%2590%2520%25D7%259C%25D7%2597%25D7%259D%2520%25D7%2593%25D7%2592%25D7%25A0%25D7%2599%25D7%259D%25C2%25BB%2520%25D7%259E%25D7%259E%25D7%2599%25D7%259B%25D7%259C
   https://wa.me/972509998887?text=%D7%94%D7%99%D7%99%2C%20%D7%9B%D7%90%D7%9F%20%D7%9C%D7%95%D7%A1%D7%99%0A%D7%94%D7%A2%D7%95%D7%96%D7%A8%D7%AA%20%D7%94%D7%90%D7%99%D7%A9%D7%99%D7%AA%20%D7%A9%D7%9C%20%D7%9E%D7%99%D7%9B%D7%9C%0A%D7%94%D7%95%D7%A7%D7%A6%D7%AA%D7%94%20%D7%9C%D7%9A%20%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C%20%D7%91%D7%9C%D7%95%D7%A1%D7%99%3A%20%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%0A%0Ahttps%3A%2F%2Fwa.me%2F972501111111%3Ftext%3D%25D7%2594%25D7%2599%25D7%2599%2520%25D7%259C%25D7%2595%25D7%25A1%25D7%2599%252C%2520%25D7%25A0%25D7%259B%25D7%25A0%25D7%25A1%25D7%25AA%25D7%2599%2520%25D7%259C%25D7%25A8%25D7%2590%25D7%2595%25D7%25AA%2520%25D7%2590%25D7%25AA%2520%25D7%2594%25D7%259E%25D7%25A9%25D7%2599%25D7%259E%25D7%2594%2520%25C2%25AB%25D7%259C%25D7%2594%25D7%2591%25D7%2599%25D7%2590%2520%25D7%259C%25D7%2597%25D7%259D%2520%25D7%2593%25D7%2592%25D7%25A0%25D7%2599%25D7%259D%25C2%25BB%2520%25D7%259E%25D7%259E%25D7%2599%25D7%259B%25D7%259C
 DB asserts:
-  - invite=93aee28a-15e3-4388-a92a-553c3289d3ca status=pending kind=assign
+  - invite=bba8e90b-0c10-42fb-9200-1d9b6fbdaf38 status=pending kind=assign
   - lucyLink=https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C%20%D7%A0%D7%9B%D7%A0%D7%A1%D7%AA%D7%99%20%D7%9C%D7%A8%D7%90%D7%95%D7%AA%20%D7%90%D7%AA%20%D7%94%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%C2%AB%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%C2%BB%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C decodedOpen=היי לוסי, נכנסתי לראות את המשימה «להביא לחם דגנים» ממיכל
 Checks:
   - PASS draft + Guest prefill
-  - PASS invite 93aee28a-15e3-4388-a92a-553c3289d3ca
+  - PASS invite bba8e90b-0c10-42fb-9200-1d9b6fbdaf38
 
 ======== STEP 2: Guest Turn 1 — Arrival via wa.me ?text= + Tip #1 ========
 Actor:    Danny
@@ -46,7 +46,7 @@ Reply:
   
   קבלי או דחי:
   לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
-Buttons:  קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101
+Buttons:  קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101
 DB asserts:
   - consentPending=true
   - guestOpenMessage=היי לוסי, נכנסתי לראות את המשימה «להביא לחם דגנים» ממיכל
@@ -77,7 +77,7 @@ Reply:
   דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד.
   בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «להתקשר לרופא»:
   דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד.
-Buttons:  כן, תשמרי לי ⟶ explicit_join_accept:ba5e66be-0e12-4ba4-8743-2b934db879b0 | כן, תשמרי לי ⟶ explicit_join_accept:ba5e66be-0e12-4ba4-8743-2b934db879b0
+Buttons:  כן, תשמרי לי ⟶ explicit_join_accept:73e8be2a-da21-449a-9f20-02c4e349ebf0 | כן, תשמרי לי ⟶ explicit_join_accept:73e8be2a-da21-449a-9f20-02c4e349ebf0
 DB asserts:
   - tipProgress=[{"key":"prospect_onboard_tasks","showCount":1},{"key":"prospect_onboard_shopping","showCount":1}] totalShows=2
 Checks:
@@ -85,22 +85,22 @@ Checks:
 
 ======== STEP 5: Guest → Member one-tap upgrade ========
 Actor:    Danny
-Inbound:  [button_reply] explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+Inbound:  [button_reply] explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
 Reply:
   בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «לקנות חלב»:
   בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «לקנות חלב»:
   --- after join ---
   בוצע! שמרתי לך את «לקנות חלב».
-Buttons:  כן, תשמרי לי ⟶ explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c | כן, תשמרי לי ⟶ explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+Buttons:  כן, תשמרי לי ⟶ explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343 | כן, תשמרי לי ⟶ explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
 DB asserts:
-  - consentPending=false consentAcceptedAt=2026-11-18T14:08:57.270Z
+  - consentPending=false consentAcceptedAt=2026-11-18T15:06:13.309Z
 Checks:
-  - PASS join explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+  - PASS join explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
   - PASS Member
 
 ======== STEP 6: Guest → Member data continuity ========
 Actor:    Noa
-Inbound:  [button_reply] explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
+Inbound:  [button_reply] explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
 Reply:
   בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «להתקשר לרופא»:
   
@@ -109,10 +109,10 @@ Reply:
   לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
   --- after join ---
   בוצע! שמרתי לך את «להתקשר לרופא».
-Buttons:  כן, תשמרי לי ⟶ explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86 | כן, תשמרי לי ⟶ explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
+Buttons:  כן, תשמרי לי ⟶ explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be | כן, תשמרי לי ⟶ explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
 DB asserts:
   - beforeJoin reminderCount=0 shopCount=0
-  - afterJoin reminders=1 shop=1 remUser=a24574fc-ff2e-47b5-a908-ca49aa108105
+  - afterJoin reminders=1 shop=1 remUser=a6049887-4e14-42fe-a0ac-357cfd0d8916
 Checks:
   - PASS join CTA
   - PASS continuity
@@ -125,9 +125,9 @@ Reply:
   יופי, הורדתי את המשימה.
 Buttons:  הצג משימות ⟶ הצג רשימת משימות | הצג משימות ⟶ הצג רשימת משימות
 DB asserts:
-  - pendingAssign=93aee28a-15e3-4388-a92a-553c3289d3ca
-  - assignedItem=4b102925-5773-46a3-8a14-dd4f5d80d349 addedBy=f6653560-645e-4099-ba51-43f6792dea5b
-  - deletedAt=2026-11-18T14:09:10.719Z
+  - pendingAssign=bba8e90b-0c10-42fb-9200-1d9b6fbdaf38
+  - assignedItem=426100f9-67a6-4a38-b4d1-9d988a724223 addedBy=8102d76e-ea5a-4f43-9fd5-11cfb0cba7d7
+  - deletedAt=2026-11-18T15:06:27.306Z
   - michalNotice=דני השלים משימה: להביא לחם דגנים ✅ expected=דני השלים משימה: להביא לחם דגנים ✅
 Checks:
   - PASS assigned row
@@ -182,14 +182,14 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C%20%D7%A0%D7%9B%D7%A0%D7%A1%D7%AA%D7%99%20%D7%9C%D7%A8%D7%90%D7%95%D7%AA%20%D7%90%D7%AA%20%D7%94%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%C2%AB%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%C2%BB%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C»
 https://wa.me/972509998887?text=%D7%94%D7%99%D7%99%2C%20%D7%9B%D7%90%D7%9F%20%D7%9C%D7%95%D7%A1%D7%99%0A%D7%94%D7%A2%D7%95%D7%96%D7%A8%D7%AA%20%D7%94%D7%90%D7%99%D7%A9%D7%99%D7%AA%20%D7%A9%D7%9C%20%D7%9E%D7%99%D7%9B%D7%9C%0A%D7%94%D7%95%D7%A7%D7%A6%D7%AA%D7%94%20%D7%9C%D7%9A%20%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C%20%D7%91%D7%9C%D7%95%D7%A1%D7%99%3A%20%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%0A%0Ahttps%3A%2F%2Fwa.me%2F972501111111%3Ftext%3D%25D7%2594%25D7%2599%25D7%2599%2520%25D7%259C%25D7%2595%25D7%25A1%25D7%2599%252C%2520%25D7%25A0%25D7%259B%25D7%25A0%25D7%25A1%25D7%25AA%25D7%2599%2520%25D7%259C%25D7%25A8%25D7%2590%25D7%2595%25D7%25AA%2520%25D7%2590%25D7%25AA%2520%25D7%2594%25D7%259E%25D7%25A9%25D7%2599%25D7%259E%25D7%2594%2520%25C2%25AB%25D7%259C%25D7%2594%25D7%2591%25D7%2599%25D7%2590%2520%25D7%259C%25D7%2597%25D7%259D%2520%25D7%2593%25D7%2592%25D7%25A0%25D7%2599%25D7%259D%25C2%25BB%2520%25D7%259E%25D7%259E%25D7%2599%25D7%259B%25D7%259C
 https://wa.me/972509998887?text=%D7%94%D7%99%D7%99%2C%20%D7%9B%D7%90%D7%9F%20%D7%9C%D7%95%D7%A1%D7%99%0A%D7%94%D7%A2%D7%95%D7%96%D7%A8%D7%AA%20%D7%94%D7%90%D7%99%D7%A9%D7%99%D7%AA%20%D7%A9%D7%9C%20%D7%9E%D7%99%D7%9B%D7%9C%0A%D7%94%D7%95%D7%A7%D7%A6%D7%AA%D7%94%20%D7%9C%D7%9A%20%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C%20%D7%91%D7%9C%D7%95%D7%A1%D7%99%3A%20%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%0A%0Ahttps%3A%2F%2Fwa.me%2F972501111111%3Ftext%3D%25D7%2594%25D7%2599%25D7%2599%2520%25D7%259C%25D7%2595%25D7%25A1%25D7%2599%252C%2520%25D7%25A0%25D7%259B%25D7%25A0%25D7%25A1%25D7%25AA%25D7%2599%2520%25D7%259C%25D7%25A8%25D7%2590%25D7%2595%25D7%25AA%2520%25D7%2590%25D7%25AA%2520%25D7%2594%25D7%259E%25D7%25A9%25D7%2599%25D7%259E%25D7%2594%2520%25C2%25AB%25D7%259C%25D7%2594%25D7%2591%25D7%2599%25D7%2590%2520%25D7%259C%25D7%2597%25D7%259D%2520%25D7%2593%25D7%2592%25D7%25A0%25D7%2599%25D7%259D%25C2%25BB%2520%25D7%259E%25D7%259E%25D7%2599%25D7%259B%25D7%259C
-  [DB] invite=93aee28a-15e3-4388-a92a-553c3289d3ca status=pending kind=assign
+  [DB] invite=bba8e90b-0c10-42fb-9200-1d9b6fbdaf38 status=pending kind=assign
   [DB] lucyLink=https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C%20%D7%A0%D7%9B%D7%A0%D7%A1%D7%AA%D7%99%20%D7%9C%D7%A8%D7%90%D7%95%D7%AA%20%D7%90%D7%AA%20%D7%94%D7%9E%D7%A9%D7%99%D7%9E%D7%94%20%C2%AB%D7%9C%D7%94%D7%91%D7%99%D7%90%20%D7%9C%D7%97%D7%9D%20%D7%93%D7%92%D7%A0%D7%99%D7%9D%C2%BB%20%D7%9E%D7%9E%D7%99%D7%9B%D7%9C decodedOpen=היי לוסי, נכנסתי לראות את המשימה «להביא לחם דגנים» ממיכל
   [PASS] Step1 AskerNotice draft: Lucy + real task + Guest wa.me?text= prefill, no Workee — expectedOpen=היי לוסי, נכנסתי לראות את המשימה «להביא לחם דגנים» ממיכל | draft=היי, כאן לוסי
 העוזרת האישית של מיכל
 הוקצתה לך משימה ממיכל בלוסי: להביא לחם דגנים
 
 https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C%20%D7%A0%D7%9B%D7%A0%D7%A1%D7%AA%D7%99%20%D7%9C%D7%A8%D7%
-  [PASS] Step1 pending assign invite in DB — 93aee28a-15e3-4388-a92a-553c3289d3ca
+  [PASS] Step1 pending assign invite in DB — bba8e90b-0c10-42fb-9200-1d9b6fbdaf38
 
 ========== STEP 2: Guest Turn 1 — Arrival via wa.me ?text= + Tip #1 ==========
   [DB] consentPending=true
@@ -209,7 +209,7 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 
 קבלי או דחי:
 לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
-  [buttons] קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101
+  [buttons] קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101
   [DB] tipProgress=[{"key":"prospect_onboard_tasks","showCount":1}] tipInReply=yes
   [DB] factsHasTask=true acceptBtn=true
   [PASS] Step2 Guest welcome + Michal pending task visible — מיכל מזמינ/ה אותך לקבל:
@@ -248,7 +248,7 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד.
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «להתקשר לרופא»:
 דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד.
-  [buttons] כן, תשמרי לי ⟶ explicit_join_accept:ba5e66be-0e12-4ba4-8743-2b934db879b0 | כן, תשמרי לי ⟶ explicit_join_accept:ba5e66be-0e12-4ba4-8743-2b934db879b0
+  [buttons] כן, תשמרי לי ⟶ explicit_join_accept:73e8be2a-da21-449a-9f20-02c4e349ebf0 | כן, תשמרי לי ⟶ explicit_join_accept:73e8be2a-da21-449a-9f20-02c4e349ebf0
   [DB] tipProgress=[{"key":"prospect_onboard_tasks","showCount":1},{"key":"prospect_onboard_shopping","showCount":1}] totalShows=2
   [PASS] Step4 Tip #2 appended + TipProgress incremented — דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מי
   [PASS] Step4 still Prospect before upgrade
@@ -260,14 +260,14 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 ◀ Lucy → Danny
   בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «לקנות חלב»:
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «לקנות חלב»:
-  [buttons] כן, תשמרי לי ⟶ explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c | כן, תשמרי לי ⟶ explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
-  [PASS] Step5 server-rendered Join CTA returned for תקצי לרונית — explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+  [buttons] כן, תשמרי לי ⟶ explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343 | כן, תשמרי לי ⟶ explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
+  [PASS] Step5 server-rendered Join CTA returned for תקצי לרונית — explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
 
 ▶ Danny → Lucy
-  [button_reply] explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+  [button_reply] explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
 ◀ ExplicitJoinHandler → Danny
   בוצע! שמרתי לך את «לקנות חלב».
-  [DB] consentPending=false consentAcceptedAt=2026-11-18T14:08:57.270Z
+  [DB] consentPending=false consentAcceptedAt=2026-11-18T15:06:13.309Z
   [PASS] Step5 upgraded to Member in DB (consentPending=false) — pending=false
   [PASS] Step5 post-join spoken confirmation — בוצע! שמרתי לך את «לקנות חלב».
 
@@ -281,20 +281,20 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «להתקשר לרופא»:
 לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
-  [buttons] כן, תשמרי לי ⟶ explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86 | כן, תשמרי לי ⟶ explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
-  [PASS] Step6 Join CTA while staging reminder+shopping — explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
+  [buttons] כן, תשמרי לי ⟶ explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be | כן, תשמרי לי ⟶ explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
+  [PASS] Step6 Join CTA while staging reminder+shopping — explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
   [DB] beforeJoin reminderCount=0 shopCount=0
   [PASS] Step6 ProspectWriteGate blocked persistence before join — rem=0 shop=0
 
 ▶ Noa → Lucy
-  [button_reply] explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
+  [button_reply] explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
 ◀ ExplicitJoinHandler → Noa
   בוצע! שמרתי לך את «להתקשר לרופא».
-  [DB] afterJoin reminders=1 shop=1 remUser=a24574fc-ff2e-47b5-a908-ca49aa108105
+  [DB] afterJoin reminders=1 shop=1 remUser=a6049887-4e14-42fe-a0ac-357cfd0d8916
   [PASS] Step6 reminder+shopping intact after join (no dupes) — rem=1 shop=1
 
 ========== STEP 7: Task complete → inviter notification ==========
-  [DB] pendingAssign=93aee28a-15e3-4388-a92a-553c3289d3ca
+  [DB] pendingAssign=bba8e90b-0c10-42fb-9200-1d9b6fbdaf38
 
 ▶ Danny → Lucy
   היי, אאשר את המשימה ממיכל
@@ -307,11 +307,11 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 להביא לחם דגנים
 
 קבלי או דחי:
-  [buttons] קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101
-  [PASS] Step7 Assign Accept offered to Danny — hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN
+  [buttons] קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101
+  [PASS] Step7 Assign Accept offered to Danny — hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c
 
 ▶ Danny → Lucy
-  [Assign Accept] hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN
+  [Assign Accept] hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c
 ◀ Lucy → Danny
   קיבלתי את ההזמנה:
 מיכל מזמינ/ה אותך לקבל:
@@ -319,8 +319,8 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 קיבלתי את ההזמנה:
 מיכל מזמינ/ה אותך לקבל:
 להביא לחם דגנים
-  [DB] assignedItem=4b102925-5773-46a3-8a14-dd4f5d80d349 addedBy=f6653560-645e-4099-ba51-43f6792dea5b
-  [PASS] Step7 assigned task row on Danny after Accept — 4b102925-5773-46a3-8a14-dd4f5d80d349
+  [DB] assignedItem=426100f9-67a6-4a38-b4d1-9d988a724223 addedBy=8102d76e-ea5a-4f43-9fd5-11cfb0cba7d7
+  [PASS] Step7 assigned task row on Danny after Accept — 426100f9-67a6-4a38-b4d1-9d988a724223
 
 ▶ Danny → Lucy
   קניתי את הלחם דגנים
@@ -328,8 +328,8 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
   יופי, הורדתי את המשימה.
 יופי, הורדתי את המשימה.
   [buttons] הצג משימות ⟶ הצג רשימת משימות | הצג משימות ⟶ הצג רשימת משימות
-  [DB] deletedAt=2026-11-18T14:09:10.719Z
-  [PASS] Step7 task marked completed (soft-deleted) — 2026-11-18T14:09:10.719Z
+  [DB] deletedAt=2026-11-18T15:06:27.306Z
+  [PASS] Step7 task marked completed (soft-deleted) — 2026-11-18T15:06:27.306Z
   [DB] michalNotice=דני השלים משימה: להביא לחם דגנים ✅ expected=דני השלים משימה: להביא לחם דגנים ✅
   [PASS] Step7 Michal received polished completion notification — דני השלים משימה: להביא לחם דגנים ✅
 
@@ -370,7 +370,7 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 ========== SUMMARY ==========
 | 1 | PASS | Step1 AskerNotice draft: Lucy + real task + Guest wa.me?text= prefill, no Workee (expectedOpen=היי לוסי, נכנסתי לראות את המשימה «להביא לחם דגנים» ממיכל | draft=היי, כאן לוסי
 העוזרת ה) |
-| 2 | PASS | Step1 pending assign invite in DB (93aee28a-15e3-4388-a92a-553c3289d3ca) |
+| 2 | PASS | Step1 pending assign invite in DB (bba8e90b-0c10-42fb-9200-1d9b6fbdaf38) |
 | 3 | PASS | Step2 Guest welcome + Michal pending task visible (מיכל מזמינ/ה אותך לקבל:
 להביא לחם דגנים
 
@@ -384,15 +384,15 @@ https://wa.me/972501111111?text=%D7%94%D7%99%D7%99%20%D7%9C%D7%95%D7%A1%D7%99%2C
 | 7 | PASS | Step3 no onboard tip on Turn 2 (ok) |
 | 8 | PASS | Step4 Tip #2 appended + TipProgress incremented (דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מי) |
 | 9 | PASS | Step4 still Prospect before upgrade |
-| 10 | PASS | Step5 server-rendered Join CTA returned for תקצי לרונית (explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c) |
+| 10 | PASS | Step5 server-rendered Join CTA returned for תקצי לרונית (explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343) |
 | 11 | PASS | Step5 upgraded to Member in DB (consentPending=false) (pending=false) |
 | 12 | PASS | Step5 post-join spoken confirmation (בוצע! שמרתי לך את «לקנות חלב».) |
-| 13 | PASS | Step6 Join CTA while staging reminder+shopping (explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86) |
+| 13 | PASS | Step6 Join CTA while staging reminder+shopping (explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be) |
 | 14 | PASS | Step6 ProspectWriteGate blocked persistence before join (rem=0 shop=0) |
 | 15 | PASS | Step6 reminder+shopping intact after join (no dupes) (rem=1 shop=1) |
-| 16 | PASS | Step7 Assign Accept offered to Danny (hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN) |
-| 17 | PASS | Step7 assigned task row on Danny after Accept (4b102925-5773-46a3-8a14-dd4f5d80d349) |
-| 18 | PASS | Step7 task marked completed (soft-deleted) (2026-11-18T14:09:10.719Z) |
+| 16 | PASS | Step7 Assign Accept offered to Danny (hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c) |
+| 17 | PASS | Step7 assigned task row on Danny after Accept (426100f9-67a6-4a38-b4d1-9d988a724223) |
+| 18 | PASS | Step7 task marked completed (soft-deleted) (2026-11-18T15:06:27.306Z) |
 | 19 | PASS | Step7 Michal received polished completion notification (דני השלים משימה: להביא לחם דגנים ✅) |
 | 20 | PASS | Step8 cold phone creates Prospect (consentPending=true) |
 | 21 | PASS | Step8 Turn1 Tip #1 (לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי ל) |
@@ -440,7 +440,7 @@ OUT Lucy:
 
 קבלי או דחי:
 לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
-BTN קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:8P0PCRDzLi808Kk2jf9TD0lN | דחה ⟶ hrc:no:cX_RVYyf07h3LDaUnoI6Ub64 | חסימת שולח ⟶ block_sender:972500000101
+BTN קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101 | קבל ⟶ hrc:ok:JOaU5ll9jHRNGFtO_khCpk-c | דחה ⟶ hrc:no:Fm0YKQBkR2HqqA-6b90LHKJR | חסימת שולח ⟶ block_sender:972500000101
 
 --- Step 3: Guest Turn 2 — task list, no tip ---
 IN  Danny: מה המשימות שלי?
@@ -456,19 +456,19 @@ OUT Lucy:
 דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד.
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «להתקשר לרופא»:
 דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד.
-BTN כן, תשמרי לי ⟶ explicit_join_accept:ba5e66be-0e12-4ba4-8743-2b934db879b0 | כן, תשמרי לי ⟶ explicit_join_accept:ba5e66be-0e12-4ba4-8743-2b934db879b0
+BTN כן, תשמרי לי ⟶ explicit_join_accept:73e8be2a-da21-449a-9f20-02c4e349ebf0 | כן, תשמרי לי ⟶ explicit_join_accept:73e8be2a-da21-449a-9f20-02c4e349ebf0
 
 --- Step 5: Guest → Member one-tap upgrade ---
-IN  Danny: [button_reply] explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+IN  Danny: [button_reply] explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
 OUT Lucy:
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «לקנות חלב»:
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «לקנות חלב»:
 --- after join ---
 בוצע! שמרתי לך את «לקנות חלב».
-BTN כן, תשמרי לי ⟶ explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c | כן, תשמרי לי ⟶ explicit_join_accept:37ed395e-1b7a-4d5c-9079-8fabaf452d8c
+BTN כן, תשמרי לי ⟶ explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343 | כן, תשמרי לי ⟶ explicit_join_accept:bbf1c210-4ab4-4a22-9285-fedd59561343
 
 --- Step 6: Guest → Member data continuity ---
-IN  Noa: [button_reply] explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
+IN  Noa: [button_reply] explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
 OUT Lucy:
 בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «להתקשר לרופא»:
 
@@ -477,7 +477,7 @@ OUT Lucy:
 לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם.
 --- after join ---
 בוצע! שמרתי לך את «להתקשר לרופא».
-BTN כן, תשמרי לי ⟶ explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86 | כן, תשמרי לי ⟶ explicit_join_accept:d2061acc-d5ff-48ec-a348-f97654784b86
+BTN כן, תשמרי לי ⟶ explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be | כן, תשמרי לי ⟶ explicit_join_accept:ca9ec552-120d-4f26-b2eb-33ca085f84be
 
 --- Step 7: Task complete → inviter notification ---
 IN  Danny: קניתי את הלחם דגנים

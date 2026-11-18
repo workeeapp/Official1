@@ -32,6 +32,8 @@ export type TipSeedDef = {
    * general seeds default to {@link GENERAL_TIP_MIN_INTERVAL_MINUTES} on reseed.
    */
   minIntervalMinutes?: number;
+  /** static (default) | dynamic — dynamic uses tip-compose LLM with FACTS. */
+  outputMode?: "static" | "dynamic";
 };
 
 /**
@@ -56,7 +58,8 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 100,
-    text: "לידיעתך: אפשר פשוט לכתוב לי מה לקנות — למשל «תוסיפי חלב לקניות» — ואשמור את זה.",
+    outputMode: "dynamic",
+    text: "Write one short Hebrew tip acknowledging they just added «{item_label}» to {list_type}. Mention they can share that list later with «תשתפי את רשימת הקניות עם …». Ground only in FACTS. Skip/empty if item_label missing.",
   },
   {
     key: "shopping_basic_show",
@@ -666,7 +669,8 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     unlockAfterKey: null,
     maxShows: 1,
     order: 504,
-    text: "אני ממליצה: אפשר תזכורת חוזרת («כל שלישי ב־19») ולחבר אותה למשימה קבועה אם בא לך.",
+    outputMode: "dynamic",
+    text: "Write one short Hebrew tip about turning the one-off reminder «{reminder_title}» into a recurring schedule (e.g. every Tuesday). Ground only in FACTS. Skip/empty if reminder_title missing.",
   },
   {
     key: "reminders_mid_edit",
@@ -804,6 +808,25 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     maxShows: 1,
     order: 606,
     text: "כדאי לנסות למחוק איש קשר שלא צריך — «תמחקי את מיכל מאנשי הקשר» — ואסיר אותו מהספר.",
+  },
+
+  // —— Inline web grounding follow-up (entity-aware; not a generic intro) ——
+  {
+    key: "web_lookup_followup",
+    for: "lucy",
+    audience: "member",
+    triggerKind: "general",
+    triggerArea: null,
+    triggerOp: null,
+    tier: "basic",
+    topic: null,
+    listType: null,
+    unlockAfterKey: null,
+    maxShows: 2,
+    order: 45,
+    minIntervalMinutes: 0,
+    outputMode: "dynamic",
+    text: "After a verified web/places lookup about «{search_topic}», write one short Hebrew tip offering to save a reminder or share that info. Ground only in FACTS. Skip/empty if search_topic missing.",
   },
 
   // —— Prospect / cold first-exposure (Wave 1 PLG) ——

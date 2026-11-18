@@ -614,6 +614,12 @@ export interface LlmMetadata {
    */
   places?: LlmPlacesAction | null;
   /**
+   * Fast same-turn web grounding (opening hours / events / cinema / facts).
+   * Engine runs hosted web_search + ExternalDataCache and replaces response.
+   * Multi-step research/portal stays on metadata.missions — not web_lookup.
+   */
+  webLookup?: LlmWebLookupAction | null;
+  /**
    * Live Jewish calendar / Shabbat ask — engine fetches Hebcal and replaces
    * response. Place required for candles/havdalah/summary; optional for
    * parasha/holidays. Missing required place → model asks; leave unset.
@@ -1474,6 +1480,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const mashov = parseMashovAction(meta);
   const smartschool = parseSmartschoolAction(meta);
   const places = parsePlacesAction(meta);
+  const webLookup = parseWebLookupAction(meta);
   const jewish = parseJewishAction(meta);
   const routes = parseRoutesAction(meta);
   const flights = parseFlightsAction(meta);
@@ -1538,6 +1545,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     ...(mashov ? { mashov } : {}),
     ...(smartschool ? { smartschool } : {}),
     ...(places ? { places } : {}),
+    ...(webLookup ? { webLookup } : {}),
     ...(jewish ? { jewish } : {}),
     ...(routes ? { routes } : {}),
     ...(flights ? { flights } : {}),
@@ -3976,6 +3984,52 @@ function parseOptionalCoord(raw: unknown): number | null {
     return Number(raw.trim());
   }
   return null;
+}
+
+/** Fast inline web grounding (same-turn; not a multi-step mission). */
+export interface LlmWebLookupAction {
+  query: string;
+  /** Explicit refresh — bypass ExternalDataCache. */
+  forceRefresh?: boolean;
+  scope?: string;
+}
+
+/** metadata.web_lookup — hosted web_search + cache; engine replaces response. */
+export function parseWebLookupAction(
+  meta: Record<string, unknown>,
+): LlmWebLookupAction | null {
+  const raw =
+    meta.web_lookup ??
+    meta.webLookup ??
+    meta.inline_search ??
+    meta.inlineSearch;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const row = raw as Record<string, unknown>;
+  const query = readText(row, [
+    "query",
+    "q",
+    "what",
+    "topic",
+    "חיפוש",
+    "שאלה",
+  ]).slice(0, 500);
+  if (!query) {
+    return null;
+  }
+  const forceRaw = row.force_refresh ?? row.forceRefresh ?? row.refresh;
+  const forceRefresh =
+    forceRaw === true ||
+    forceRaw === 1 ||
+    (typeof forceRaw === "string" &&
+      ["1", "true", "yes", "כן"].includes(forceRaw.trim().toLowerCase()));
+  const scope = readText(row, ["scope", "kind", "domain"]).slice(0, 64);
+  return {
+    query,
+    ...(forceRefresh ? { forceRefresh: true } : {}),
+    ...(scope ? { scope } : {}),
+  };
 }
 
 /** metadata.places — live Google Places fetch; engine replaces response. */

@@ -13,6 +13,12 @@ export type TipComposeFacts = {
   item_key?: string | null;
   /** Alias list of item labels from this turn (first = primary). */
   items?: string[];
+  /** Reminder title created/updated this turn. */
+  reminder_title?: string | null;
+  /** Assignee / contact display name when relevant. */
+  assignee_name?: string | null;
+  /** Inline web_lookup / places topic grounded this turn. */
+  search_topic?: string | null;
 };
 
 const STATIC_TIP_TOKENS = [
@@ -21,6 +27,9 @@ const STATIC_TIP_TOKENS = [
   "list_type",
   "op",
   "items",
+  "reminder_title",
+  "assignee_name",
+  "search_topic",
 ] as const;
 
 type StaticTipToken = (typeof STATIC_TIP_TOKENS)[number];
@@ -68,6 +77,15 @@ export function formatTipComposeFacts(facts: TipComposeFacts): string {
   } else if (label) {
     lines.push(`items: ${label}`);
   }
+  if (facts.reminder_title?.trim()) {
+    lines.push(`reminder_title: ${facts.reminder_title.trim()}`);
+  }
+  if (facts.assignee_name?.trim()) {
+    lines.push(`assignee_name: ${facts.assignee_name.trim()}`);
+  }
+  if (facts.search_topic?.trim()) {
+    lines.push(`search_topic: ${facts.search_topic.trim()}`);
+  }
   return lines.join("\n");
 }
 
@@ -83,6 +101,9 @@ function tokenValues(facts: TipComposeFacts): Record<StaticTipToken, string> {
     list_type: facts.list_type?.trim() || "",
     op: facts.op?.trim() || "",
     items: items.length > 0 ? items.join(", ") : label,
+    reminder_title: facts.reminder_title?.trim() || "",
+    assignee_name: facts.assignee_name?.trim() || "",
+    search_topic: facts.search_topic?.trim() || "",
   };
 }
 

@@ -23,6 +23,7 @@ import {
   ValidationError,
 } from "../utils/errors.js";
 import { ensureDefaultTips } from "./tips.service.js";
+import { formatCapabilityRegistryPromptBlock } from "./capabilities.registry.js";
 
 const PHONE_IN_USE = "Phone number is already in use";
 
@@ -159,7 +160,7 @@ export async function listTeamsForUser(userId: string): Promise<PublicTeam[]> {
   return rows.map(toPublicTeam);
 }
 
-/** Short custom prompt for WhatsApp guest onboarding (no Lucy capability catalog). */
+/** Short custom prompt for WhatsApp guest onboarding (capability registry sync). */
 const GUEST_LUCY_INSTRUCTIONS = [
   "SYSTEM:",
   "You are לוסי-אורח — Workee's guest guide. Your only job is to help this WhatsApp guest become a registered team member.",
@@ -177,6 +178,8 @@ const GUEST_LUCY_INSTRUCTIONS = [
   "When name + gender are known, emit metadata.register { name, gender } (and surname only if given) and confirm they are registered. Then they will talk with לוסי (not you) from the next message.",
   "TIPS: when AVAILABLE_TIPS includes guest_terms and the guest asks how registration / usage works or about terms/תקנון, set metadata.tips=[\"guest_terms\"]. The engine sends the catalog text — do not paste תקנון into responses yourself. Otherwise tips null.",
   "Never invent private data. Never claim you are the guest. Do not hand off to other workers.",
+  // Capability block last keeps the static SYSTEM prefix cache-stable.
+  formatCapabilityRegistryPromptBlock("guest"),
 ].join("\n");
 
 function publicAddressGender(
