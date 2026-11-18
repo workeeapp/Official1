@@ -1384,6 +1384,7 @@ function workerTargetingInstructions(
     "STANDING TASK DONE: if that task row has חוזר / next_occurrences, «סיימתי / עשיתי / הלכתי» OR «סמן כבוצע: <that title>» means done for THIS occurrence — never lists.remove (it would delete the whole series and its clock). Emit lists.update list_type tasks with that item_id and occurrence_done = YYYY-MM-DD of the occurrence they did (true = today; «הלכתי אתמול» → yesterday from calendar); nothing else on the item. Response: acknowledge and name the next occurrence AFTER that day from next_occurrences. done_dates on the row = already marked; do not list those occurrences again. lists.remove only on an explicit delete of the standing task («תמחקי את המשימה», «אני כבר לא הולך»). Unclear → ask whether they finished this occurrence or want the standing task deleted, with lists empty. Tasks without חוזר: remove as usual.",
     "STANDING TASK — ONE DATE CHANGED: cancelling or moving a single occurrence («ב־23.10 אני לא צריך לאסוף» / «ב־23.10 לאסוף ב־11:00») → lists.update list_type tasks with that item_id and occurrence_change { date: YYYY-MM-DD (one of next_occurrences), cancel: true } or { date, time: \"HH:mm\" }; nothing else on the item. A linked repeating clock for the same work → same turn lists update reminders with its reminder_id and the same occurrence_change. Never occurrence_done, lists.remove, a recurrence change, or a new one-off task for this. Only that date vs. every week unclear → ask whether the change is only for that date or for every <weekday>, naming both, with lists empty. It IS unclear when they name the series' own weekday or the task itself with a new time or day but no date and no scope word («תזיזי את החוג של יום שלישי ל־18:00»): FORBIDDEN changing the whole series or one date on a guess. It is clear only with a date or «הקרוב / השבוע / רק הפעם» (one date) or «מעכשיו / מהשבוע הבא / תמיד / מעכשיו והלאה / בקביעות» (the series). Response names the date and that the other occurrences stay.",
     "list_type: shopping = things to buy (לקנות חלב). tasks = work to do (להכין חביתה, לשתות מים, לקחת ילדים). On remove/update, match the list_type of the saved row in EMPLOYEE_SAVED_DATA. response must say משימות for tasks and קניות for shopping.",
+    "ASSIGN CHORE («תקצי לX …» / «תקצה לטל להביא חלב» / «תשימי על X לעשות Y»): SAME TURN lists.add list_type=tasks, targets=[X only] (assign — speaker omitted), item = the chore (e.g. להביא חלב). FORBIDDEN list_type shopping unless they explicitly asked for קניות / רשימת קניות. FORBIDDEN blocking the turn to ask «מתי להזכיר…» before creating — create/assign the task now; then soft-offer a reminder in the reply («רוצה שאוסיף לזה גם תזכורת?» / כן/לא). Reminder clock only after they accept the offer (or they already named a ping time).",
     "PERSONAL TASK DEFAULT: «תוסיפי לי משימה» / «משימה ל…» / «לטפל ב…» without naming a custom list → list_type tasks, list_name empty, targets [] (built-in personal משימות). Detail/פירוט stays on that personal item. FORBIDDEN: dumping it onto a shared custom list like משימות לעבודה just because it exists or sounds work-related — only when they explicitly named that list. Also FORBIDDEN: saving chat/meta/bug commentary as a list row.",
     "NAMED LIST MUTATE: when they name a list (לרשימת X / במשימות לעבודה), add/update/remove on list_type custom + that list_name from EMPLOYEE_SAVED_DATA — personal or shared. Guests still cannot mutate. Do not refuse because shared; do not switch to built-in tasks/shopping.",
     "LIST NAME MATCH (custom / titled lists only): resolve against THIS turn's EMPLOYEE_SAVED_DATA list_name (personal or shared). Built-in קניות/משימות/אנשי קשר → fixed list_type, list_name \"\" unless they named a custom title. Match by MEANING — the speaker need not repeat the exact title; an exact title or a description that fits («הרשימה של ערב הפוקר») both refer to a list. (1) ONE clearly matching list → mutate NOW, no confirm. (2) TWO OR MORE plausible lists (e.g. spoken token in ≥2 titles: באגים / באגים לקוד; two poker-evening lists) → lists=[] and ASK which as NUMBERED 1. 2. 3. (3) No sufficiently clear match → lists=[] and ASK — never guess. For (2)/(3) list the candidates as NUMBERED 1. 2. 3. (exact list_name; personal vs משותפת עם X); never pick first/shared/looks-like. Example shape: a short question asking which list they meant, then «1. באגים» / «2. באגים לקוד (משותפת עם עמית)». After they answer with the title OR a line index («2» / «ל2») → map to the LAST list-pick ask line → exact list_name from EMPLOYEE_SAVED_DATA. Out-of-range index → re-ask; FORBIDDEN inventing numbers. FORBIDDEN: inventing list_name or picking by topic alone — a topic that refers to no list («הוסיפי באג») is not a list description (TOPIC-ONLY handling). Server will not fix a wrong list_name.",
@@ -4523,6 +4524,12 @@ export async function sendChatMessage(input: {
     // Partner shared-list notify skips must not erase the speaker's spoken reply.
     // replaceSpoken is only for intentional outbound sends the model claimed to deliver.
     let outboundSkips = [...waRelays.skips, ...waPhones.skips];
+    // Assign/share in-app notify also hits Graph — include those no_session skips
+    // so hrc:ok (LLM 0ms) cold partners get AskerNotice, not a raw Meta string.
+    const closedSessionSkips = [
+      ...outboundSkips,
+      ...sharedWhatsAppSkips,
+    ].filter((skip) => skip.reason === "no_session");
     let inviteComposeUrl: string | null = null;
     let inviteNotice = "";
     let inviteSaveContactButton: { label: string; command: string } | null =
@@ -4535,12 +4542,13 @@ export async function sendChatMessage(input: {
           digitalId: digital.id,
           askerName: actorName,
           phoneRelays: attributedPhones,
-          phoneSkips: waPhones.skips,
-          relaySkips: waRelays.skips,
+          phoneSkips: [...waPhones.skips, ...sharedWhatsAppSkips],
+          relaySkips: [...waRelays.skips, ...sharedWhatsAppSkips],
           relays: attributedRelays,
           messages: metadata.messages ?? [],
           contacts: refreshedContacts,
           employees: [...employees, ...externalPartners],
+          closedSessionSkips,
         }),
       );
       if (inviteBuilt) {
@@ -4560,7 +4568,10 @@ export async function sendChatMessage(input: {
     if (!inviteComposeUrl && deferredCollabComposeUrl) {
       inviteComposeUrl = deferredCollabComposeUrl;
     }
-    const skips = [...sharedWhatsAppSkips, ...outboundSkips];
+    // Never surface raw no_session Meta/24h strings — AskerNotice covers them.
+    const skips = [...sharedWhatsAppSkips, ...outboundSkips].filter(
+      (skip) => skip.reason !== "no_session",
+    );
     const whatsappNotice = [inviteNotice, formatWhatsAppSkipNotice(skips)]
       .filter(Boolean)
       .join("\n\n");
@@ -4572,15 +4583,21 @@ export async function sendChatMessage(input: {
           scheduledJobCount: scheduledJobDeliveryCount,
         });
     // Cold AskerNotice: append after honest acks («ממתינה לתשובה…»).
-    // Replace only false «שלחתי/שיתפתי» claims or skip-only failures.
+    // Replace false «שלחתי/שיתפתי/בוצע לפי האישור» claims or skip-only failures.
+    // (Use turn.reply here — workingReply is declared next and starts as turn.reply.)
     const spokenClaim = parseLlmReply(turn.reply).response;
     const falseOutboundClaim =
       inviteNotice.length > 0 &&
-      /שיתפ|שלחתי|נשלח|הוטל(?:ה)? האחריות|ביצעתי את השיתוף/.test(
+      /שיתפ|שלחתי|נשלח|הוטל(?:ה)? האחריות|ביצעתי את השיתוף|בוצע לפי האישור/.test(
         spokenClaim,
       );
+    const hadClosedSessionOutbound =
+      closedSessionSkips.length > 0 || deferredCollabNotice.length > 0;
     const deliveryFailed =
       falseOutboundClaim ||
+      (inviteNotice.length > 0 &&
+        Boolean(authorizedHighRiskConfirmId) &&
+        hadClosedSessionOutbound) ||
       ((formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
         scheduleSkipNotice.length > 0) &&
         inviteNotice.length === 0);
@@ -6145,7 +6162,12 @@ export async function sendChatMessage(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
-    const replaceSpoken = deliveryFailed;
+    // Cold deferred Pending + AskerNotice is the whole asker-facing reply —
+    // drop validate-miss / false-done / «הטלתי» noise (incl. hrc:ok path).
+    const preferAskerNoticeOnly = Boolean(
+      deferredCollabNotice && inviteNotice.trim(),
+    );
+    const replaceSpoken = deliveryFailed || preferAskerNoticeOnly;
     let reply = replaceSpoken
       ? composeAssistantReply({
           llmReply: workingReply,
@@ -6460,6 +6482,8 @@ async function buildColdInvitesForNoSession(input: {
   }>;
   contacts: Array<{ name: string; phone: string | null }>;
   employees: PublicEmployee[];
+  /** Assign/share notify + outbound no_session skips (hrc:ok path included). */
+  closedSessionSkips?: WhatsAppDeliverySkip[];
 }): Promise<{
   notice: string;
   composeUrl: string;
@@ -6599,6 +6623,53 @@ async function buildColdInvitesForNoSession(input: {
         expectsReply: message.expectsReply !== false,
       });
     }
+  }
+
+  // Closed-session notify skips (assign/share in-app WhatsApp ping, hrc:ok):
+  // resolve label → phone and create the same AskerNotice + wa.me draft.
+  for (const skip of input.closedSessionSkips ?? []) {
+    if (skip.reason !== "no_session") {
+      continue;
+    }
+    const label = skip.label.trim();
+    if (!label) {
+      continue;
+    }
+    let phone = "";
+    const employeeHit = matchEmployee(label, input.employees);
+    if (employeeHit?.phone && employeeHit.id !== input.asker.id) {
+      phone =
+        toWhatsAppAddress(employeeHit.phone) ||
+        normalizePhoneDigits(employeeHit.phone);
+    } else {
+      const contact = matchContact(label, input.contacts);
+      if (contact?.phone) {
+        phone =
+          toWhatsAppAddress(contact.phone) ||
+          normalizePhoneDigits(contact.phone);
+      }
+    }
+    if (!phone || seen.has(phone)) {
+      continue;
+    }
+    seen.add(phone);
+    const matchedMessage = input.messages.find((row) =>
+      row.targets.some(
+        (t) => t.includes(label) || (phone.length > 0 && t.includes(phone)),
+      ),
+    );
+    candidates.push({
+      phone,
+      label:
+        employeeHit?.nickname?.trim() ||
+        employeeHit?.name.trim() ||
+        label,
+      askSummary:
+        matchedMessage?.askSummary?.trim() ||
+        matchedMessage?.text.trim() ||
+        "לעדכן אותי",
+      expectsReply: matchedMessage?.expectsReply !== false,
+    });
   }
 
   if (candidates.length === 0) {

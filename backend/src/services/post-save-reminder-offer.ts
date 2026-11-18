@@ -11,7 +11,7 @@ import type {
 } from "@workee/shared";
 
 export const POST_SAVE_REMINDER_OFFER_TEXT =
-  "אוסיף גם תזכורת בוואטסאפ?";
+  "רוצה שאוסיף לזה גם תזכורת?";
 
 export const POST_SAVE_REMINDER_OFFER_BUTTONS: LlmReplyButton[] = [
   { label: "כן", command: "כן" },

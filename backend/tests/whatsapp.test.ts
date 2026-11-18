@@ -757,19 +757,22 @@ describe("WhatsApp webhook", () => {
     fetchSpy.mockRestore();
   });
 
-  it("explains a skipped WhatsApp send without a 24h window", () => {
+  it("omits raw no_session Meta/24h strings (AskerNotice owns that UX)", () => {
     expect(
       formatWhatsAppSkipNotice([{ label: "מיכל", reason: "no_session" }]),
-    ).toContain("מיכל");
+    ).toBe("");
     expect(
-      formatWhatsAppSkipNotice([{ label: "מיכל", reason: "no_session" }]),
-    ).toContain("24");
+      formatWhatsAppSkipNotice([
+        { label: "מיכל", reason: "no_session" },
+        { label: "טל", reason: "no_phone" },
+      ]),
+    ).toContain("אין מספר בכרטיס");
     expect(
-      appendEngineNotice(
-        JSON.stringify({ response: "שלחתי למיכל", metadata: {} }),
-        "הוואטסאפ אל מיכל לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.",
-      ),
-    ).toContain("לא נשלח");
+      formatWhatsAppSkipNotice([
+        { label: "מיכל", reason: "no_session" },
+        { label: "טל", reason: "no_phone" },
+      ]),
+    ).not.toContain("24");
   });
 
   it("keeps the model response and only appends an engine notice", () => {
@@ -947,7 +950,7 @@ describe("WhatsApp webhook", () => {
 
   it("replaces a false sent claim when WhatsApp delivery failed", () => {
     const fail =
-      "הוואטסאפ אל מיכל לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.";
+      "ממתין — ההודעה ל«מיכל» עדיין ממתינה. «מיכל» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ.";
     const spoken = composeAssistantReply({
       llmReply: JSON.stringify({
         response: "שלחתי למיכל הודעה עם לבבות",
@@ -960,9 +963,9 @@ describe("WhatsApp webhook", () => {
     expect(parsed.responses).toEqual([fail]);
   });
 
-  it("appends partner notify skips without erasing a shared-list delete reply", () => {
+  it("appends non-session partner skips without erasing a shared-list delete reply", () => {
     const partnerSkip = formatWhatsAppSkipNotice([
-      { label: "עמית", reason: "no_session" },
+      { label: "עמית", reason: "failed" },
     ]);
     const spoken = composeAssistantReply({
       llmReply: JSON.stringify({

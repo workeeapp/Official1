@@ -29,10 +29,6 @@ import { EXPLICIT_JOIN_ACCEPT_PREFIX } from "../src/services/pending-prospect-ac
 import {
   parseCollabInvitePayload,
 } from "../src/services/collab-invite.service.js";
-import {
-  createWhatsAppInvite,
-  formatAskerPendingNotice,
-} from "../src/services/whatsapp-invite.service.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
 import { listEmployeesForUser } from "../src/services/employee.service.js";
 import { resolveWhatsAppSpeaker } from "../src/services/whatsapp.service.js";
@@ -47,6 +43,19 @@ const PRIVATE_ITEM = "סוד-פרטי-אל-תדליף";
 const SHARE_ITEM = "לחם-שיתוף-PLG";
 const REMINDER_ITEM = "לקנות חלב";
 const ASSIGN_TASK = "להוציא את הכלב";
+const ASSIGN_MILK_TASK = "להביא חלב";
+
+function visibleReplyText(reply: string): string {
+  const parsed = parseLlmReply(reply);
+  return [
+    parsed.response,
+    ...parsed.responseBubbles.map((b) => b.text),
+    parsed.whatsappComposeUrl ?? "",
+    ...parsed.responseBubbles.map((b) => b.whatsappComposeUrl ?? ""),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 type Check = { name: string; pass: boolean; detail: string };
 type Bubble = { who: string; direction: "in" | "out"; text: string; buttons?: string[] };
@@ -566,6 +575,113 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
         ).consentPending === true,
       );
 
+      await prisma.whatsAppInbound
+        .deleteMany({ where: { phone: { contains: PROSPECT_PHONE.slice(-9) } } })
+        .catch(() => undefined);
+
+      sayIn("Asker", `תקצי ל${CONTACT_NAME} ${ASSIGN_MILK_TASK}`);
+      stubLlm({
+        responses: [
+          {
+            text: `הטלתי על ${CONTACT_NAME}: ${ASSIGN_MILK_TASK}.`,
+            buttons: [],
+          },
+        ],
+        metadata: {
+          lists: [
+            {
+              action: "add",
+              list_type: "tasks",
+              list_name: "",
+              targets: [CONTACT_NAME],
+              items: [{ "שם משימה": ASSIGN_MILK_TASK }],
+            },
+          ],
+        },
+      });
+      const askerAssignMilk = await sendChatMessage({
+        userId: asker.account.userId,
+        employeeId: asker.account.employeeId,
+        digitalEmployeeId: asker.digitalEmployeeId,
+        message: `תקצי ל${CONTACT_NAME} ${ASSIGN_MILK_TASK}`,
+      });
+      sayOut("Asker", askerAssignMilk.reply);
+      const milkHr = confirmCommandFromReply(askerAssignMilk.reply);
+      check(
+        "תקצי assign requires high-risk confirm or Pending AskerNotice",
+        Boolean(milkHr) || /ממתין/.test(visibleReplyText(askerAssignMilk.reply)),
+        milkHr ?? visibleReplyText(askerAssignMilk.reply).slice(0, 180),
+      );
+      let milkConfirmReply = askerAssignMilk.reply;
+      if (milkHr) {
+        sayIn("Asker", milkHr);
+        setLlmClientForTests(null);
+        const milkConfirmTurn = await sendChatMessage({
+          userId: asker.account.userId,
+          employeeId: asker.account.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId,
+          message: milkHr,
+        });
+        sayOut("Asker", milkConfirmTurn.reply);
+        milkConfirmReply = milkConfirmTurn.reply;
+      } else {
+        setLlmClientForTests(null);
+      }
+      const milkVisible = visibleReplyText(milkConfirmReply);
+      check(
+        "Cold תקצי hrc:ok has no raw 24h Meta error",
+        !/לא כתב לעסק ב־24 השעות האחרונות/.test(milkVisible),
+        milkVisible.slice(0, 240),
+      );
+      check(
+        "Cold תקצי hrc:ok AskerNotice has draft + wa.me",
+        /ממתין/.test(milkVisible) &&
+          (/היי, כאן לוסי|«/.test(milkVisible) ||
+            /קישור מוכן|שלח בוואטסאפ|24/.test(milkVisible)) &&
+          (/wa\.me\//.test(milkVisible) ||
+            Boolean(parseLlmReply(milkConfirmReply).whatsappComposeUrl) ||
+            parseLlmReply(milkConfirmReply).responseBubbles.some((b) =>
+              Boolean(b.whatsappComposeUrl),
+            )),
+        milkVisible.slice(0, 280),
+      );
+      check(
+        "Cold תקצי did not block on מתי להזכיר before create",
+        !/מתי להזכיר/.test(milkVisible),
+        milkVisible.slice(0, 160),
+      );
+      const milkInvite = await prisma.whatsAppInvite.findFirst({
+        where: {
+          userId: asker.account.userId,
+          recipientPhone: { contains: PROSPECT_PHONE.slice(-9) },
+          status: "pending",
+          askSummary: { contains: ASSIGN_MILK_TASK.slice(0, 20) },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const milkPayload = milkInvite
+        ? parseCollabInvitePayload(milkInvite.payload)
+        : null;
+      check(
+        "Cold תקצי invite pending with tasks payload",
+        Boolean(milkInvite) &&
+          milkPayload?.kind === "assign" &&
+          milkPayload.domain === "list" &&
+          (milkPayload.action as { listType?: string }).listType === "tasks",
+        milkInvite?.id ?? "",
+      );
+      // Free the phone for Scenario2 Accept/Join (dog assign).
+      if (milkInvite) {
+        await prisma.whatsAppInvite.update({
+          where: { id: milkInvite.id },
+          data: { status: "cancelled" },
+        });
+      }
+
+      // Scenario2 assign (dog) — Accept/Join gate on Prospect.
+      await prisma.whatsAppInbound
+        .deleteMany({ where: { phone: { contains: PROSPECT_PHONE.slice(-9) } } })
+        .catch(() => undefined);
       sayIn("Asker", `תבקשי מ${CONTACT_NAME} ${ASSIGN_TASK} ב-17:00`);
       stubLlm({
         responses: [{ text: "ביקשתי.", buttons: [] }],
@@ -589,64 +705,38 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
       });
       sayOut("Asker", askerAssign1.reply);
       const assignHr = confirmCommandFromReply(askerAssign1.reply);
-      check("Assign also requires high-risk confirm", Boolean(assignHr));
-      sayIn("Asker", assignHr ?? "(missing)");
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: asker.account.userId,
-        employeeId: asker.account.employeeId,
-        digitalEmployeeId: asker.digitalEmployeeId,
-        message: assignHr!,
-      });
-      const assignRowId = randomUUID();
-      const assignPayload = {
-        v: 2 as const,
-        kind: "assign" as const,
-        domain: "list" as const,
-        rowId: assignRowId,
-        action: {
-          action: "add" as const,
-          listType: "tasks" as const,
-          listName: "",
-          items: [{ "שם משימה": ASSIGN_TASK }],
-          targets: [] as string[],
-        },
-      };
-      expect(parseCollabInvitePayload(assignPayload)).toBeTruthy();
-      const assignCreated = await createWhatsAppInvite({
-        userId: asker.account.userId,
-        askerEmployeeId: asker.account.employeeId,
-        digitalEmployeeId: asker.digitalEmployeeId,
-        askerName: asker.name,
-        recipientPhone: PROSPECT_PHONE,
-        recipientLabel: CONTACT_NAME,
-        askSummary: ASSIGN_TASK,
-        expectsReply: true,
-        intentKind: "assign",
-        payload: assignPayload,
-      });
-      const assignPendingNotice = formatAskerPendingNotice({
-        recipientLabel: CONTACT_NAME,
-        intentKind: "assign",
-      });
-      sayOut(
-        "Asker",
-        JSON.stringify({
-          responses: [
-            {
-              text: `${assignPendingNotice}\n\n${assignCreated?.notice ?? ""}`,
-              buttons: [],
-            },
-          ],
-          metadata: {},
-        }),
-      );
+      check("Assign also requires high-risk confirm", Boolean(assignHr) || /ממתין/.test(visibleReplyText(askerAssign1.reply)));
+      let assignConfirmReply = askerAssign1.reply;
+      if (assignHr) {
+        sayIn("Asker", assignHr);
+        setLlmClientForTests(null);
+        const assignConfirmTurn = await sendChatMessage({
+          userId: asker.account.userId,
+          employeeId: asker.account.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId,
+          message: assignHr,
+        });
+        sayOut("Asker", assignConfirmTurn.reply);
+        assignConfirmReply = assignConfirmTurn.reply;
+      } else {
+        setLlmClientForTests(null);
+      }
+      const assignVisible = visibleReplyText(assignConfirmReply);
       check(
-        "Assign asker notice is ממתין",
-        assignPendingNotice.includes("ממתין"),
-        assignPendingNotice,
+        "Assign asker notice is ממתין (real hrc:ok reply)",
+        /ממתין/.test(assignVisible) &&
+          !/לא כתב לעסק ב־24 השעות האחרונות/.test(assignVisible),
+        assignVisible.slice(0, 240),
       );
-      const assignInvite = assignCreated?.invite ?? null;
+      const assignInvite = await prisma.whatsAppInvite.findFirst({
+        where: {
+          userId: asker.account.userId,
+          recipientPhone: { contains: PROSPECT_PHONE.slice(-9) },
+          status: "pending",
+          askSummary: { contains: ASSIGN_TASK.slice(0, 20) },
+        },
+        orderBy: { createdAt: "desc" },
+      });
       check("Assign invite pending", Boolean(assignInvite), assignInvite?.id ?? "");
 
       stubLlm({

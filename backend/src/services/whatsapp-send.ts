@@ -710,11 +710,12 @@ export function formatWhatsAppSkipNotice(skips: WhatsAppDeliverySkip[]): string 
     return "";
   }
 
+  // `no_session` (closed Meta 24h window) must NEVER surface as a raw Graph/
+  // Meta error to the asker — chat.service converts those into Pending +
+  // AskerNotice (forwardable draft + wa.me). Only keep non-session failures.
   return skips
+    .filter((skip) => skip.reason !== "no_session")
     .map((skip) => {
-      if (skip.reason === "no_session") {
-        return `הוואטסאפ אל ${skip.label} לא נשלח: הנמען לא כתב לעסק ב־24 השעות האחרונות.`;
-      }
       if (skip.reason === "no_phone") {
         return `הוואטסאפ אל ${skip.label} לא נשלח: אין מספר בכרטיס.`;
       }
