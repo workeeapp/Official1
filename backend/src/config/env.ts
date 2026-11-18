@@ -77,7 +77,9 @@ const envSchema = z.object({
   AVIATIONSTACK_ACCESS_KEY: z.string().optional(),
   /**
    * Wave 1 Stage 2: comma-separated E.164/digits phones allowed to use
-   * /as-prospect, /reset-me, and /reset-cold when NODE_ENV !== production.
+   * /as-prospect, /restore-me (/reset-me alias), and /reset-cold when
+   * NODE_ENV !== production. Keep empty on LIVE by default — tools are
+   * ignored when unset. Never enables destructive account deletes.
    */
   DEV_TEST_PHONES: z.string().optional(),
   /** Prospect pre-LLM inbound message hard cap (circuit breaker). */

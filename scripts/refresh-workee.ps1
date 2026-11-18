@@ -64,6 +64,44 @@ function Write-Step([string]$message) {
   Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $message)
 }
 
+function Backup-WorkeeLiveDatabaseBeforeRefresh {
+  <#
+    Automatic pre-refresh pg_dump of LIVE workee DB.
+    Writes timestamped dumps under Official1-backups and retains the last 14
+    workee-LIVE-pre-refresh-*.dump files. Never touches eval :5436.
+  #>
+  $backupRoot = "C:\Users\dorta\Desktop\Official1-backups"
+  New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $outFile = Join-Path $backupRoot "workee-LIVE-pre-refresh-$stamp.dump"
+
+  $container = docker ps --format "{{.Names}}" 2>$null | Where-Object { $_ -eq "workee-postgres" } | Select-Object -First 1
+  if (-not $container) {
+    Write-Warning "workee-postgres container not running — skip pre-refresh pg_dump"
+    return
+  }
+
+  Write-Step "Pre-refresh pg_dump of LIVE workee → $outFile"
+  docker exec -e PGPASSWORD=workee workee-postgres pg_dump -U workee -d workee -Fc -f /tmp/workee-LIVE-pre-refresh.dump
+  if ($LASTEXITCODE -ne 0) {
+    throw "pre-refresh pg_dump failed (exit $LASTEXITCODE)"
+  }
+  docker cp workee-postgres:/tmp/workee-LIVE-pre-refresh.dump $outFile
+  if (-not (Test-Path $outFile) -or (Get-Item $outFile).Length -lt 1024) {
+    throw "pre-refresh pg_dump missing or too small: $outFile"
+  }
+  Write-Step ("Pre-refresh dump OK ({0:N1} MB)" -f ((Get-Item $outFile).Length / 1MB))
+
+  $kept = Get-ChildItem -Path $backupRoot -Filter "workee-LIVE-pre-refresh-*.dump" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending
+  if ($kept.Count -gt 14) {
+    $kept | Select-Object -Skip 14 | ForEach-Object {
+      Write-Step "Pruning old dump $($_.Name)"
+      Remove-Item -Force $_.FullName
+    }
+  }
+}
+
 if ($root -ne $scriptCheckout) {
   Write-Step "Live worktree: $root (primary was $scriptCheckout; use -Local or WORKEE_FORCE_LOCAL=1 to override)"
 }
@@ -398,6 +436,9 @@ Invoke-NativeOk "npm install"
 # Do NOT free ports here - keep-up / an old API may reclaim 3003 during the long
 # migrate+build window and then collide with the new npm run dev. Stop immediately
 # before start instead.
+
+# Safety net: dump LIVE before migrate/restart so we can restore after wipe.
+Backup-WorkeeLiveDatabaseBeforeRefresh
 
 Write-Step "Applying migrations (db:deploy)"
 npm run db:deploy

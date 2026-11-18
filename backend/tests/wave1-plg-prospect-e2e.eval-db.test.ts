@@ -340,8 +340,10 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
         text: "/reset-me",
       });
       check(
-        "/reset-me restores asker phone",
-        resetMe.handled === true && resetMe.reply.includes(ASKER_PHONE),
+        "/reset-me restores asker phone without deletes",
+        resetMe.handled === true &&
+          resetMe.reply.includes(ASKER_PHONE) &&
+          resetMe.reply.includes("ללא מחיקת נתונים"),
         resetMe.reply,
       );
       const askerEmp = await prisma.employee.findUniqueOrThrow({

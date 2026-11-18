@@ -1,9 +1,10 @@
 /**
- * Regression: /reset-me must purge a temp Prospect that already has
- * reminders (actor Restrict), assigned task lists, pending outbound rows,
- * and a WhatsAppInbound window — without FK errors.
+ * Regression: /restore-me (/reset-me alias) must restore a parked `_backup`
+ * phone without deleting the real member's reminders/lists — and must only
+ * unlink (phone=null) a temporary Prospect holding the live digits.
  *
  * Run: npm run test:eval-db -- tests/wave1-reset-me-teardown.eval-db.test.ts
+ * (isolated workee_test — never LIVE)
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../src/database/prisma.js";
@@ -17,14 +18,12 @@ import { resetEnvCache } from "../src/config/env.js";
 import {
   handleDevProspectTool,
   PHONE_BACKUP_SUFFIX,
-  purgeDevUserAccount,
 } from "../src/services/prospect-dev-tools.service.js";
 import { phonesMatch } from "../src/utils/phone.js";
 
 const PHONE = "972500000091";
 
 const harnesses: HarnessAccount[] = [];
-const extraUserIds: string[] = [];
 
 async function cleanupPhone(phone: string): Promise<void> {
   const humans = await prisma.employee.findMany({
@@ -39,7 +38,15 @@ async function cleanupPhone(phone: string): Promise<void> {
         row.phone.endsWith(PHONE_BACKUP_SUFFIX)),
   );
   for (const hit of hits) {
-    await purgeDevUserAccount(hit.userId).catch(() => undefined);
+    const account = harnesses.find((h) => h.userId === hit.userId);
+    if (account) {
+      await destroyHarnessAccount(account).catch(() => undefined);
+      const idx = harnesses.findIndex((h) => h.userId === hit.userId);
+      if (idx >= 0) harnesses.splice(idx, 1);
+    } else {
+      // Test-only cleanup on eval DB — not used by production /restore-me.
+      await prisma.employee.update({ where: { id: hit.id }, data: { phone: null } });
+    }
   }
   await prisma.whatsAppInbound
     .deleteMany({ where: { phone: { contains: phone.slice(-9) } } })
@@ -52,16 +59,10 @@ beforeAll(() => {
 });
 
 afterAll(async () => {
-  for (const id of [...extraUserIds]) {
-    await purgeDevUserAccount(id).catch(() => undefined);
-  }
-  extraUserIds.length = 0;
   while (harnesses.length > 0) {
     const account = harnesses.pop();
     if (account) {
-      await purgeDevUserAccount(account.userId).catch(async () => {
-        await destroyHarnessAccount(account).catch(() => undefined);
-      });
+      await destroyHarnessAccount(account).catch(() => undefined);
     }
   }
   await cleanupPhone(PHONE);
@@ -69,14 +70,14 @@ afterAll(async () => {
   resetEnvCache();
 });
 
-describe("Wave 1 /reset-me teardown (eval-db)", () => {
-  it("purges temp Prospect with reminders, tasks, pending outbound, and inbound", async () => {
+describe("Wave 1 /restore-me phone-park (eval-db)", () => {
+  it("restores parked member without deleting reminders/lists; unlinks temp Prospect only", async () => {
     await cleanupPhone(PHONE);
     process.env.DEV_TEST_PHONES = PHONE;
     process.env.NODE_ENV = "test";
     resetEnvCache();
 
-    const member = await createHarnessAccount("טל-reset", { digitalWorker: true });
+    const member = await createHarnessAccount("טל-restore", { digitalWorker: true });
     harnesses.push(member);
     await prisma.user.update({
       where: { id: member.userId },
@@ -87,6 +88,39 @@ describe("Wave 1 /reset-me teardown (eval-db)", () => {
       data: { phone: PHONE },
     });
 
+    // Durable member data that must survive restore-me.
+    await prisma.reminder.create({
+      data: {
+        userId: member.userId,
+        ownerId: member.employeeId,
+        actorId: member.employeeId,
+        itemKey: "חלב-member",
+        itemLabel: "לקנות חלב",
+        listType: "tasks",
+        fireAt: new Date(Date.now() + 60_000),
+        repeat: "once",
+        pingIds: [member.employeeId],
+        messageText: "לקנות חלב",
+        status: "active",
+        sendStatus: "pending",
+      },
+    });
+    const memberList = await prisma.employeeList.create({
+      data: {
+        employeeId: member.digitalEmployeeId!,
+        listType: "tasks",
+        name: "מטלות-member",
+      },
+    });
+    await prisma.employeeListItem.create({
+      data: {
+        listId: memberList.id,
+        itemKey: "חלב-member",
+        data: { text: "לקנות חלב" },
+        addedById: member.employeeId,
+      },
+    });
+
     const asProspect = await handleDevProspectTool({
       phone: PHONE,
       text: "/as-prospect",
@@ -94,9 +128,13 @@ describe("Wave 1 /reset-me teardown (eval-db)", () => {
     expect(asProspect.handled).toBe(true);
     expect(asProspect.reply).toMatch(/_backup|as-prospect/i);
 
-    const temp = await createHarnessAccount("Prospect-reset", { digitalWorker: true });
+    const parked = await prisma.employee.findUniqueOrThrow({
+      where: { id: member.employeeId },
+    });
+    expect(parked.phone).toBe(`${PHONE}${PHONE_BACKUP_SUFFIX}`);
+
+    const temp = await createHarnessAccount("Prospect-restore", { digitalWorker: true });
     harnesses.push(temp);
-    extraUserIds.push(temp.userId);
     await prisma.user.update({
       where: { id: temp.userId },
       data: { consentPending: true },
@@ -105,14 +143,12 @@ describe("Wave 1 /reset-me teardown (eval-db)", () => {
       where: { id: temp.employeeId },
       data: { phone: PHONE },
     });
-
-    // Reminder with actor Restrict — this is what broke LIVE /reset-me.
     await prisma.reminder.create({
       data: {
         userId: temp.userId,
         ownerId: temp.employeeId,
         actorId: temp.employeeId,
-        itemKey: "תיק-reset",
+        itemKey: "תיק-temp",
         itemLabel: "לקחת תיק",
         listType: "tasks",
         fireAt: new Date(Date.now() + 60_000),
@@ -124,91 +160,65 @@ describe("Wave 1 /reset-me teardown (eval-db)", () => {
       },
     });
 
-    const list = await prisma.employeeList.create({
-      data: {
-        employeeId: temp.digitalEmployeeId!,
-        listType: "tasks",
-        name: "מטלות",
-      },
-    });
-    await prisma.employeeListItem.create({
-      data: {
-        listId: list.id,
-        itemKey: "תיק-reset",
-        data: { text: "לקחת תיק" },
-        addedById: temp.employeeId,
-      },
-    });
-
-    await prisma.deliveryAttempt.create({
-      data: {
-        userId: temp.userId,
-        ledgerKey: `reset-me-teardown-${temp.userId}`,
-        stepKey: "wa:notice",
-        destination: PHONE,
-        purpose: "asker_notice",
-        status: "queued",
-      },
-    });
-
-    await prisma.whatsAppInvite.create({
-      data: {
-        token: `WRK-INV-RESET${temp.userId.replace(/-/g, "").slice(0, 12)}`.slice(0, 32),
-        userId: temp.userId,
-        askerEmployeeId: temp.employeeId,
-        digitalEmployeeId: temp.digitalEmployeeId!,
-        recipientPhone: "972509999001",
-        recipientLabel: "דני",
-        askSummary: "שיתוף בדיקה",
-        draftText: "טיוטה",
-        status: "pending",
-      },
-    });
-
     await prisma.whatsAppInbound.upsert({
       where: { phone: PHONE },
       create: { phone: PHONE, lastInboundAt: new Date() },
       update: { lastInboundAt: new Date() },
     });
 
-    const beforeReminders = await prisma.reminder.count({ where: { userId: temp.userId } });
-    const beforeAttempts = await prisma.deliveryAttempt.count({
-      where: { userId: temp.userId },
-    });
-    const beforeLists = await prisma.employeeList.count({
-      where: { employeeId: temp.digitalEmployeeId! },
-    });
-    expect(beforeReminders).toBeGreaterThan(0);
-    expect(beforeAttempts).toBeGreaterThan(0);
-    expect(beforeLists).toBeGreaterThan(0);
-
-    const resetMe = await handleDevProspectTool({
+    const restore = await handleDevProspectTool({
       phone: PHONE,
-      text: "/reset-me",
+      text: "/restore-me",
     });
-    expect(resetMe.handled).toBe(true);
-    expect(resetMe.reply).toMatch(/שוחזר/);
-    expect(resetMe.reply).not.toMatch(/נכשל/);
-    expect(resetMe.reply).toMatch(/חלון 24|Cold/i);
+    expect(restore.handled).toBe(true);
+    expect(restore.reply).toMatch(/שוחזר/);
+    expect(restore.reply).toMatch(/ללא מחיקת נתונים/);
+    expect(restore.reply).not.toMatch(/נכשל/);
 
     const restored = await prisma.employee.findUniqueOrThrow({
       where: { id: member.employeeId },
     });
     expect(restored.phone).toBe(PHONE);
 
-    const tempUser = await prisma.user.findUnique({ where: { id: temp.userId } });
-    expect(tempUser).toBeNull();
-    expect(await prisma.reminder.count({ where: { userId: temp.userId } })).toBe(0);
-    expect(await prisma.deliveryAttempt.count({ where: { userId: temp.userId } })).toBe(0);
+    // Real member durable data intact.
+    expect(await prisma.reminder.count({ where: { userId: member.userId } })).toBeGreaterThan(0);
     expect(
-      await prisma.employeeList.count({ where: { employeeId: temp.digitalEmployeeId! } }),
-    ).toBe(0);
+      await prisma.employeeList.count({ where: { employeeId: member.digitalEmployeeId! } }),
+    ).toBeGreaterThan(0);
+
+    // Temp prospect still exists but phone unlinked — never purged.
+    const tempUser = await prisma.user.findUnique({ where: { id: temp.userId } });
+    expect(tempUser).not.toBeNull();
+    const tempEmp = await prisma.employee.findUniqueOrThrow({
+      where: { id: temp.employeeId },
+    });
+    expect(tempEmp.phone).toBeNull();
+    expect(await prisma.reminder.count({ where: { userId: temp.userId } })).toBeGreaterThan(0);
+
     expect(await prisma.whatsAppInbound.findUnique({ where: { phone: PHONE } })).toBeNull();
 
-    // Avoid double-delete in afterAll — temp already purged.
-    const idx = harnesses.findIndex((h) => h.userId === temp.userId);
-    if (idx >= 0) harnesses.splice(idx, 1);
-    const extraIdx = extraUserIds.indexOf(temp.userId);
-    if (extraIdx >= 0) extraUserIds.splice(extraIdx, 1);
+    // Legacy alias behaves the same (re-park + restore).
+    const asProspect2 = await handleDevProspectTool({
+      phone: PHONE,
+      text: "/as-prospect",
+    });
+    expect(asProspect2.handled).toBe(true);
+    // Put temp back on digits so /reset-me has something to unlink.
+    await prisma.employee.update({
+      where: { id: temp.employeeId },
+      data: { phone: PHONE },
+    });
+    const alias = await handleDevProspectTool({
+      phone: PHONE,
+      text: "/reset-me",
+    });
+    expect(alias.handled).toBe(true);
+    expect(alias.reply).toMatch(/שוחזר|restore-me/);
+    expect(alias.reply).toMatch(/ללא מחיקת נתונים/);
+    const memberAgain = await prisma.employee.findUniqueOrThrow({
+      where: { id: member.employeeId },
+    });
+    expect(memberAgain.phone).toBe(PHONE);
+    expect(await prisma.reminder.count({ where: { userId: member.userId } })).toBeGreaterThan(0);
   });
 });

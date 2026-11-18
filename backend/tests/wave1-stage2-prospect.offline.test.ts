@@ -546,60 +546,40 @@ describe("Dev /as-prospect, /reset-me, /reset-cold", () => {
     expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
   });
 
-  it("clears WhatsApp 24h inbound window on /reset-me after restore", async () => {
+  it("clears WhatsApp 24h inbound window on /restore-me after phone restore", async () => {
     employeeFindFirst
-      .mockResolvedValueOnce(null) // no temp prospect on digits
       .mockResolvedValueOnce({
         id: "e-bak",
         userId: "u-bak",
         phone: `972501111111${PHONE_BACKUP_SUFFIX}`,
-      });
+      })
+      .mockResolvedValueOnce(null); // no temp prospect on digits
     employeeUpdate.mockResolvedValue({});
     const out = await handleDevProspectTool({
       phone: "972501111111",
-      text: "/reset-me",
+      text: "/restore-me",
     });
     expect(out.handled).toBe(true);
     expect(out.reply).toContain("972501111111");
+    expect(out.reply).toMatch(/ללא מחיקת נתונים|שוחזר/i);
     expect(out.reply).toMatch(/חלון 24|Cold/i);
     expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
+    expect(employeeDeleteMany).not.toHaveBeenCalled();
+    expect(reminderDeleteMany).not.toHaveBeenCalled();
   });
 
-  it("reset-me deletes reminders and pending outbound before employees when temp Prospect has deps", async () => {
-    const callOrder: string[] = [];
-    reminderDeleteMany.mockImplementation(async () => {
-      callOrder.push("reminder");
-      return { count: 1 };
-    });
-    deliveryAttemptDeleteMany.mockImplementation(async () => {
-      callOrder.push("deliveryAttempt");
-      return { count: 1 };
-    });
-    whatsAppInviteDeleteMany.mockImplementation(async () => {
-      callOrder.push("whatsAppInvite");
-      return { count: 1 };
-    });
-    employeeListDeleteMany.mockImplementation(async () => {
-      callOrder.push("employeeList");
-      return { count: 1 };
-    });
-    employeeDeleteMany.mockImplementation(async () => {
-      callOrder.push("employee");
-      return { count: 1 };
-    });
-
+  it("restore-me / reset-me unlink temp Prospect phone without deleting rows", async () => {
     employeeFindFirst
+      .mockResolvedValueOnce({
+        id: "e-bak",
+        userId: "u-bak",
+        phone: `972501111111${PHONE_BACKUP_SUFFIX}`,
+      })
       .mockResolvedValueOnce({
         id: "e-temp",
         userId: "u-temp",
         phone: "972501111111",
-      })
-      .mockResolvedValueOnce({
-        id: "e-bak",
-        userId: "u-bak",
-        phone: `972501111111${PHONE_BACKUP_SUFFIX}`,
       });
-    employeeFindMany.mockResolvedValue([{ id: "e-temp" }, { id: "e-temp-lucy" }]);
     employeeUpdate.mockResolvedValue({});
 
     const out = await handleDevProspectTool({
@@ -608,29 +588,26 @@ describe("Dev /as-prospect, /reset-me, /reset-cold", () => {
     });
 
     expect(out.handled).toBe(true);
-    expect(out.reply).toMatch(/שוחזר|reset-me/i);
+    expect(out.reply).toMatch(/שוחזר|restore-me/i);
+    expect(out.reply).toMatch(/ללא מחיקת נתונים/);
     expect(out.reply).not.toMatch(/נכשל/);
-    expect(reminderDeleteMany).toHaveBeenCalled();
-    expect(deliveryAttemptDeleteMany).toHaveBeenCalledWith({
-      where: { userId: "u-temp" },
+    // Temp holder is unlinked (phone null) — never deleted.
+    expect(employeeUpdate).toHaveBeenCalledWith({
+      where: { id: "e-temp" },
+      data: { phone: null },
     });
-    expect(whatsAppInviteDeleteMany).toHaveBeenCalledWith({
-      where: { userId: "u-temp" },
+    expect(employeeUpdate).toHaveBeenCalledWith({
+      where: { id: "e-bak" },
+      data: { phone: "972501111111" },
     });
-    expect(employeeListDeleteMany).toHaveBeenCalled();
-    expect(employeeDeleteMany).toHaveBeenCalledWith({ where: { userId: "u-temp" } });
+    expect(employeeDeleteMany).not.toHaveBeenCalled();
+    expect(reminderDeleteMany).not.toHaveBeenCalled();
+    expect(employeeListDeleteMany).not.toHaveBeenCalled();
+    expect(userDelete).not.toHaveBeenCalled();
     expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
-
-    const reminderIdx = callOrder.indexOf("reminder");
-    const employeeIdx = callOrder.indexOf("employee");
-    expect(reminderIdx).toBeGreaterThanOrEqual(0);
-    expect(employeeIdx).toBeGreaterThan(reminderIdx);
-    expect(callOrder.indexOf("deliveryAttempt")).toBeLessThan(employeeIdx);
-    expect(callOrder.indexOf("whatsAppInvite")).toBeLessThan(employeeIdx);
-    expect(callOrder.indexOf("employeeList")).toBeLessThan(employeeIdx);
   });
 
-  it("ignores /as-prospect, /reset-me, and /reset-cold in production", async () => {
+  it("ignores /as-prospect, /restore-me, /reset-me, and /reset-cold in production", async () => {
     isProductionMock.mockReturnValue(true);
     getEnvMock.mockReturnValue({
       NODE_ENV: "production",
@@ -641,6 +618,9 @@ describe("Dev /as-prospect, /reset-me, /reset-cold", () => {
       expect(isDevTestPhoneAllowed("972501111111")).toBe(false);
       await expect(
         handleDevProspectTool({ phone: "972501111111", text: "/as-prospect" }),
+      ).resolves.toEqual({ handled: false, reply: "" });
+      await expect(
+        handleDevProspectTool({ phone: "972501111111", text: "/restore-me" }),
       ).resolves.toEqual({ handled: false, reply: "" });
       await expect(
         handleDevProspectTool({ phone: "972501111111", text: "/reset-me" }),
