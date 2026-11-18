@@ -756,6 +756,103 @@ describe("decideReplyFromApplyResult", () => {
     expect(a.spoken).toBe(b.spoken);
   });
 
+  it("keeps the model sentence after a complete directory add", () => {
+    const requested = captureRequestedFromMetadata({
+      directory: [
+        {
+          action: "add",
+          contactId: "",
+          name: "מיכל",
+          phone: "0501234567",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      directoryResult: {
+        saved: [{ id: "c-new", name: "מיכל" }],
+        removed: [],
+      },
+    });
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הוספתי את מיכל לאנשי הקשר."),
+      addressGender: "male",
+    });
+    expect(result.completeness).toBe("complete");
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe("הוספתי את מיכל לאנשי הקשר.");
+  });
+
+  it("keeps the model sentence after a complete directory remove", () => {
+    const requested = captureRequestedFromMetadata({
+      directory: [
+        {
+          action: "remove",
+          contactId: "c1",
+          name: "מיכל",
+          phone: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      directoryResult: {
+        saved: [],
+        removed: [{ id: "c1", name: "מיכל" }],
+      },
+    });
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("מחקתי את מיכל מאנשי הקשר."),
+      addressGender: "male",
+    });
+    expect(result.completeness).toBe("complete");
+    expect(decided.keepDraft).toBe(true);
+    expect(decided.spoken).toBe("מחקתי את מיכל מאנשי הקשר.");
+  });
+
+  it("a partial directory turn does not use list wording for the saved contact", () => {
+    const requested = captureRequestedFromMetadata({
+      directory: [
+        {
+          action: "add",
+          contactId: "",
+          name: "מיכל",
+          phone: "0501234567",
+          targets: [],
+        },
+        {
+          action: "add",
+          contactId: "",
+          name: "דני",
+          phone: "0509999999",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      directoryResult: {
+        saved: [{ id: "c-michal", name: "מיכל" }],
+        removed: [],
+      },
+    });
+    const decided = decideReplyFromApplyResult({
+      applyResult: result,
+      modelDraft: draftJson("הוספתי את שניהם."),
+      addressGender: "male",
+    });
+    expect(result.completeness).toBe("unknown");
+    expect(decided.keepDraft).toBe(false);
+    expect(decided.spoken).toContain("שמרתי את «מיכל» באנשי הקשר.");
+    expect(decided.spoken).not.toContain("לרשימת");
+    expect(decided.spoken).not.toContain("בוצע.");
+    expect(decided.spoken).toContain("לא הצלחתי לאמת");
+  });
+
   it("unknown caution conjugates to SPEAKER_ADDRESS gender", () => {
     expect(unknownCautionForAddress("male")).toBe(
       "לא הצלחתי לאמת את כל הפעולות — נסה שוב או בדוק את הרשימה.",

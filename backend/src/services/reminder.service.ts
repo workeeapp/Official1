@@ -2913,6 +2913,11 @@ export async function applyReminders(input: {
   contacts?: SpeakerContact[];
   /** Reminder ids already cancelled this turn (e.g. list-remove cascade). */
   alreadyCancelledReminderIds?: Iterable<string>;
+  /**
+   * Stage 6: Class V authorized high-risk confirm — stamp highRiskAuthorizedAt
+   * so foreign ping clocks may fire.
+   */
+  highRiskAuthorized?: boolean;
 }): Promise<{
   removed: string[];
   missed: string[];
@@ -3530,6 +3535,9 @@ export async function applyReminders(input: {
         nextSource === "mashov" ||
         nextSource === "smartschool" ||
         resolvedCondition !== Prisma.DbNull;
+      const authStamp = input.highRiskAuthorized
+        ? { highRiskAuthorizedAt: new Date() }
+        : {};
       const row = existing
         ? await prisma.reminder.update({
             where: { id: existing.id },
@@ -3551,6 +3559,7 @@ export async function applyReminders(input: {
               composeCondition: resolvedCondition,
               watchOnce: nextWatchOnce,
               composeAspects: nextAspectsJson,
+              ...authStamp,
             },
           })
         : await prisma.reminder.create({
@@ -3576,6 +3585,7 @@ export async function applyReminders(input: {
               composeCondition: resolvedCondition,
               watchOnce: nextWatchOnce,
               composeAspects: nextAspectsJson,
+              ...authStamp,
             },
           });
       const linkedWorkerItemId =

@@ -43,6 +43,14 @@ export type PresentedCollabInvite = {
   kind: "share" | "assign";
 };
 
+/**
+ * Stage 5b cutover: pending share/assign must be presented + opaque Accept/Decline
+ * (Class V). Auto-apply is permanently off (`applyPendingCollabInvites` is a no-op).
+ */
+export function collabInviteAckRequired(): boolean {
+  return true;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -119,12 +127,11 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
     return "";
   }
   const lines = [
-    "COLLAB INVITE (pending assign — ask before applying):",
-    "Ask in warm Hebrew whether to take this activity. Do not say it is already saved.",
-    "To accept one invitation, emit metadata.collab_invite set to that invite_id and leave lists, filing, reminders, directory, jobs, and messages empty.",
-    "To decline one invitation, emit metadata.decline_invite set to that invite_id the same way.",
-    "metadata.confirm true or false does not accept or decline. A missing confirm is not a decline.",
-    "Any other request on this turn does not accept or decline.",
+    "COLLAB INVITE (pending — present only; do not claim it is saved):",
+    "Ask in warm Hebrew whether to accept this activity.",
+    "Do not emit metadata.collab_invite or metadata.decline_invite — Accept/Decline are engine buttons only.",
+    "metadata.confirm true or false does not accept or decline.",
+    "Leave lists, filing, reminders, directory, jobs, and messages empty on this turn unless the user asked something else.",
   ];
   for (const invite of invites) {
     lines.push(
@@ -181,14 +188,31 @@ export async function loadPresentedCollabInvites(
     return [];
   }
   const rows = await findPendingCollabInvites(phone);
+  const out: PresentedCollabInvite[] = [];
   for (const row of rows) {
-    // Share and assign activate before this load. A broken payload is failed
-    // here too, so it cannot sit pending forever if activation skipped it.
-    if (!parseCollabInvitePayload(row.payload)) {
+    const payload = parseCollabInvitePayload(row.payload);
+    if (!payload) {
+      // Broken payload cannot sit pending forever.
       await markCollabInviteFailed(row.id);
+      continue;
     }
+    if (payload.kind !== "share" && payload.kind !== "assign") {
+      continue;
+    }
+    const asker = await prisma.employee.findUnique({
+      where: { id: row.askerEmployeeId },
+      select: { name: true, nickname: true },
+    });
+    const askerName =
+      asker?.nickname?.trim() || asker?.name?.trim() || "מישהו";
+    out.push({
+      inviteId: row.id,
+      askerName,
+      askSummary: row.askSummary.trim() || "פריט",
+      kind: payload.kind,
+    });
   }
-  return [];
+  return out;
 }
 
 async function markCollabInviteFailed(inviteId: string): Promise<void> {
@@ -270,39 +294,15 @@ export async function createDeferredCollabInvites(input: {
 export type ConfirmCollabResult = "consumed" | "lost" | "failed" | "rolled_back";
 
 /**
- * Apply every pending share or assign for this phone, oldest first.
- * Each invite is its own claim-and-insert. A failure leaves that invite pending
- * and does not stop the next one. Share stays on the sender with the recipient
- * in visibleTo. Assign lands on the recipient with addedById set to the sender.
- * Neither waits for an acceptance id.
+ * Stage 5b cutover: no auto-apply. Pending share/assign must be presented and
+ * accepted via opaque Class V commands (confirmCollabInvite / cancelCollabInvite).
+ * Kept as a named hook so call sites stay stable; body is intentionally empty.
  */
-export async function applyPendingCollabInvites(input: {
+export async function applyPendingCollabInvites(_input: {
   recipient: PublicEmployee;
   sharedLists: SharedListRef[];
 }): Promise<void> {
-  if (isGuestEmployee(input.recipient) || !input.recipient.phone?.trim()) {
-    return;
-  }
-  const rows = await findPendingCollabInvites(input.recipient.phone);
-  for (const row of rows) {
-    const payload = parseCollabInvitePayload(row.payload);
-    if (!payload) {
-      await markCollabInviteFailed(row.id);
-      continue;
-    }
-    if (payload.kind !== "share" && payload.kind !== "assign") {
-      continue;
-    }
-    try {
-      await confirmCollabInvite({
-        inviteId: row.id,
-        recipient: input.recipient,
-        sharedLists: input.sharedLists,
-      });
-    } catch {
-      // confirmCollabInvite already rolls a failed insert back to pending.
-    }
-  }
+  return;
 }
 
 /**

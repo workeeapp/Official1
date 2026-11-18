@@ -54,6 +54,11 @@ import {
 } from "./flights.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
+import {
+  claimDeliverySend,
+  completeDeliveryAttempt,
+} from "./delivery-attempt.service.js";
+import { shouldSuppressLegacyForeignClock } from "./reminder-high-risk-auth.js";
 
 /** ChatConversations row for actor×digital so reminder_compose can FK LlmUsages. */
 async function getOrCreateBillingConversation(input: {
@@ -555,6 +560,27 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     const speaker = lucy ?? digitals[0];
     const actor = employees.find((employee) => employee.id === reminder.actorId);
     const actorName = actor?.nickname?.trim() || actor?.name || "";
+    // Stage 6: suppress legacy human-actor foreign clocks without Class V auth marker.
+    if (
+      shouldSuppressLegacyForeignClock({
+        actorId: reminder.actorId,
+        pingIds: reminder.pingIds,
+        highRiskAuthorizedAt:
+          "highRiskAuthorizedAt" in reminder
+            ? (reminder.highRiskAuthorizedAt as Date | null)
+            : null,
+        employees,
+      })
+    ) {
+      recordWhatsAppEvent(
+        "reminder_legacy_foreign_suppress",
+        `id=${reminder.id} item=${reminder.itemLabel}`,
+      );
+      await settleFiredReminder(reminder, now, "failed", {
+        retryWhenFailed: false,
+      });
+      continue;
+    }
     const dests = pingIds(reminder.pingIds);
     const sendResults: boolean[] = [];
 
@@ -967,27 +993,88 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         `item=${reminder.itemLabel} dest=${dest.slice(-4)} phone=${phone ? `…${phone.replace(/\D/g, "").slice(-4)}` : "none"}`,
       );
       if (phone && getEnv().WHATSAPP_ACCESS_TOKEN?.trim()) {
+        // F1: claim DeliveryAttempt before Graph; never auto-resend accepted|unknown|sending.
+        let attemptId: string | null = null;
         try {
-          const result = await sendWhatsAppButtons(phone, text, buttons, {
-            ignoreSession: true,
+          const claim = await claimDeliverySend({
+            userId: reminder.userId,
+            sourceKey: `reminder:${reminder.id}`,
+            destination: phone,
+            purpose: "reminder_fire",
           });
-          if (result === "sent") {
+          attemptId = claim.attemptId;
+          if (!claim.maySend) {
+            // Already accepted or in-flight/unknown — do not Graph again.
             destDelivered = true;
-            if (files.length > 0) {
-              const delivered = await deliverAttachmentsToPhone(phone, files, {
+          } else {
+            try {
+              const result = await sendWhatsAppButtons(phone, text, buttons, {
                 ignoreSession: true,
               });
-              recordWhatsAppEvent(
-                "reminder_files",
-                `sent=${delivered.sent} failed=${delivered.failed}`,
+              if (result === "sent") {
+                destDelivered = true;
+                if (attemptId) {
+                  await completeDeliveryAttempt({
+                    attemptId,
+                    status: "accepted",
+                  });
+                }
+                if (files.length > 0) {
+                  const delivered = await deliverAttachmentsToPhone(phone, files, {
+                    ignoreSession: true,
+                  });
+                  recordWhatsAppEvent(
+                    "reminder_files",
+                    `sent=${delivered.sent} failed=${delivered.failed}`,
+                  );
+                }
+              } else if (attemptId) {
+                await completeDeliveryAttempt({
+                  attemptId,
+                  status: "failed",
+                  lastError: String(result),
+                });
+              }
+            } catch (error) {
+              // Crash/timeout after a possible Graph accept → unknown (no auto-resend).
+              if (attemptId) {
+                await completeDeliveryAttempt({
+                  attemptId,
+                  status: "unknown",
+                  lastError:
+                    error instanceof Error ? error.message : "unknown",
+                });
+              }
+              console.error(
+                "Reminder WhatsApp failed",
+                error instanceof Error ? error.message : "unknown",
               );
             }
           }
         } catch (error) {
-          console.error(
-            "Reminder WhatsApp failed",
+          // Ledger unavailable — fall back to direct send (eval/offline mocks).
+          recordWhatsAppEvent(
+            "reminder_delivery_ledger_fail",
             error instanceof Error ? error.message : "unknown",
           );
+          try {
+            const result = await sendWhatsAppButtons(phone, text, buttons, {
+              ignoreSession: true,
+            });
+            if (result === "sent") {
+              destDelivered = true;
+              if (files.length > 0) {
+                await deliverAttachmentsToPhone(phone, files, {
+                  ignoreSession: true,
+                });
+              }
+            }
+          } catch (sendError) {
+            console.error(
+              "Reminder WhatsApp failed",
+              sendError instanceof Error ? sendError.message : "unknown",
+            );
+          }
         }
       }
       sendResults.push(destDelivered);
@@ -1007,9 +1094,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       });
     }
     if (sendStatus === "sent") {
-      // Graph already accepted this send. The wamid exists only in process
-      // memory until this write. A crash here looks the same as a crash before
-      // Graph accepted, so the next tick sends again (at-least-once).
+      // Durable DeliveryAttempt.accepted is claimed before Graph; this reminder
+      // flag closes the settle path. Retry after crash skips via ledger.
       await prisma.reminder.update({
         where: { id: reminder.id },
         data: { sendStatus: DELIVERY_ACCEPTED, sentAt: now },

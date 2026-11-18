@@ -20,8 +20,10 @@ model User {
   chatConversations ChatConversation[]
   contacts          Contact[]
   contactBooks      ContactBook[]
-  tips              Tip[]
-  whatsappInvites   WhatsAppInvite[]
+  tips                    Tip[]
+  whatsappInvites         WhatsAppInvite[]
+  pendingHighRiskConfirms PendingHighRiskConfirm[]
+  deliveryAttempts        DeliveryAttempt[]
 
   @@map("Users")
 }
@@ -434,6 +436,12 @@ model Reminder {
   status      String   @default("active") @db.VarChar(16)
   sendStatus  String   @default("pending") @map("send_status") @db.VarChar(16)
   sentAt      DateTime? @map("sent_at")
+  /**
+   * Stage 6: set when this clock was created/updated under Class V authorized
+   * high-risk confirm (P-Out foreign). Null + human-actor foreign ping →
+   * suppress at fire (legacy). Personal / Lucy-owned product clocks fire without it.
+   */
+  highRiskAuthorizedAt DateTime? @map("high_risk_authorized_at")
   workerItemId String?   @unique @map("worker_item_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -866,4 +874,75 @@ model WhatsAppInvite {
   @@index([recipientPhone, status])
   @@index([guestEmployeeId])
   @@map("WhatsAppInvites")
+}
+
+/**
+ * M1–M3: staged high-risk plan awaiting Class V confirm (opaque WA button).
+ * Snapshot is immutable once offered; execute reuses existing CORE apply paths.
+ */
+model PendingHighRiskConfirm {
+  id                 String    @id @default(uuid()) @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  speakerEmployeeId  String    @map("speaker_employee_id") @db.Uuid
+  recipientPhone     String    @map("recipient_phone") @db.VarChar(32)
+  conversationId     String?   @map("conversation_id") @db.Uuid
+  /** send | share | assign | … — see high-risk-action-gate action kinds */
+  actionKind         String    @map("action_kind") @db.VarChar(64)
+  /** Immutable side-effect plan JSON (server-authored). */
+  snapshot           Json
+  summaryText        String    @map("summary_text") @db.Text
+  summaryHash        String    @map("summary_hash") @db.VarChar(64)
+  confirmCommand     String    @unique @map("confirm_command") @db.VarChar(128)
+  cancelCommand      String    @unique @map("cancel_command") @db.VarChar(128)
+  /**
+   * pending_offer | offered | consuming | consumed | consumed_partial |
+   * cancelled | expired | superseded | failed_pre_effect | failed_partial |
+   * needs_reconciliation
+   */
+  status             String    @default("pending_offer") @db.VarChar(32)
+  expiresAt          DateTime  @map("expires_at")
+  offerChatMessageId String?   @map("offer_chat_message_id") @db.Uuid
+  offerWamid         String?   @map("offer_wamid") @db.VarChar(128)
+  consumedAt         DateTime? @map("consumed_at")
+  cancelReason       String?   @map("cancel_reason") @db.VarChar(64)
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveryAttempts   DeliveryAttempt[]
+
+  @@index([userId, speakerEmployeeId, status])
+  @@index([recipientPhone, status])
+  @@index([expiresAt])
+  @@map("PendingHighRiskConfirms")
+}
+
+/**
+ * Durable ledger for external (WhatsApp) steps of a high-risk confirm execute.
+ * Idempotency: unique (confirmId, destination, purpose). Never auto-resend accepted|unknown.
+ */
+model DeliveryAttempt {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  confirmId         String?   @map("confirm_id") @db.Uuid
+  /**
+   * Global idempotency key (unique). Covers PendingConfirm steps and
+   * F1/O11 sources that have no PendingHighRiskConfirm row.
+   */
+  ledgerKey         String    @unique @map("ledger_key") @db.VarChar(255)
+  /** Stable key within confirm/source: destination + purpose (also stored split). */
+  stepKey           String    @map("step_key") @db.VarChar(255)
+  destination       String    @map("destination") @db.VarChar(64)
+  purpose           String    @db.VarChar(64)
+  /** queued | sending | accepted | failed | unknown */
+  status            String    @default("queued") @db.VarChar(16)
+  providerMessageId String?   @map("provider_message_id") @db.VarChar(128)
+  lastError         String?   @map("last_error") @db.VarChar(500)
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  confirm           PendingHighRiskConfirm? @relation(fields: [confirmId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, updatedAt])
+  @@map("DeliveryAttempts")
 }

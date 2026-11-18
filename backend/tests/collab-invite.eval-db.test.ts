@@ -1,7 +1,8 @@
 /**
- * Phase 2: an unregistered contact phone does not become a personal stand-in.
- * Share and assign both apply on that phone's first chat turn. Neither waits
- * for an acceptance id. Assign still lands on the recipient.
+ * Phase 2 / Stage 5b: deferred share/assign continuity via confirmCollabInvite.
+ * Auto-apply is cut over — recipient product path is present + opaque V
+ * (see collab-invite-ack.eval-db.test.ts). This file keeps service-level CAS
+ * and seeds invites directly (asker's share ACTION is Gate-stripped).
  *
  * Real Prisma on workee_test. Model is stubbed. No WhatsApp send, no OpenAI.
  *
@@ -20,6 +21,7 @@ import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 import { sendChatMessage } from "../src/services/chat.service.js";
 import {
   confirmCollabInvite,
+  parseCollabInvitePayload,
   readCollabInviteDecision,
 } from "../src/services/collab-invite.service.js";
 import { listEmployeesForUser } from "../src/services/employee.service.js";
@@ -28,6 +30,7 @@ import { setLlmClientForTests } from "../src/services/llm-client.js";
 import { phonesMatch } from "../src/utils/phone.js";
 import {
   bindInboundToInvite,
+  createWhatsAppInvite,
   findPendingMessageInviteByPhone,
   INVITE_TOKEN_PREFIX,
 } from "../src/services/whatsapp-invite.service.js";
@@ -48,6 +51,12 @@ describe("share/assign invitation continuity (eval-db)", () => {
     setLlmClientForTests(null);
     const ids = userIds();
     if (ids.length > 0) {
+      await prisma.deliveryAttempt
+        .deleteMany({ where: { userId: { in: ids } } })
+        .catch(() => undefined);
+      await prisma.pendingHighRiskConfirm
+        .deleteMany({ where: { userId: { in: ids } } })
+        .catch(() => undefined);
       await prisma.whatsAppInvite.deleteMany({ where: { userId: { in: ids } } }).catch(
         () => undefined,
       );
@@ -133,48 +142,79 @@ describe("share/assign invitation continuity (eval-db)", () => {
   async function deferItem(input: {
     asker: HarnessAccount;
     contactName: string;
+    contactPhone: string;
     listType: "shopping" | "tasks";
     label: string;
     share: boolean;
   }) {
-    installStub({
-      responses: [{ text: "אשלח הזמנה.", buttons: [] }],
-      metadata: {
-        confirm: false,
-        lists: [
+    const rowId = randomUUID();
+    const payload = {
+      v: 1 as const,
+      kind: (input.share ? "share" : "assign") as "share" | "assign",
+      domain: "list" as const,
+      rowId,
+      action: {
+        action: "add" as const,
+        listType: input.listType,
+        listName: "",
+        items: [
           {
-            action: "add",
-            list_type: input.listType,
-            list_name: "",
-            items: [
-              {
-                [input.listType === "tasks" ? "שם משימה" : "שם פריט"]: input.label,
-              },
-            ],
-            targets: input.share ? ["טל", input.contactName] : [input.contactName],
+            [input.listType === "tasks" ? "שם משימה" : "שם פריט"]: input.label,
           },
         ],
+        targets: [] as string[],
       },
+    };
+    expect(parseCollabInvitePayload(payload)).toBeTruthy();
+    const created = await createWhatsAppInvite({
+      userId: input.asker.userId,
+      askerEmployeeId: input.asker.employeeId,
+      digitalEmployeeId: input.asker.digitalEmployeeId!,
+      askerName: "טל",
+      recipientPhone: input.contactPhone,
+      recipientLabel: input.contactName,
+      askSummary: input.label,
+      expectsReply: false,
+      payload,
+    });
+    expect(created).toBeTruthy();
+    expect(created!.invite.payload).toBeTruthy();
+    expect(await rowsWithLabel(input.label)).toHaveLength(0);
+    return { invite: created!.invite, rowId };
+  }
+
+  /** Stage 5b: present + opaque Accept (replaces pre-LLM auto-apply). */
+  async function presentAndAccept(recipient: {
+    userId: string;
+    employeeId: string;
+    digitalEmployeeId: string;
+  }) {
+    installStub({
+      responses: [{ text: "יש הזמנה.", buttons: [] }],
+      metadata: { lists: [] },
     });
     await sendChatMessage({
-      userId: input.asker.userId,
-      employeeId: input.asker.employeeId,
-      digitalEmployeeId: input.asker.digitalEmployeeId!,
-      message: input.share ? "תשתפי עם איש הקשר" : "תשימי על איש הקשר",
+      userId: recipient.userId,
+      employeeId: recipient.employeeId,
+      digitalEmployeeId: recipient.digitalEmployeeId,
+      message: "היי",
     });
-    const invite = await prisma.whatsAppInvite.findFirst({
-      where: { userId: input.asker.userId, status: "pending" },
-      orderBy: { createdAt: "desc" },
+    const offer = await prisma.pendingHighRiskConfirm.findFirst({
+      where: {
+        userId: recipient.userId,
+        actionKind: "collab_invite",
+        status: "offered",
+      },
+      orderBy: { createdAt: "asc" },
     });
-    expect(invite?.payload).toBeTruthy();
-    const payload = invite?.payload as { rowId?: string; kind?: string };
-    expect(payload.kind).toBe(input.share ? "share" : "assign");
-    expect(payload.rowId).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-    const written = await rowsWithLabel(input.label);
-    expect(written).toHaveLength(0);
-    return { invite: invite!, rowId: payload.rowId! };
+    expect(offer).toBeTruthy();
+    setLlmClientForTests(null);
+    return sendChatMessage({
+      userId: recipient.userId,
+      employeeId: recipient.employeeId,
+      digitalEmployeeId: recipient.digitalEmployeeId,
+      message: offer!.confirmCommand,
+    });
   }
 
   async function rowsWithLabel(label: string) {
@@ -236,7 +276,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
   });
 
   it(
-    "applies a deferred share on the recipient's first chat turn",
+    "applies a deferred share after opaque Accept (Stage 5b)",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -244,31 +284,14 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label,
         share: true,
       });
       const recipient = await recipientOf(phone);
       expect(recipient.userId).not.toBe(asker.userId);
-      const facts = { facts: "" };
-      installStub(
-        {
-          responses: [{ text: "היי.", buttons: [] }],
-          metadata: { confirm: true, lists: [] },
-        },
-        facts,
-      );
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "היי",
-      });
-      expect(facts.facts).toContain(label);
-      expect(facts.facts).toContain(rowId);
-      expect(facts.facts).not.toContain("COLLAB INVITE");
-      expect(facts.facts).not.toContain(invite.id);
-      expect(facts.facts).not.toContain("GUEST MODE");
+      await presentAndAccept(recipient);
       const consumed = await prisma.whatsAppInvite.findUnique({
         where: { id: invite.id },
       });
@@ -281,27 +304,12 @@ describe("share/assign invitation continuity (eval-db)", () => {
         expect.arrayContaining([asker.employeeId, recipient.employeeId]),
       );
       expect(rows[0]?.list.employeeId).not.toBe(recipient.employeeId);
-
-      installStub({
-        responses: [{ text: "שוב.", buttons: [] }],
-        metadata: { confirm: false, collab_invite: invite.id, lists: [] },
-      });
-      await sendChatMessage({
-        userId: recipient.userId,
-        employeeId: recipient.employeeId,
-        digitalEmployeeId: recipient.digitalEmployeeId,
-        message: "היי שוב",
-      });
-      expect(await rowsWithLabel(label)).toHaveLength(1);
-      expect(
-        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
-      ).toBe("consumed");
     },
     120_000,
   );
 
   it(
-    "applies a deferred assign on the recipient's first chat turn",
+    "applies a deferred assign after opaque Accept (Stage 5b)",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -309,23 +317,14 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "tasks",
         label,
         share: false,
       });
       const recipient = await recipientOf(phone);
       expect(recipient.userId).not.toBe(asker.userId);
-      const facts = { facts: "" };
-      await say(
-        recipient,
-        "היי",
-        { confirm: true, lists: [] },
-        facts,
-      );
-      expect(facts.facts).toContain(label);
-      expect(facts.facts).toContain(rowId);
-      expect(facts.facts).not.toContain("COLLAB INVITE");
-      expect(facts.facts).not.toContain(invite.id);
+      await presentAndAccept(recipient);
       const rows = await rowsWithLabel(label);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.id).toBe(rowId);
@@ -335,26 +334,20 @@ describe("share/assign invitation continuity (eval-db)", () => {
       expect(
         (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
       ).toBe("consumed");
-
-      await say(recipient, "היי שוב", {
-        confirm: false,
-        collab_invite: invite.id,
-        lists: [],
-      });
-      expect(await rowsWithLabel(label)).toHaveLength(1);
     },
     120_000,
   );
 
   it(
-    "does not let decline_invite cancel a deferred share",
+    "model decline_invite alone does not cancel a deferred share (needs opaque V)",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
       const label = `סירוב-${randomUUID().slice(0, 8)}`;
-      const { invite, rowId } = await deferItem({
+      const { invite } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label,
         share: true,
@@ -371,11 +364,9 @@ describe("share/assign invitation continuity (eval-db)", () => {
         message: "לא",
       });
       const stored = await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } });
-      expect(stored?.status).toBe("consumed");
-      const rows = await rowsWithLabel(label);
-      expect(rows).toHaveLength(1);
-      expect(rows[0]?.id).toBe(rowId);
-      expect(rows[0]?.list.employeeId).toBe(asker.employeeId);
+      // Present may stage an offer, but model decline_invite is not Class V.
+      expect(stored?.status).toBe("pending");
+      expect(await rowsWithLabel(label)).toHaveLength(0);
     },
     120_000,
   );
@@ -389,6 +380,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label,
         share: true,
@@ -424,6 +416,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const deferred = await deferItem({
         asker: rollbackAsker,
         contactName: "נועה",
+        contactPhone: rollbackPhone,
         listType: "shopping",
         label: rollbackLabel,
         share: true,
@@ -466,6 +459,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label,
         share: true,
@@ -496,6 +490,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const guestInvite = await deferItem({
         asker: guestAsker,
         contactName: "נועה",
+        contactPhone: guestPhone,
         listType: "shopping",
         label: guestLabel,
         share: true,
@@ -580,6 +575,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       expect(live?.deletedAt ?? null).toBeNull();
       expect(await rowsWithLabel(label)).toHaveLength(0);
 
+      // Unrelated collab_invite id + personal add must not consume the pending invite.
       const personalLabel = `פרטי-נפרד-${randomUUID().slice(0, 8)}`;
       installStub({
         responses: [{ text: "גם חלב וגם הזמנה.", buttons: [] }],
@@ -604,18 +600,24 @@ describe("share/assign invitation continuity (eval-db)", () => {
       });
       expect(
         (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
-      ).toBe("consumed");
-      expect(await rowsWithLabel(label)).toHaveLength(1);
+      ).toBe("pending");
+      expect(await rowsWithLabel(label)).toHaveLength(0);
       expect(await rowsWithLabel(personalLabel)).toHaveLength(1);
       expect(
         (await prisma.whatsAppInvite.findUnique({ where: { id: nullInvite.id } }))?.status,
       ).toBe("pending");
+
+      await presentAndAccept(recipient);
+      expect(
+        (await prisma.whatsAppInvite.findUnique({ where: { id: invite.id } }))?.status,
+      ).toBe("consumed");
+      expect(await rowsWithLabel(label)).toHaveLength(1);
     },
     180_000,
   );
 
-  it(
-    "still applies immediately for a registered recipient",
+  it.skip(
+    "still applies immediately for a registered recipient [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const partner = await createHarnessAccount("עמית", { digitalWorker: true });
       harnesses.push(partner);
@@ -668,6 +670,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label: `פאזה1-${randomUUID().slice(0, 8)}`,
         share: true,
@@ -705,8 +708,8 @@ describe("share/assign invitation continuity (eval-db)", () => {
     120_000,
   );
 
-  it(
-    "does not let decline_invite cancel a deferred assign",
+  it.skip(
+    "does not let decline_invite cancel a deferred assign [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -714,6 +717,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "tasks",
         label,
         share: false,
@@ -739,8 +743,8 @@ describe("share/assign invitation continuity (eval-db)", () => {
     120_000,
   );
 
-  it(
-    "applies every pending share once on the first chat turn",
+  it.skip(
+    "applies every pending share once on the first chat turn [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -749,6 +753,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const first = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label: firstLabel,
         share: true,
@@ -756,6 +761,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const second = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label: secondLabel,
         share: true,
@@ -788,8 +794,8 @@ describe("share/assign invitation continuity (eval-db)", () => {
     180_000,
   );
 
-  it(
-    "continues after one deferred share fails and retries that same row id",
+  it.skip(
+    "continues after one deferred share fails and retries that same row id [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -798,6 +804,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const failed = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label: failedLabel,
         share: true,
@@ -805,6 +812,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const kept = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "shopping",
         label: keptLabel,
         share: true,
@@ -850,8 +858,8 @@ describe("share/assign invitation continuity (eval-db)", () => {
     180_000,
   );
 
-  it(
-    "continues after one deferred assign fails and retries that same row id",
+  it.skip(
+    "continues after one deferred assign fails and retries that same row id [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -860,6 +868,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const failed = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "tasks",
         label: failedLabel,
         share: false,
@@ -867,6 +876,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const kept = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "tasks",
         label: keptLabel,
         share: false,
@@ -920,6 +930,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "tasks",
         label,
         share: false,
@@ -937,6 +948,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const guestInvite = await deferItem({
         asker: guestAsker,
         contactName: "נועה",
+        contactPhone: guestPhone,
         listType: "tasks",
         label: guestLabel,
         share: false,
@@ -994,10 +1006,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
           payload: { v: 1, kind: "assign" },
         },
       });
-      const facts = { facts: "" };
-      await say(recipient, "היי", { confirm: false, lists: [] }, facts);
-      expect(facts.facts).toContain(label);
-      expect(facts.facts).not.toContain("COLLAB INVITE");
+      await presentAndAccept(recipient);
       const rows = await rowsWithLabel(label);
       expect(rows).toHaveLength(1);
       expect(rows[0]?.id).toBe(rowId);
@@ -1017,8 +1026,8 @@ describe("share/assign invitation continuity (eval-db)", () => {
     180_000,
   );
 
-  it(
-    "still assigns immediately onto a registered recipient",
+  it.skip(
+    "still assigns immediately onto a registered recipient [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const partner = await createHarnessAccount("עמית", { digitalWorker: true });
       harnesses.push(partner);
@@ -1061,8 +1070,8 @@ describe("share/assign invitation continuity (eval-db)", () => {
     120_000,
   );
 
-  it(
-    "keeps one assign row when two first turns arrive together",
+  it.skip(
+    "keeps one assign row when two first turns arrive together [auto-apply cutover — see collab-invite-ack.eval-db]",
     async () => {
       const phone = await unusedPhone();
       const asker = await openAsker("נועה", phone);
@@ -1070,6 +1079,7 @@ describe("share/assign invitation continuity (eval-db)", () => {
       const { invite, rowId } = await deferItem({
         asker,
         contactName: "נועה",
+        contactPhone: phone,
         listType: "tasks",
         label,
         share: false,
@@ -1122,3 +1132,4 @@ async function destroyCreatedUser(userId: string): Promise<void> {
   await prisma.team.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.user.delete({ where: { id: userId } }).catch(() => undefined);
 }
+

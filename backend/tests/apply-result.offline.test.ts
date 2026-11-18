@@ -313,6 +313,82 @@ describe("buildApplyResult accounting", () => {
     expect(result.domains.directory?.completeness).toBe("unknown");
     expect(result.domains.directory?.apply_misses).toEqual([]);
   });
+
+  it("a saved directory add is complete when the contact name matches", () => {
+    const requested = captureRequestedFromMetadata({
+      directory: [
+        {
+          action: "add",
+          contactId: "",
+          name: "מיכל",
+          phone: "0501234567",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      directoryResult: {
+        saved: [{ id: "c-new", name: "מיכל" }],
+        removed: [],
+      },
+    });
+    expect(result.domains.directory?.completeness).toBe("complete");
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("a removed directory contact is complete when the id matches", () => {
+    const requested = captureRequestedFromMetadata({
+      directory: [
+        {
+          action: "remove",
+          contactId: "c1",
+          name: "מיכל",
+          phone: "",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      directoryResult: {
+        saved: [],
+        removed: [{ id: "c1", name: "מיכל" }],
+      },
+    });
+    expect(result.domains.directory?.completeness).toBe("complete");
+    expect(result.domains.directory?.applied[0]?.label).toBe("מיכל");
+    expect(result.completeness).toBe("complete");
+  });
+
+  it("one saved directory add does not verify a different named add", () => {
+    const requested = captureRequestedFromMetadata({
+      directory: [
+        {
+          action: "add",
+          contactId: "",
+          name: "מיכל",
+          phone: "0501234567",
+          targets: [],
+        },
+        {
+          action: "add",
+          contactId: "",
+          name: "דני",
+          phone: "0509999999",
+          targets: [],
+        },
+      ],
+    });
+    const result = buildApplyResult({
+      requested,
+      directoryResult: {
+        saved: [{ id: "c-michal", name: "מיכל" }],
+        removed: [],
+      },
+    });
+    expect(result.domains.directory?.completeness).toBe("unknown");
+  });
 });
 
 describe("computeDomainCompleteness", () => {

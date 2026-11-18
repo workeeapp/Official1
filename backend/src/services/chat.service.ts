@@ -188,6 +188,7 @@ import {
 } from "./whatsapp-invite.service.js";
 import {
   cancelCollabInvite,
+  collabInviteAckRequired,
   collabMutationsAreEmpty,
   applyPendingCollabInvites,
   confirmCollabInvite,
@@ -198,6 +199,35 @@ import {
   readCollabInviteDecision,
   type PresentedCollabInvite,
 } from "./collab-invite.service.js";
+import {
+  applyHighRiskActionGate,
+  digitalWorkerGateNames,
+  highRiskPrimaryKind,
+  highRiskStripsToMisses,
+  HIGH_RISK_NEEDS_CONFIRM,
+} from "./high-risk-action-gate.js";
+import {
+  formatCollabInviteAcceptedReply,
+  formatCollabInviteDeclinedReply,
+  formatCollabInviteOfferReply,
+  formatHighRiskConfirmCancelReply,
+  formatHighRiskConfirmDeadReply,
+  formatHighRiskConfirmDoneReply,
+  formatHighRiskConfirmOfferReply,
+  ingestPendingHighRiskCommand,
+  isOpaqueConfirmCommand,
+  markHighRiskConfirmOffered,
+  finalizePendingConfirm,
+  revalidateConsumingConfirm,
+  stageCollabInviteConfirm,
+  stageHighRiskConfirm,
+  summarizeHighRiskSnapshot,
+} from "./pending-high-risk-confirm.service.js";
+import {
+  claimDeliverySend,
+  completeDeliveryAttempt,
+} from "./delivery-attempt.service.js";
+import { deliverO11WhatsApp } from "./o11-whatsapp-delivery.js";
 import {
   collectAppliedTipOps,
   formatAvailableTipsContext,
@@ -2702,38 +2732,120 @@ export async function sendChatMessage(input: {
     }
   }
 
+  /** Class V: opaque PendingConfirm tap — skip LLM, apply authorized snapshot. */
+  let authorizedHighRiskConfirmId: string | null = null;
+  let authorizedHighRiskSnapshot: LlmMetadata | null = null;
+  let pendingConfirmCancelReply: string | null = null;
+  /** S8 / Stage 5a: opaque collab invite Accept/Decline (not CORE metadata). */
+  let authorizedCollabConfirmId: string | null = null;
+  let authorizedCollabInviteId: string | null = null;
+  let authorizedCollabDecision: "accept" | "decline" | null = null;
+  let authorizedCollabSummary: string | null = null;
+  const inboundCommand = stripWhatsAppReplyPrefix(input.message).trim();
+  if (
+    !guestSpeaker &&
+    !consultFrom &&
+    employee.phone &&
+    isOpaqueConfirmCommand(inboundCommand)
+  ) {
+    const ingest = await ingestPendingHighRiskCommand({
+      command: inboundCommand,
+      userId: input.userId,
+      speakerEmployeeId: employee.id,
+      recipientPhone: employee.phone,
+      conversationId: conversation.id,
+    });
+    if (ingest?.kind === "cancel") {
+      pendingConfirmCancelReply = formatHighRiskConfirmCancelReply();
+    } else if (ingest?.kind === "confirm") {
+      // Execute-time integrity: dump/intent guards stay skipped for authorized
+      // snapshots, but hash/TTL/status must still pass before side effects.
+      const recheck = await revalidateConsumingConfirm(ingest.confirmId);
+      if (!recheck.ok) {
+        pendingConfirmCancelReply = formatHighRiskConfirmDeadReply();
+      } else {
+        authorizedHighRiskConfirmId = ingest.confirmId;
+        authorizedHighRiskSnapshot = ingest.snapshot;
+      }
+    } else if (ingest?.kind === "collab_confirm") {
+      const recheck = await revalidateConsumingConfirm(ingest.confirmId);
+      if (!recheck.ok) {
+        pendingConfirmCancelReply = formatHighRiskConfirmDeadReply();
+        await finalizePendingConfirm({
+          confirmId: ingest.confirmId,
+          status: "failed_pre_effect",
+        }).catch(() => undefined);
+      } else {
+        authorizedCollabConfirmId = ingest.confirmId;
+        authorizedCollabInviteId = ingest.inviteId;
+        authorizedCollabDecision = "accept";
+        authorizedCollabSummary = ingest.summaryText;
+      }
+    } else if (ingest?.kind === "collab_cancel") {
+      authorizedCollabConfirmId = ingest.confirmId;
+      authorizedCollabInviteId = ingest.inviteId;
+      authorizedCollabDecision = "decline";
+    } else if (ingest?.kind === "dead") {
+      pendingConfirmCancelReply = formatHighRiskConfirmDeadReply();
+    }
+  }
+
   try {
     let turn;
     const llmStarted = Date.now();
-    let openaiRequest = buildOpenAiRequest({
-      conversationId: conversation.openaiConversationId,
-      message,
-      liveFacts,
-      model: config.model,
-      temperature: config.temperature,
-      reasoningEffort: config.reasoningEffort,
-      instructions,
-      textFormat: config.responseFormat,
-    });
-    try {
-      turn = await client.createResponse({
-        conversationId: conversation.openaiConversationId,
-        message,
-        liveFacts,
-        model: config.model,
-        temperature: config.temperature,
-        reasoningEffort: config.reasoningEffort,
-        instructions,
-        textFormat: config.responseFormat,
-        ...(imageUrls.length > 0 ? { imageUrls } : {}),
-      });
-    } catch (error) {
-      if (!isContextTooLargeError(error)) {
-        throw error;
-      }
-      recordWhatsAppEvent("chat_rotate", "openai_request_too_large");
-      const rotated = await rotateConversation(conversation);
-      conversation = { ...rotated, needsContext: true };
+    let openaiRequest: Record<string, unknown> | ReturnType<typeof buildOpenAiRequest> =
+      {};
+    let llmMs = 0;
+    if (pendingConfirmCancelReply) {
+      turn = {
+        reply: JSON.stringify({
+          responses: [{ text: pendingConfirmCancelReply, buttons: [] }],
+          metadata: {},
+        }),
+        raw: {},
+      };
+    } else if (authorizedCollabDecision === "accept" && authorizedCollabSummary) {
+      turn = {
+        reply: JSON.stringify({
+          responses: [
+            {
+              text: formatCollabInviteAcceptedReply(authorizedCollabSummary),
+              buttons: [],
+            },
+          ],
+          metadata: {},
+        }),
+        raw: {},
+      };
+    } else if (authorizedCollabDecision === "decline") {
+      turn = {
+        reply: JSON.stringify({
+          responses: [
+            { text: formatCollabInviteDeclinedReply(), buttons: [] },
+          ],
+          metadata: {},
+        }),
+        raw: {},
+      };
+    } else if (authorizedHighRiskSnapshot) {
+      turn = {
+        reply: JSON.stringify({
+          responses: [
+            {
+              text: formatHighRiskConfirmDoneReply(
+                summarizeHighRiskSnapshot(
+                  authorizedHighRiskSnapshot,
+                  "send",
+                ),
+              ),
+              buttons: [],
+            },
+          ],
+          metadata: {},
+        }),
+        raw: {},
+      };
+    } else {
       openaiRequest = buildOpenAiRequest({
         conversationId: conversation.openaiConversationId,
         message,
@@ -2744,28 +2856,64 @@ export async function sendChatMessage(input: {
         instructions,
         textFormat: config.responseFormat,
       });
-      turn = await client.createResponse({
-        conversationId: conversation.openaiConversationId,
-        message,
-        liveFacts,
+      try {
+        turn = await client.createResponse({
+          conversationId: conversation.openaiConversationId,
+          message,
+          liveFacts,
+          model: config.model,
+          temperature: config.temperature,
+          reasoningEffort: config.reasoningEffort,
+          instructions,
+          textFormat: config.responseFormat,
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        });
+      } catch (error) {
+        if (!isContextTooLargeError(error)) {
+          throw error;
+        }
+        recordWhatsAppEvent("chat_rotate", "openai_request_too_large");
+        const rotated = await rotateConversation(conversation);
+        conversation = { ...rotated, needsContext: true };
+        openaiRequest = buildOpenAiRequest({
+          conversationId: conversation.openaiConversationId,
+          message,
+          liveFacts,
+          model: config.model,
+          temperature: config.temperature,
+          reasoningEffort: config.reasoningEffort,
+          instructions,
+          textFormat: config.responseFormat,
+        });
+        turn = await client.createResponse({
+          conversationId: conversation.openaiConversationId,
+          message,
+          liveFacts,
+          model: config.model,
+          temperature: config.temperature,
+          reasoningEffort: config.reasoningEffort,
+          instructions,
+          textFormat: config.responseFormat,
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        });
+      }
+      llmMs = Date.now() - llmStarted;
+    }
+    const afterLlmStarted = Date.now();
+    if (
+      !authorizedHighRiskSnapshot &&
+      !pendingConfirmCancelReply &&
+      !authorizedCollabDecision
+    ) {
+      await recordLlmUsage({
+        conversationId: conversation.id,
+        employeeId: conversationOwnerId,
+        digitalEmployeeId: digital.id,
+        openaiConversationId: conversation.openaiConversationId,
         model: config.model,
-        temperature: config.temperature,
-        reasoningEffort: config.reasoningEffort,
-        instructions,
-        textFormat: config.responseFormat,
-        ...(imageUrls.length > 0 ? { imageUrls } : {}),
+        turn,
       });
     }
-    const llmMs = Date.now() - llmStarted;
-    const afterLlmStarted = Date.now();
-    await recordLlmUsage({
-      conversationId: conversation.id,
-      employeeId: conversationOwnerId,
-      digitalEmployeeId: digital.id,
-      openaiConversationId: conversation.openaiConversationId,
-      model: config.model,
-      turn,
-    });
     const messageIds = await saveTurn({
       conversationId: conversation.id,
       speaker: turnSpeaker,
@@ -2778,7 +2926,15 @@ export async function sendChatMessage(input: {
     });
 
     const parsedMetadata = parseReplyMetadata(turn.reply);
-    if (!guestSpeaker && employee.phone && collabMutationsAreEmpty(parsedMetadata)) {
+    // S8: model collab_invite / decline_invite alone is not Class V. When ack
+    // mode is on, only opaque Accept/Decline commands may confirm/cancel.
+    if (
+      !guestSpeaker &&
+      employee.phone &&
+      collabMutationsAreEmpty(parsedMetadata) &&
+      !collabInviteAckRequired() &&
+      !authorizedCollabDecision
+    ) {
       const decision = readCollabInviteDecision(turn.reply);
       const accept = presentedInvite(presentedCollab, decision.acceptId);
       const decline = presentedInvite(presentedCollab, decision.declineId);
@@ -2801,12 +2957,73 @@ export async function sendChatMessage(input: {
         });
       }
     }
+    // Class V collab Accept/Decline — server rechecks inside confirm/cancel.
+    if (
+      !guestSpeaker &&
+      employee.phone &&
+      authorizedCollabDecision &&
+      authorizedCollabInviteId &&
+      authorizedCollabConfirmId
+    ) {
+      if (authorizedCollabDecision === "accept") {
+        const collabLists = await listSharedCustomListsForActor(
+          input.userId,
+          employee.id,
+        );
+        const result = await confirmCollabInvite({
+          inviteId: authorizedCollabInviteId,
+          recipient: employee,
+          sharedLists: collabLists,
+        });
+        await finalizePendingConfirm({
+          confirmId: authorizedCollabConfirmId,
+          status: result === "consumed" ? "consumed" : "failed_pre_effect",
+        });
+        if (result !== "consumed") {
+          // No side effect — honest dead reply (confirm already finalized).
+          turn.reply = JSON.stringify({
+            responses: [
+              { text: formatHighRiskConfirmDeadReply(), buttons: [] },
+            ],
+            metadata: {},
+          });
+        }
+      } else {
+        const declined = await cancelCollabInvite({
+          inviteId: authorizedCollabInviteId,
+          recipientPhone: employee.phone,
+        });
+        // PendingConfirm already cancelled at ingest; invite cancel is CAS.
+        if (declined !== "cancelled") {
+          turn.reply = JSON.stringify({
+            responses: [
+              { text: formatHighRiskConfirmDeadReply(), buttons: [] },
+            ],
+            metadata: {},
+          });
+        }
+      }
+    }
     let metadata = resolveSpokenMetadata(
       input.message,
       parsedMetadata,
       humans,
       employee.id,
     );
+    // Class V execute: replace parsed metadata with the immutable authorized snapshot.
+    if (authorizedHighRiskSnapshot) {
+      metadata = {
+        ...emptyLlmMetadata(),
+        ...authorizedHighRiskSnapshot,
+        lists: authorizedHighRiskSnapshot.lists ?? [],
+        listOps: authorizedHighRiskSnapshot.listOps ?? [],
+        filing: authorizedHighRiskSnapshot.filing ?? [],
+        messages: authorizedHighRiskSnapshot.messages ?? [],
+        reminders: authorizedHighRiskSnapshot.reminders ?? [],
+        directory: authorizedHighRiskSnapshot.directory ?? [],
+        jobs: authorizedHighRiskSnapshot.jobs ?? [],
+      };
+    }
     if (!guestSpeaker) {
       const alignedLists = alignListTargetsWithMessageRecipients({
         lists: metadata.lists ?? [],
@@ -2947,8 +3164,24 @@ export async function sendChatMessage(input: {
     const applyResultRequested = captureRequestedFromMetadata(metadata);
     const showDumpBeforeStrip = metadata.showDump;
     const metadataBeforeStrip = metadata;
+    // Class V authorized snapshot: do not let show/dump/intent guards drop the plan.
+    if (authorizedHighRiskSnapshot) {
+      metadata = {
+        ...emptyLlmMetadata(),
+        ...authorizedHighRiskSnapshot,
+        lists: authorizedHighRiskSnapshot.lists ?? [],
+        listOps: authorizedHighRiskSnapshot.listOps ?? [],
+        filing: authorizedHighRiskSnapshot.filing ?? [],
+        messages: authorizedHighRiskSnapshot.messages ?? [],
+        reminders: authorizedHighRiskSnapshot.reminders ?? [],
+        directory: authorizedHighRiskSnapshot.directory ?? [],
+        jobs: authorizedHighRiskSnapshot.jobs ?? [],
+      };
+    }
     // show_dump: display-only — drop spurious removes; mutates win over accidental show_dump.
-    metadata = stripShowTurnMutates(metadata);
+    metadata = authorizedHighRiskSnapshot
+      ? metadata
+      : stripShowTurnMutates(metadata);
     // Result-C: mutate+show — strip drops showDump; keep pending for post-apply dump.
     const pendingShowDump: PendingShowDump | null = capturePendingShowDump({
       showDumpBefore: showDumpBeforeStrip,
@@ -2979,7 +3212,7 @@ export async function sendChatMessage(input: {
     const turnVisibleRefs = guestSpeaker
       ? null
       : buildThisTurnVisibleRefs(speakerSnapshot, workerSnapshot);
-    if (!guestSpeaker) {
+    if (!guestSpeaker && !authorizedHighRiskSnapshot) {
       const intentResolved = resolveIntentRefs(metadata.lists ?? [], {
         dump: lastNumberedDump,
         visibleRefs: turnVisibleRefs!,
@@ -2994,27 +3227,105 @@ export async function sendChatMessage(input: {
     // Hard guard H: dump binds line refs; explicit add + ESD-grounded ids pass.
     // Stale/invented ids (not on dump, not Stage-2 passThrough, not this-turn
     // visible refs) are dropped. Apply still owns existence/permissions.
-    const dumpRestricted = guestSpeaker
-      ? {
-          lists: metadata.lists ?? [],
-          droppedOutsideDump: false,
-          droppedItems: [] as DumpGuardDrop[],
-        }
-      : restrictListMutatesToLastNumberedDump(
-          metadata.lists ?? [],
-          lastNumberedDump,
-          {
-            ...(intentPassThroughIds
-              ? { passThroughIds: intentPassThroughIds }
-              : {}),
-            ...(turnVisibleRefs && turnVisibleRefs.size > 0
-              ? { groundedIds: new Set(turnVisibleRefs.keys()) }
-              : {}),
-          },
-        );
+    // Class V authorized snapshot skips H — plan was already gated at stage time.
+    const dumpRestricted =
+      guestSpeaker || authorizedHighRiskSnapshot
+        ? {
+            lists: metadata.lists ?? [],
+            droppedOutsideDump: false,
+            droppedItems: [] as DumpGuardDrop[],
+          }
+        : restrictListMutatesToLastNumberedDump(
+            metadata.lists ?? [],
+            lastNumberedDump,
+            {
+              ...(intentPassThroughIds
+                ? { passThroughIds: intentPassThroughIds }
+                : {}),
+              ...(turnVisibleRefs && turnVisibleRefs.size > 0
+                ? { groundedIds: new Set(turnVisibleRefs.keys()) }
+                : {}),
+            },
+          );
     dumpGuardDropsForResult = dumpRestricted.droppedItems ?? [];
     if (dumpRestricted.droppedOutsideDump) {
       metadata = { ...metadata, lists: dumpRestricted.lists };
+    }
+    // M1–M3 HighRiskActionGate: after dump/intent guards, before any durable/
+    // outbound side effect. Stage 5b: applyPendingCollabInvites is a no-op;
+    // deferred share/assign use present + opaque Class V Accept/Decline.
+    let highRiskMissesForResult: ResultIntentMiss[] = [];
+    let highRiskOffer: Awaited<ReturnType<typeof stageHighRiskConfirm>> = null;
+    let highRiskDidStrip = false;
+    /** Stage 5a: opaque Accept/Decline offers for presented pending invites. */
+    let collabInviteOffers: NonNullable<
+      Awaited<ReturnType<typeof stageCollabInviteConfirm>>
+    >[] = [];
+    if (!guestSpeaker) {
+      const gated = applyHighRiskActionGate(metadata, {
+        speaker: employee,
+        digitalWorkerNames: digitalWorkerGateNames(
+          digitalEmployees(employees),
+        ),
+        allowAuthorizedSnapshot: Boolean(authorizedHighRiskConfirmId),
+      });
+      metadata = gated.metadata;
+      highRiskDidStrip = gated.didStrip;
+      highRiskMissesForResult = highRiskStripsToMisses(gated.stripped);
+      if (gated.didStrip) {
+        recordWhatsAppEvent(
+          "high_risk_gate",
+          `stripped=${gated.stripped.length} kinds=${gated.stripped
+            .map((s) => s.kind)
+            .slice(0, 8)
+            .join(",")}`,
+        );
+        if (employee.phone) {
+          highRiskOffer =
+            (await withoutFailingTurn("high_risk_stage_failed", () =>
+              stageHighRiskConfirm({
+                userId: input.userId,
+                speakerEmployeeId: employee.id,
+                recipientPhone: employee.phone!,
+                conversationId: conversation.id,
+                actionKind: highRiskPrimaryKind(gated.stripped),
+                snapshot: gated.strippedSnapshot,
+              }),
+            )) ?? null;
+        }
+      }
+    }
+    // Present + stage opaque Accept/Decline when ack mode is on and this turn
+    // is not already consuming a collab V command or a high-risk offer.
+    if (
+      !guestSpeaker &&
+      !consultFrom &&
+      employee.phone &&
+      collabInviteAckRequired() &&
+      presentedCollab.length > 0 &&
+      !authorizedCollabDecision &&
+      !authorizedHighRiskConfirmId &&
+      !highRiskDidStrip
+    ) {
+      const staged: typeof collabInviteOffers = [];
+      for (const invite of presentedCollab) {
+        const offer = await withoutFailingTurn("collab_invite_stage_failed", () =>
+          stageCollabInviteConfirm({
+            userId: input.userId,
+            speakerEmployeeId: employee.id,
+            recipientPhone: employee.phone!,
+            conversationId: conversation.id,
+            inviteId: invite.inviteId,
+            inviteKind: invite.kind,
+            askerName: invite.askerName,
+            askSummary: invite.askSummary,
+          }),
+        );
+        if (offer) {
+          staged.push(offer);
+        }
+      }
+      collabInviteOffers = staged;
     }
     let deferredCollabNotice = "";
     let metadataForApply = {
@@ -3343,6 +3654,7 @@ export async function sendChatMessage(input: {
       reminders: reminderWrites,
       contacts: speakerContacts,
       alreadyCancelledReminderIds: cancelledReminderIds,
+      highRiskAuthorized: Boolean(authorizedHighRiskConfirmId),
     });
     // Merge nested clocks into reminder apply accounting (join already written).
     reminderResult.saved.push(...nestedResult.saved);
@@ -3422,7 +3734,7 @@ export async function sendChatMessage(input: {
       requested: applyResultRequestedForBuild,
       intentMisses: intentMissesForResult,
       dumpGuardDrops: dumpGuardDropsForResult,
-      stripMisses: stripMissesForResult,
+      stripMisses: [...stripMissesForResult, ...highRiskMissesForResult],
       unclassifiedStripDrops: unclassifiedStripDropsForResult,
       listMutations,
       filingMutations,
@@ -3682,11 +3994,13 @@ export async function sendChatMessage(input: {
         }),
       );
       if (pendingInviteContinue.askerPhone) {
-        await sendWhatsAppText(
-          pendingInviteContinue.askerPhone,
-          pendingInviteContinue.askerNotice,
-          { ignoreSession: true },
-        ).catch(() => "failed" as const);
+        await deliverO11WhatsApp({
+          userId: pendingInviteContinue.askerUserId,
+          inviteId: pendingInviteContinue.inviteId,
+          destination: pendingInviteContinue.askerPhone,
+          purpose: "o11_asker",
+          text: pendingInviteContinue.askerNotice,
+        });
       }
     }
 
@@ -3963,8 +4277,21 @@ export async function sendChatMessage(input: {
       );
     }
     await deliverWhatsAppRelays(involvedNotices, employee.id);
-    const waRelays = await deliverWhatsAppRelays(attributedRelays, employee.id);
-    const waPhones = await deliverWhatsAppPhones(attributedPhones);
+    const waRelays = authorizedHighRiskConfirmId
+      ? await deliverRelaysWithDeliveryLedger({
+          userId: input.userId,
+          confirmId: authorizedHighRiskConfirmId,
+          relays: attributedRelays,
+          actorId: employee.id,
+        })
+      : await deliverWhatsAppRelays(attributedRelays, employee.id);
+    const waPhones = authorizedHighRiskConfirmId
+      ? await deliverPhonesWithDeliveryLedger({
+          userId: input.userId,
+          confirmId: authorizedHighRiskConfirmId,
+          relays: attributedPhones,
+        })
+      : await deliverWhatsAppPhones(attributedPhones);
     // Partner shared-list notify skips must not erase the speaker's spoken reply.
     // replaceSpoken is only for intentional outbound sends the model claimed to deliver.
     let outboundSkips = [...waRelays.skips, ...waPhones.skips];
@@ -4032,6 +4359,31 @@ export async function sendChatMessage(input: {
         workingReply,
         decidedReply.spoken,
       );
+    }
+    // High-risk Gate: never keep a model success claim when ops were stripped.
+    // Prefer PendingConfirm offer copy when staged; else honest needs-confirm line.
+    if (highRiskDidStrip && !authorizedHighRiskConfirmId) {
+      const offerText = highRiskOffer
+        ? formatHighRiskConfirmOfferReply(highRiskOffer.summaryText)
+        : HIGH_RISK_NEEDS_CONFIRM;
+      workingReply = replaceSpokenForExecutionOverride(workingReply, offerText);
+      if (highRiskOffer?.buttons.length) {
+        workingReply = setEngineButtons(workingReply, highRiskOffer.buttons);
+      }
+    }
+    // Stage 5a: engine collab invite offer + opaque Accept/Decline buttons.
+    if (collabInviteOffers.length > 0 && !authorizedCollabDecision) {
+      const primary = collabInviteOffers[0]!;
+      const offerText =
+        collabInviteOffers.length === 1
+          ? formatCollabInviteOfferReply(primary.summaryText)
+          : [
+              formatCollabInviteOfferReply(primary.summaryText),
+              `(+${collabInviteOffers.length - 1} הזמנות נוספות)`,
+            ].join("\n");
+      workingReply = replaceSpokenForExecutionOverride(workingReply, offerText);
+      const buttons = collabInviteOffers.flatMap((o) => o.buttons);
+      workingReply = setEngineButtons(workingReply, buttons);
     }
     if (jobResult && jobResult.askWhich.length > 1) {
       workingReply = replaceSpokenForExecutionOverride(
@@ -5650,6 +6002,41 @@ export async function sendChatMessage(input: {
         : {}),
     });
 
+    if (highRiskOffer) {
+      const offerMsgId =
+        turnMessageIds.assistants?.[0] ?? turnMessageIds.assistant;
+      if (offerMsgId) {
+        await withoutFailingTurn("high_risk_offer_mark_failed", () =>
+          markHighRiskConfirmOffered({
+            id: highRiskOffer!.id,
+            offerChatMessageId: offerMsgId,
+          }),
+        );
+      }
+    }
+    if (collabInviteOffers.length > 0) {
+      const offerMsgId =
+        turnMessageIds.assistants?.[0] ?? turnMessageIds.assistant;
+      if (offerMsgId) {
+        for (const offer of collabInviteOffers) {
+          await withoutFailingTurn("collab_invite_offer_mark_failed", () =>
+            markHighRiskConfirmOffered({
+              id: offer.id,
+              offerChatMessageId: offerMsgId,
+            }),
+          );
+        }
+      }
+    }
+    if (authorizedHighRiskConfirmId) {
+      await withoutFailingTurn("high_risk_finalize_failed", () =>
+        finalizePendingConfirm({
+          confirmId: authorizedHighRiskConfirmId!,
+          status: "consumed",
+        }),
+      );
+    }
+
     if (conversation.needsContext) {
       await markContextInjected(conversation.id);
       if (!guestSpeaker && !consultFrom && isLucyDigital(digital)) {
@@ -5713,6 +6100,82 @@ export async function sendChatMessage(input: {
     }
     throw new ServiceUnavailableError();
   }
+}
+
+/** Stage 4: claim DeliveryAttempt before Graph; never resend accepted|unknown. */
+async function deliverRelaysWithDeliveryLedger(input: {
+  userId: string;
+  confirmId: string;
+  actorId: string;
+  relays: Array<{
+    target: PublicEmployee;
+    text: string;
+    buttons?: LlmReplyButton[];
+  }>;
+}): Promise<Awaited<ReturnType<typeof deliverWhatsAppRelays>>> {
+  const allowed: typeof input.relays = [];
+  const attemptIds: string[] = [];
+  for (const relay of input.relays) {
+    const phone = relay.target.phone?.trim();
+    if (!phone || relay.target.id === input.actorId) {
+      continue;
+    }
+    const claim = await claimDeliverySend({
+      userId: input.userId,
+      confirmId: input.confirmId,
+      destination: phone,
+      purpose: "relay",
+    });
+    if (!claim.maySend) {
+      continue;
+    }
+    allowed.push(relay);
+    if (claim.attemptId) {
+      attemptIds.push(claim.attemptId);
+    }
+  }
+  const result = await deliverWhatsAppRelays(allowed, input.actorId);
+  for (const attemptId of attemptIds) {
+    const failed = result.skips.length > 0 && result.sentLabels.length === 0;
+    await completeDeliveryAttempt({
+      attemptId,
+      status: failed ? "failed" : "accepted",
+    });
+  }
+  return result;
+}
+
+async function deliverPhonesWithDeliveryLedger(input: {
+  userId: string;
+  confirmId: string;
+  relays: Array<{ phone: string; text: string; label?: string }>;
+}): Promise<Awaited<ReturnType<typeof deliverWhatsAppPhones>>> {
+  const allowed: typeof input.relays = [];
+  const attemptIds: string[] = [];
+  for (const relay of input.relays) {
+    const claim = await claimDeliverySend({
+      userId: input.userId,
+      confirmId: input.confirmId,
+      destination: relay.phone,
+      purpose: "phone",
+    });
+    if (!claim.maySend) {
+      continue;
+    }
+    allowed.push(relay);
+    if (claim.attemptId) {
+      attemptIds.push(claim.attemptId);
+    }
+  }
+  const result = await deliverWhatsAppPhones(allowed);
+  for (const attemptId of attemptIds) {
+    const failed = result.skips.length > 0 && result.sentLabels.length === 0;
+    await completeDeliveryAttempt({
+      attemptId,
+      status: failed ? "failed" : "accepted",
+    });
+  }
+  return result;
 }
 
 async function buildColdInvitesForNoSession(input: {
@@ -5894,6 +6357,7 @@ async function continueInviteAfterRegister(input: {
   guestDisplayName: string;
   guestPhone: string | null | undefined;
 }): Promise<{
+  inviteId: string;
   askerUserId: string;
   askerEmployeeId: string;
   askerPhone: string | null;
@@ -5940,9 +6404,13 @@ async function continueInviteAfterRegister(input: {
 
   if (input.guestPhone) {
     const askText = `${askerName} שאל/ה: ${ask}`;
-    await sendWhatsAppText(input.guestPhone, askText, {
-      ignoreSession: true,
-    }).catch(() => "failed" as const);
+    await deliverO11WhatsApp({
+      userId: invite.userId,
+      inviteId: invite.id,
+      destination: input.guestPhone,
+      purpose: "o11_guest",
+      text: askText,
+    });
   }
 
   return {
@@ -5952,6 +6420,7 @@ async function continueInviteAfterRegister(input: {
     digitalEmployeeId: invite.digitalEmployeeId,
     askerNotice: `${subjectName} נרשם/ה לוורקי. השאלה: ${ask} — אעדכן כשיענה/תענה.`,
     guestAck: `ועכשיו לשאלה ששאלו אותך: ${ask}`,
+    inviteId: invite.id,
   };
 }
 

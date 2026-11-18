@@ -37,6 +37,8 @@ export type RequestedOp = {
   mutateSource?: string;
   /** Numbered-dump line when the request used mutate_source=dump_line. */
   dumpLine?: number;
+  /** Directory add: contact name, so one saved add cannot verify a different add. */
+  label?: string;
 };
 
 export type AppliedOp = {
@@ -364,6 +366,7 @@ export function requestedOpsFromDirectory(
     domain: "directory" as const,
     op: row.action,
     id: row.contactId || undefined,
+    label: row.name.trim() || undefined,
   }));
 }
 
@@ -550,6 +553,30 @@ export function computeDomainCompleteness(input: {
       // only for id-less path; known id with no fate stays unaccounted.
       unaccounted += 1;
       continue;
+    }
+
+    // Directory adds have no contact id yet. A name on the request claims only
+    // an applied add with that name — never a different add in the same turn.
+    if (req.domain === "directory") {
+      const want = req.label?.trim() ?? "";
+      const appliedIdx = applied.findIndex((row, index) => {
+        if (usedApplied.has(index) || row.op !== req.op) {
+          return false;
+        }
+        if (!want) {
+          return true;
+        }
+        return (row.label?.trim() ?? "") === want;
+      });
+      if (appliedIdx >= 0) {
+        usedApplied.add(appliedIdx);
+        matchedApplied += 1;
+        continue;
+      }
+      if (want) {
+        unaccounted += 1;
+        continue;
+      }
     }
 
     // Id-less (e.g. lists.add before item_id mint): claim applied first so a
@@ -897,8 +924,8 @@ export function buildApplyResult(input: {
   };
   directoryResult?: {
     saved: Array<{ id: string; name?: string }>;
-    /** Removed contact ids. */
-    removed: string[];
+    /** Removed contacts. `id` pairs to the requested contact id. */
+    removed: Array<{ id: string; name: string }>;
   };
 }): ApplyResult {
   const domains: ApplyResult["domains"] = {};
@@ -1097,17 +1124,25 @@ export function buildApplyResult(input: {
   );
   if (directoryRequested.length > 0) {
     const dr = input.directoryResult;
+    const updateIds = new Set(
+      directoryRequested
+        .filter((req) => req.op === "update" && req.id)
+        .map((req) => req.id as string),
+    );
     const applied: AppliedOp[] = [
-      ...(dr?.saved ?? []).map((row) => ({
-        domain: "directory" as const,
-        op: "add",
-        id: row.id,
-        label: row.name,
-      })),
-      ...(dr?.removed ?? []).map((id) => ({
+      ...(dr?.saved ?? [])
+        .filter((row) => !updateIds.has(row.id))
+        .map((row) => ({
+          domain: "directory" as const,
+          op: "add",
+          id: row.id,
+          label: row.name,
+        })),
+      ...(dr?.removed ?? []).map((row) => ({
         domain: "directory" as const,
         op: "remove",
-        id,
+        id: row.id,
+        label: row.name,
       })),
     ];
     const intent_misses = stripMisses.filter(
@@ -1116,26 +1151,19 @@ export function buildApplyResult(input: {
     const unclassified_drops = unclassifiedStrip.filter(
       (op) => op.domain === "directory",
     );
-    const allStripClassified =
-      unclassified_drops.length === 0 &&
-      directoryRequested.every((req) =>
-        intent_misses.some((miss) => missMatchesRequested(miss, req)),
-      );
     domains.directory = {
       requested: directoryRequested,
       applied,
       intent_misses,
       apply_misses: [],
       ...(unclassified_drops.length > 0 ? { unclassified_drops } : {}),
-      completeness: allStripClassified
-        ? computeDomainCompleteness({
-            requested: directoryRequested,
-            applied,
-            intent_misses,
-            apply_misses: [],
-            unclassified_drops,
-          })
-        : "unknown",
+      completeness: computeDomainCompleteness({
+        requested: directoryRequested,
+        applied,
+        intent_misses,
+        apply_misses: [],
+        unclassified_drops,
+      }),
     };
   }
 

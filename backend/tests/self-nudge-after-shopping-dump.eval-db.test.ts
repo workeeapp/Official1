@@ -212,11 +212,20 @@ describe("self-nudge after shopping dump (eval-db, stubbed LLM)", () => {
       .flatMap((l) => (l.list_type === "tasks" ? l.items : []))
       .find((it) => String(it["שם משימה"] ?? it.title ?? "") === ZIP_TASK);
     expect(zipTask?.item_id, "speaker task id").toBeTruthy();
+    // Snapshot exposes join links as reminder / reminders (not flat reminder_id).
+    const primaryLinkedId = String(
+      (zipTask?.reminder as { reminder_id?: unknown } | undefined)?.reminder_id ??
+        "",
+    );
+    const linkedIds = Array.isArray(zipTask?.reminders)
+      ? zipTask!.reminders.map((row) =>
+          String((row as { reminder_id?: unknown }).reminder_id ?? ""),
+        )
+      : [];
+    const clockId = String(zipClock?.reminder_id ?? "");
     const linked =
-      String(zipTask?.reminder_id ?? "") === String(zipClock?.reminder_id ?? "") ||
-      String(zipClock?.item_id ?? "") === String(zipTask?.item_id ?? "") ||
-      (Array.isArray(zipTask?.reminder_ids) &&
-        zipTask!.reminder_ids.includes(String(zipClock?.reminder_id ?? "")));
+      (primaryLinkedId !== "" && primaryLinkedId === clockId) ||
+      linkedIds.includes(clockId);
     expect(linked, "clock must soft-link to speaker task via nested remind").toBe(
       true,
     );

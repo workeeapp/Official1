@@ -13,6 +13,7 @@ import type {
   ResultIntentMiss,
 } from "./apply-result.js";
 import { applyResultHasFailure } from "./apply-failure-overrides.js";
+import { HIGH_RISK_NEEDS_CONFIRM } from "./high-risk-action-gate.js";
 
 export type DecideReplyFromApplyResult = {
   keepDraft: boolean;
@@ -131,6 +132,8 @@ function reportableMissLines(result: ApplyResult): string[] {
         } else {
           push(LIST_FIND_MISS);
         }
+      } else if (miss.reason === "high_risk_gated") {
+        push(HIGH_RISK_NEEDS_CONFIRM);
       }
     }
     for (const miss of domain.apply_misses as ApplyMiss[]) {
@@ -162,18 +165,38 @@ function reportableMissLines(result: ApplyResult): string[] {
   return lines;
 }
 
-function formatAppliedLines(applied: AppliedOp[]): string[] {
+function formatDirectoryAppliedLines(applied: AppliedOp[]): string[] {
   const lines: string[] = [];
-  const removes = applied.filter(
+  for (const row of applied) {
+    if (row.domain !== "directory") {
+      continue;
+    }
+    const name = row.label?.trim() ?? "";
+    if (!name) {
+      continue;
+    }
+    if (row.op === "add") {
+      lines.push(`שמרתי את «${name}» באנשי הקשר.`);
+    } else if (row.op === "remove") {
+      lines.push(`הסרתי את «${name}» מאנשי הקשר.`);
+    }
+  }
+  return lines;
+}
+
+function formatAppliedLines(applied: AppliedOp[]): string[] {
+  const lines: string[] = formatDirectoryAppliedLines(applied);
+  const listRows = applied.filter((row) => row.domain !== "directory");
+  const removes = listRows.filter(
     (row) =>
       row.op === "remove" ||
       row.op === "remove_filing" ||
       row.op === "delete_list",
   );
-  const adds = applied.filter(
+  const adds = listRows.filter(
     (row) => row.op === "add" || row.op === "add_filing",
   );
-  const updates = applied.filter(
+  const updates = listRows.filter(
     (row) =>
       row.op === "update" ||
       row.op === "update_filing" ||
@@ -222,7 +245,7 @@ function formatAppliedLines(applied: AppliedOp[]): string[] {
     lines.push(`עדכנתי ${updates.length} פריטים.`);
   }
 
-  if (lines.length === 0 && applied.length > 0) {
+  if (lines.length === 0 && listRows.length > 0) {
     lines.push("בוצע.");
   }
   return lines;

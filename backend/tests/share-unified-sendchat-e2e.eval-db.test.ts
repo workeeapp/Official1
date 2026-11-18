@@ -1,13 +1,16 @@
 /**
  * sendChatMessage E2E with LLM stub on approved workee_test.
- * Proves: plan → apply → correctShareClaimReply → bubble button attach
- * inside the real chat pipeline (not C1–C4 helpers).
+ *
+ * M1–M3 stage 2: HighRiskActionGate strip-only blocks ungated Share/Assign
+ * side effects through sendChatMessage. CORE share apply remains covered by
+ * share-unified-c1c4 / plan+apply helpers. Stage 3 PendingConfirm V restores
+ * completion UX.
  *
  * Run: npm run test:eval-db -- tests/share-unified-sendchat-e2e.eval-db.test.ts
  */
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { parseLlmReply, readSpokenBubbles } from "@workee/shared";
+import { parseLlmReply } from "@workee/shared";
 import { prisma } from "../src/database/prisma.js";
 import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 import {
@@ -133,68 +136,48 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
   });
 
   it(
-    "already-shared second turn: no DB change, model reply kept + show on bubble",
+    "Gate strip: co-share ACTION does not mutate visibleTo (stage 2)",
     async () => {
-    account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
-    const lucyId = await ensureLucy(account);
-    const amit = account.partners[0]!;
-    const itemId = await seedShopping(account, "חלב-E2E");
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const lucyId = await ensureLucy(account);
+      const itemId = await seedShopping(account, "חלב-E2E");
+      const before = await prisma.employeeListItem.findFirst({
+        where: { id: itemId, deletedAt: null },
+      });
+      expect(before?.scope).toBe("personal");
 
-    const sharePayload = {
-      responses: [{ text: "שיתפתי את החלב עם עמית.", buttons: [] }],
-      metadata: {
-        lists: [
-          {
-            action: "update",
-            list_type: "shopping",
-            list_name: "",
-            items: [{ item_id: itemId }],
-            targets: [SPEAKER, PARTNER],
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "שיתפתי את החלב עם עמית.", buttons: [] }],
+          metadata: {
+            lists: [
+              {
+                action: "update",
+                list_type: "shopping",
+                list_name: "",
+                items: [{ item_id: itemId }],
+                targets: [SPEAKER, PARTNER],
+              },
+            ],
           },
-        ],
-      },
-    };
-    setLlmClientForTests(stubReply(sharePayload));
-    const first = await sendChatMessage({
-      userId: account.userId,
-      employeeId: account.employeeId,
-      digitalEmployeeId: lucyId,
-      message: "תשתפי את החלב עם עמית",
-    });
-    const rowAfterFirst = await prisma.employeeListItem.findFirst({
-      where: { id: itemId, deletedAt: null },
-    });
-    expect(rowAfterFirst?.scope).toBe("shared");
-    expect(rowAfterFirst?.visibleTo as string[]).toEqual(
-      expect.arrayContaining([account.employeeId, amit.id]),
-    );
-    expect(parseLlmReply(first.reply).response).toMatch(/שיתפתי|עמית/);
-
-    setLlmClientForTests(stubReply(sharePayload));
-    const second = await sendChatMessage({
-      userId: account.userId,
-      employeeId: account.employeeId,
-      digitalEmployeeId: lucyId,
-      message: "תשתפי שוב את החלב עם עמית",
-    });
-    const rowAfterSecond = await prisma.employeeListItem.findFirst({
-      where: { id: itemId, deletedAt: null },
-    });
-    expect(rowAfterSecond?.updatedAt?.getTime()).toBe(
-      rowAfterFirst?.updatedAt?.getTime(),
-    );
-    const spoken = parseLlmReply(second.reply).response.trim();
-    // Reply contract (2026-11-04): already-shared is not an apply failure — the
-    // requested state holds, so the engine keeps the model's reply. Saying
-    // «כבר משותף» is the model's job (it sees shared_with in live facts).
-    expect(spoken).toBe("שיתפתי את החלב עם עמית.");
-    const bubbles = readSpokenBubbles(JSON.parse(second.reply));
-    expect(bubbles?.[0]?.buttons?.length ?? 0).toBeGreaterThan(0);
-  },
+        }),
+      );
+      await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "תשתפי את החלב עם עמית",
+      });
+      const after = await prisma.employeeListItem.findFirst({
+        where: { id: itemId, deletedAt: null },
+      });
+      expect(after?.scope).toBe("personal");
+      expect(after?.visibleTo as string[]).toEqual(before?.visibleTo as string[]);
+    },
     60_000,
   );
 
-  it("assign fan-out via sendChatMessage — row on partner + באחריות button", async () => {
+  it("Gate strip: assign fan-out via sendChatMessage creates no partner row", async () => {
     account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
     const lucyId = await ensureLucy(account);
     const amit = account.partners[0]!;
@@ -203,12 +186,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         responses: [
           {
             text: "הטלתי על עמית לקנות יוגורט.",
-            buttons: [
-              {
-                label: `באחריות ${PARTNER}`,
-                command: `הצג קניות באחריות ${PARTNER}`,
-              },
-            ],
+            buttons: [],
           },
         ],
         metadata: {
@@ -224,49 +202,27 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         },
       }),
     );
-    const result = await sendChatMessage({
+    await sendChatMessage({
       userId: account.userId,
       employeeId: account.employeeId,
       digitalEmployeeId: lucyId,
       message: "תשימי על עמית יוגורט",
     });
-    // Prefer snapshot + live rows (itemKey is derived — do not string-match alone).
     const snap = await getEmployeeRecordSnapshot(amit.id);
     const shopping = snap.lists.find((l) => l.list_type === "shopping");
     const blob = JSON.stringify(shopping?.items ?? []);
-    expect(blob).toContain("יוגורט-E2E-assign");
-    expect(blob).toMatch(/assigned_by|באחריות/);
-    const rows = await prisma.employeeListItem.findMany({
-      where: {
-        deletedAt: null,
-        list: { employeeId: amit.id, listType: "shopping" },
-      },
-    });
-    const row = rows.find((r) => JSON.stringify(r.data).includes("יוגורט-E2E-assign"));
-    expect(row?.addedById).toBe(account.employeeId);
-    const spoken = parseLlmReply(result.reply).response;
-    expect(spoken).toMatch(/עמית|הטלתי|יוגורט/);
-    const bubbles = readSpokenBubbles(JSON.parse(result.reply));
-    expect(
-      (bubbles?.[0]?.buttons ?? []).some(
-        (b) =>
-          b.label.includes("באחריות") ||
-          b.command.includes("באחריות") ||
-          b.label.includes(PARTNER),
-      ),
-    ).toBe(true);
+    expect(blob).not.toContain("יוגורט-E2E-assign");
   }, 60_000);
 
-  it("filing co-share via sendChatMessage — shared filing + תיוקים button", async () => {
+  it("Gate strip: filing co-share via sendChatMessage does not create shared filing", async () => {
     account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
     const lucyId = await ensureLucy(account);
-    const amit = account.partners[0]!;
     setLlmClientForTests(
       stubReply({
         responses: [
           {
             text: "שיתפתי את התיוק קוד עם עמית.",
-            buttons: [{ label: "הצג תיוקים", command: "הצג תיוקים" }],
+            buttons: [],
           },
         ],
         metadata: {
@@ -283,7 +239,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         },
       }),
     );
-    const result = await sendChatMessage({
+    await sendChatMessage({
       userId: account.userId,
       employeeId: account.employeeId,
       digitalEmployeeId: lucyId,
@@ -296,41 +252,19 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         deletedAt: null,
       },
     });
-    expect(filing?.scope).toBe("shared");
-    expect(filing?.visibleTo as string[]).toEqual(
-      expect.arrayContaining([account.employeeId, amit.id]),
-    );
-    const parsed = parseLlmReply(result.reply);
-    expect(parsed.response).toMatch(/שיתפתי|תיוק|עמית/);
-    expect(parsed.response).not.toMatch(/לא הצלחתי לשתף/);
-    const bubbles = readSpokenBubbles(JSON.parse(result.reply));
-    const allButtons = [
-      ...(parsed.buttons ?? []),
-      ...(bubbles ?? []).flatMap((b) => b.buttons ?? []),
-    ];
-    expect(
-      allButtons.some(
-        (b) => b.command.includes("תיוק") || b.label.includes("תיוק"),
-      ),
-    ).toBe(true);
+    expect(filing).toBeNull();
   }, 60_000);
 
-  it("custom list co-share via sendChatMessage — named list row + list button", async () => {
+  it("Gate strip: custom list co-share creates no shared row", async () => {
     account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
     const lucyId = await ensureLucy(account);
-    const amit = account.partners[0]!;
     const listName = "באגים-E2E";
     setLlmClientForTests(
       stubReply({
         responses: [
           {
             text: "שיתפתי את הבאג עם עמית.",
-            buttons: [
-              {
-                label: `משותף עם ${PARTNER}`,
-                command: `הצג רשימת ${listName} משותפות עם ${PARTNER}`,
-              },
-            ],
+            buttons: [],
           },
         ],
         metadata: {
@@ -346,7 +280,7 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         },
       }),
     );
-    const result = await sendChatMessage({
+    await sendChatMessage({
       userId: account.userId,
       employeeId: account.employeeId,
       digitalEmployeeId: lucyId,
@@ -357,22 +291,8 @@ describe("sendChatMessage share E2E (eval-db, LLM stub)", () => {
         deletedAt: null,
         list: { employeeId: account.employeeId, listType: "custom", name: listName },
       },
-      include: { list: true },
     });
-    expect(row?.scope).toBe("shared");
-    expect(row?.visibleTo as string[]).toEqual(
-      expect.arrayContaining([account.employeeId, amit.id]),
-    );
-    expect(parseLlmReply(result.reply).response).toMatch(/שיתפתי|באג|עמית/);
-    const bubbles = readSpokenBubbles(JSON.parse(result.reply));
-    expect(
-      (bubbles?.[0]?.buttons ?? []).some(
-        (b) =>
-          b.command.includes(listName) ||
-          b.label.includes("רשימה") ||
-          b.label.includes("משותף"),
-      ),
-    ).toBe(true);
+    expect(row).toBeNull();
   }, 60_000);
 
   it("a guest speaker's own shopping add is saved on that speaker", async () => {
