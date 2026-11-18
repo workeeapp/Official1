@@ -641,10 +641,12 @@ describe("Cold Prospect 24h window + AskerNotice", () => {
       coldProspect: true,
     });
     expect(notice).toContain("ממתין");
-    expect(notice).toContain("24");
+    expect(notice).toContain("לוסי בוואטסאפ");
     expect(notice).toContain("שלח בוואטסאפ");
     expect(notice).toContain("«היי כאן לוסי…»");
     expect(notice).toContain("לא שלחתי");
+    expect(notice).not.toContain("אין חלון 24");
+    expect(notice).not.toContain("מהעסק");
     expect(notice).not.toMatch(/ההודעה נשלחה|בוצע|שיתפתי/);
   });
 });

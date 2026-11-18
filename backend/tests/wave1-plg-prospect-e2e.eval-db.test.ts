@@ -57,6 +57,16 @@ function visibleReplyText(reply: string): string {
     .join("\n");
 }
 
+/** Forwardable Lucy draft inside AskerNotice (not the «name» snippets). */
+function extractAskerDraftBody(visible: string): string {
+  const fromLucy = visible.match(/«(היי, כאן לוסי[\s\S]*?)»/);
+  if (fromLucy?.[1]) {
+    return fromLucy[1];
+  }
+  const blocks = [...visible.matchAll(/«([\s\S]*?)»/g)].map((m) => m[1] ?? "");
+  return blocks.sort((a, b) => b.length - a.length)[0] ?? visible;
+}
+
 type Check = { name: string; pass: boolean; detail: string };
 type Bubble = { who: string; direction: "in" | "out"; text: string; buttons?: string[] };
 
@@ -421,9 +431,27 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
             Boolean(b.whatsappComposeUrl),
           )) &&
           (/היי, כאן לוסי|«/.test(confirmVisible) ||
-            /קישור מוכן|שלח בוואטסאפ|24/.test(confirmVisible)),
+            /קישור מוכן|שלח בוואטסאפ/.test(confirmVisible)),
         confirmVisible.slice(0, 280),
       );
+      {
+        const draftBody = extractAskerDraftBody(confirmVisible);
+        const hasBareOrFallback =
+          /https:\/\/wa\.me\/\d+(?![\/?])/.test(draftBody) ||
+          /כתבו למספר של לוסי/.test(draftBody);
+        check(
+          "AskerNotice draft has bare wa.me (no %D7) and no Workee/ביקש jargon",
+          /היי, כאן לוסי/.test(draftBody) &&
+            hasBareOrFallback &&
+            !/\?text=/.test(draftBody) &&
+            !/%D7/.test(draftBody) &&
+            !/Workee/.test(confirmVisible) &&
+            !/ביקש/.test(confirmVisible) &&
+            !/אין חלון 24/.test(confirmVisible) &&
+            !/מהעסק/.test(confirmVisible),
+          draftBody.slice(0, 280),
+        );
+      }
       const pendingShare = await prisma.whatsAppInvite.findFirst({
         where: {
           userId: asker.account.userId,
@@ -633,18 +661,30 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
         !/לא כתב לעסק ב־24 השעות האחרונות/.test(milkVisible),
         milkVisible.slice(0, 240),
       );
-      check(
-        "Cold תקצי hrc:ok AskerNotice has draft + wa.me",
-        /ממתין/.test(milkVisible) &&
-          (/היי, כאן לוסי|«/.test(milkVisible) ||
-            /קישור מוכן|שלח בוואטסאפ|24/.test(milkVisible)) &&
-          (/wa\.me\//.test(milkVisible) ||
-            Boolean(parseLlmReply(milkConfirmReply).whatsappComposeUrl) ||
-            parseLlmReply(milkConfirmReply).responseBubbles.some((b) =>
-              Boolean(b.whatsappComposeUrl),
-            )),
-        milkVisible.slice(0, 280),
-      );
+      {
+        const milkDraft = extractAskerDraftBody(milkVisible);
+        const hasBareOrFallback =
+          /https:\/\/wa\.me\/\d+(?![\/?])/.test(milkDraft) ||
+          /כתבו למספר של לוסי/.test(milkDraft);
+        check(
+          "Cold תקצי hrc:ok AskerNotice has draft + wa.me",
+          /ממתין/.test(milkVisible) &&
+            /היי, כאן לוסי/.test(milkDraft) &&
+            /להביא חלב|הוקצתה לך משימה/.test(milkDraft) &&
+            hasBareOrFallback &&
+            !/\?text=/.test(milkDraft) &&
+            !/%D7/.test(milkDraft) &&
+            !/Workee/.test(milkVisible) &&
+            !/ביקש/.test(milkVisible) &&
+            !/לעדכן אותי/.test(milkDraft) &&
+            (Boolean(parseLlmReply(milkConfirmReply).whatsappComposeUrl) ||
+              parseLlmReply(milkConfirmReply).responseBubbles.some((b) =>
+                Boolean(b.whatsappComposeUrl),
+              ) ||
+              /שלח בוואטסאפ/.test(milkVisible)),
+          milkDraft.slice(0, 280),
+        );
+      }
       check(
         "Cold תקצי did not block on מתי להזכיר before create",
         !/מתי להזכיר/.test(milkVisible),

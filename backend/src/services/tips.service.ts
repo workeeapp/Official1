@@ -834,6 +834,8 @@ function pickSortedTip(candidates: Tip[]): Tip | null {
  * eligible key (no automatic general fallback). At most one tip.
  * Dynamic tips: compose from tip.text + turn FACTS; fail/empty → skip (no progress).
  */
+const PROSPECT_ONBOARD_TIP_PREFIX = "prospect_onboard_";
+
 export async function resolveAndRecordTipsForTurn(input: {
   userId: string;
   speaker: PublicEmployee;
@@ -847,6 +849,14 @@ export async function resolveAndRecordTipsForTurn(input: {
   billing?: ComposeLlmBilling | null;
   /** Test clock for cooldowns. */
   now?: Date;
+  /**
+   * Wave 1 PLG Prospect: auto-pick a short onboard tip on inbound turns 1 or 3
+   * (skip 2 so tips are not back-to-back). Caller skips button-only replies.
+   */
+  prospectOnboarding?: {
+    enabled: boolean;
+    inboundTurnCount: number;
+  };
 }): Promise<TipTurnResult> {
   await ensureDefaultTips(input.userId);
   const now = input.now ?? new Date();
@@ -940,6 +950,38 @@ export async function resolveAndRecordTipsForTurn(input: {
       generals.push(tip);
     }
     chosen = pickSortedTip(generals);
+  }
+
+  // Prospect first-exposure: engine may pick onboard tips without model keys.
+  if (
+    !chosen &&
+    input.prospectOnboarding?.enabled &&
+    (input.prospectOnboarding.inboundTurnCount === 1 ||
+      input.prospectOnboarding.inboundTurnCount === 3)
+  ) {
+    const onboard: Tip[] = [];
+    for (const tip of eligible) {
+      if (!tip.key.startsWith(PROSPECT_ONBOARD_TIP_PREFIX)) {
+        continue;
+      }
+      if (tip.triggerKind !== "general") {
+        continue;
+      }
+      if (
+        !tipFullyEligibleForKeyPick(
+          tip,
+          eligible,
+          showCountByTip,
+          lastShownByTip,
+          keyToTipId,
+          now,
+        )
+      ) {
+        continue;
+      }
+      onboard.push(tip);
+    }
+    chosen = pickSortedTip(onboard);
   }
 
   if (!chosen) {

@@ -106,19 +106,24 @@ describe("Wave 1 Stage 1 payload v2", () => {
 describe("Wave 1 Stage 1 drafts + ממתין", () => {
   it("builds intent-specific Lucy drafts", () => {
     const share = buildFatherInviteDraft({
-      askerName: "עמית",
+      askerName: "מיכל",
       askSummary: "חלב",
       token: "WRK-INV-ABCDEF12",
       intentKind: "share",
     });
-    expect(share.draftText).toContain("לשתף איתך");
+    expect(share.draftText).toContain("יש שיתוף ממיכל בלוסי");
+    expect(share.draftText).not.toContain("ביקש");
+    expect(share.draftText).not.toContain("Workee");
     const assign = buildFatherInviteDraft({
-      askerName: "עמית",
+      askerName: "מיכל",
       askSummary: "לקחת תיק",
       token: "WRK-INV-ABCDEF12",
       intentKind: "assign",
     });
-    expect(assign.draftText).toContain("אחריות");
+    expect(assign.draftText).toContain("הוקצתה לך משימה ממיכל בלוסי");
+    expect(assign.draftText).toContain("לקחת תיק");
+    expect(assign.draftText).not.toContain("ביקש");
+    expect(assign.draftText).not.toMatch(/\?text=/);
   });
 
   it("asker notices say ממתין and never claim done", () => {
@@ -132,8 +137,11 @@ describe("Wave 1 Stage 1 drafts + ממתין", () => {
       recipientLabel: "אבא",
       draftText: "טיוטה",
       intentKind: "assign",
+      coldProspect: true,
     });
     expect(cold).toContain("ממתין");
+    expect(cold).not.toContain("אין חלון 24");
+    expect(cold).not.toContain("מהעסק");
   });
 
   it("extracts scoped invite value from payload", () => {

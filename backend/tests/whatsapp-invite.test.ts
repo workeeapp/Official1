@@ -43,9 +43,11 @@ vi.mock("../src/config/env.js", () => ({
 import {
   bindInboundToInvite,
   buildFatherInviteDraft,
+  buildWhatsAppBareUrl,
   buildWhatsAppComposeUrl,
   createWhatsAppInvite,
   formatColdInviteNotice,
+  formatInviteDraftSummary,
   formatInviteOpeningContext,
   formatPendingInviteContext,
   parseInviteToken,
@@ -71,35 +73,52 @@ describe("whatsapp invite helpers", () => {
     expect(parseInviteToken("no token here")).toBeNull();
   });
 
-  it("builds wa.me compose URLs and father drafts with business link", () => {
-    const url = buildWhatsAppComposeUrl(
-      "972549595333",
-      "היי אבא",
-    );
-    expect(url).toMatch(/^https:\/\/wa\.me\/972549595333\?text=/);
-    expect(decodeURIComponent(url.split("text=")[1]!)).toContain("היי אבא");
+  it("builds bare Lucy wa.me in draft (no %D7 / ?text=) and real item title", () => {
+    const compose = buildWhatsAppComposeUrl("972549595333", "היי אבא");
+    expect(compose).toMatch(/^https:\/\/wa\.me\/972549595333\?text=/);
+
+    const bare = buildWhatsAppBareUrl("972501111111");
+    expect(bare).toBe("https://wa.me/972501111111");
+    expect(bare).not.toContain("?");
 
     const { draftText, businessUrl } = buildFatherInviteDraft({
-      askerName: "עמית",
-      askSummary: "מתי אתה מתכנן להגיע",
+      askerName: "מיכל",
+      askSummary: "להביא לחם דגנים",
       token: `${INVITE_TOKEN_PREFIX}ABCD1234`,
+      intentKind: "assign",
     });
     expect(draftText).toContain("היי, כאן לוסי");
-    expect(draftText).toContain("עמית");
-    expect(draftText).toContain("מתי אתה מתכנן להגיע");
-    expect(businessUrl).toMatch(/^https:\/\/wa\.me\/972501111111\?text=/);
+    expect(draftText).toContain("מיכל");
+    expect(draftText).toContain("להביא לחם דגנים");
+    expect(draftText).toMatch(/הוקצתה לך משימה ממיכל בלוסי:/);
+    expect(draftText).not.toContain("לעדכן אותי");
+    expect(draftText).not.toContain("Workee");
+    expect(draftText).not.toContain("ביקש");
+    expect(draftText).not.toContain("מבקש");
+    expect(businessUrl).toBe("https://wa.me/972501111111");
     expect(draftText).toContain(businessUrl!);
+    expect(draftText).not.toMatch(/\?text=/);
+    expect(draftText).not.toMatch(/%D7/);
+    expect(formatInviteDraftSummary({
+      askSummary: "להביא לחם דגנים",
+      intentKind: "assign",
+    })).toBe("משימה: להביא לחם דגנים");
   });
 
-  it("formats cold invite notice for the asker", () => {
+  it("formats cold invite notice without Meta jargon", () => {
     const notice = formatColdInviteNotice({
-      recipientLabel: "אבא",
+      recipientLabel: "טל",
       draftText: "טיוטה",
+      intentKind: "assign",
+      coldProspect: true,
     });
-    expect(notice).toContain("אבא");
+    expect(notice).toContain("טל");
     expect(notice).toContain("ממתין");
     expect(notice).toContain("שלח בוואטסאפ");
     expect(notice).toContain("«טיוטה»");
+    expect(notice).not.toContain("אין חלון 24");
+    expect(notice).not.toContain("מהעסק");
+    expect(notice).not.toContain("Workee");
   });
 
   it("creates an invite row and compose URL", async () => {
@@ -149,71 +168,49 @@ describe("whatsapp invite helpers", () => {
       guestEmployeeId: null,
       createdAt: new Date("2026-11-18T09:00:00.000Z"),
     });
-    inviteUpdate.mockResolvedValue({});
-    employeeUpdate.mockResolvedValue({});
     employeeFindUnique.mockResolvedValue({
       name: "עמית",
-      nickname: "עמית",
+      nickname: null,
     });
+    inviteUpdate.mockResolvedValue({});
 
     const bound = await bindInboundToInvite({
       fromPhone: "972549595333",
-      inboundText: `${INVITE_TOKEN_PREFIX}TESTTOKEN1\nשלום`,
-      currentUserId: "wrong-user",
-      currentEmployeeId: "guest-emp",
+      inboundText: "היי",
+      currentUserId: "prospect-user",
+      currentEmployeeId: "prospect-emp",
     });
-
-    expect(bound).not.toBeNull();
-    expect(bound!.userId).toBe("wrong-user");
-    expect(bound!.employeeId).toBe("guest-emp");
-    expect(bound!.context.askSummary).toBe("מתי אתה מגיע");
-    expect(employeeUpdate).not.toHaveBeenCalled();
-    expect(inviteUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: "inv-1" },
-        data: { guestEmployeeId: "guest-emp" },
-      }),
-    );
+    expect(bound?.userId).toBe("prospect-user");
+    expect(bound?.employeeId).toBe("prospect-emp");
+    expect(bound?.context.askSummary).toContain("מתי");
   });
 
-  it("formats PENDING_INVITE context for לוסי-אורח", () => {
-    const text = formatPendingInviteContext({
-      inviteId: "inv-1",
-      token: `${INVITE_TOKEN_PREFIX}X`,
-      askerName: "עמית",
-      askSummary: "מתי אתה מגיע",
-      recipientLabel: "אבא",
-    });
-    expect(text).toContain("PENDING_INVITE");
-    expect(text).toContain("עמית");
-    expect(text).toContain("מתי אתה מגיע");
-    expect(text).toContain("register");
-  });
-
-  it("formats an opening context without a registration gate", () => {
+  it("invite opening context is a warm first-exposure welcome", () => {
     const text = formatInviteOpeningContext({
-      inviteId: "inv-1",
-      token: `${INVITE_TOKEN_PREFIX}X`,
-      askerName: "טל",
-      askSummary: "רשימת הקניות המשותפת",
-      recipientLabel: "דני",
+      inviteId: "i1",
+      token: `${INVITE_TOKEN_PREFIX}ABCD1234`,
+      askerName: "מיכל",
+      askSummary: "להביא לחם דגנים",
+      recipientLabel: "טל",
     });
-    expect(text).toContain("טל");
-    expect(text).toContain("רשימת הקניות המשותפת");
-    expect(text).not.toContain("register");
+    expect(text).toContain("מיכל");
+    expect(text).toContain("להביא לחם דגנים");
+    expect(text).toMatch(/warm|first exposure|greeting/i);
+    expect(text).toMatch(/tasks|shopping|reminders|filings/i);
+    expect(text).not.toContain("Workee");
     expect(text).not.toContain("metadata.register");
-    expect(text).not.toContain("GUEST MODE");
   });
 
-  it("uses pure-send wording when expectsReply is false", () => {
+  it("uses gender-safe send wording (no ביקש)", () => {
     const { draftText } = buildFatherInviteDraft({
-      askerName: "עמית",
+      askerName: "מיכל",
       askSummary: "מה שלומך?",
       token: `${INVITE_TOKEN_PREFIX}SEND0001`,
       expectsReply: false,
     });
-    expect(draftText).toContain("ביקש שאעביר לך");
+    expect(draftText).toContain("הודעה ממיכל בלוסי");
     expect(draftText).toContain("מה שלומך?");
+    expect(draftText).not.toContain("ביקש");
     expect(draftText).not.toContain("לברר איתך");
   });
 
@@ -226,7 +223,8 @@ describe("whatsapp invite helpers", () => {
       expectsReply: false,
     });
     expect(businessUrl).toBeNull();
-    expect(draftText).toContain("כתוב למספר העסק");
+    expect(draftText).toContain("לוסי");
+    expect(draftText).not.toContain("Workee");
     const compose = buildWhatsAppComposeUrl("972549595333", draftText);
     expect(compose).toMatch(/^https:\/\/wa\.me\/972549595333\?text=/);
   });
@@ -235,5 +233,17 @@ describe("whatsapp invite helpers", () => {
     const button = saveContactReplyButton("אחותי", "972549595333");
     expect(button.label).toBe(SAVE_CONTACT_BUTTON_LABEL);
     expect(button.command).toBe("שמור את אחותי באנשי הקשר 972549595333");
+  });
+
+  it("keeps pending invite context for legacy guest shells", () => {
+    const text = formatPendingInviteContext({
+      inviteId: "i1",
+      token: `${INVITE_TOKEN_PREFIX}ABCD1234`,
+      askerName: "טל",
+      askSummary: "רשימת הקניות המשותפת",
+      recipientLabel: "אורח",
+    });
+    expect(text).toContain("טל");
+    expect(text).toContain("רשימת הקניות המשותפת");
   });
 });

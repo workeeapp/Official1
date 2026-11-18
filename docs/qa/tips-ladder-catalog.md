@@ -56,6 +56,9 @@ Engine fires **one tip per turn**; mid unlocks after any basic in the topic was 
 | 604 | directory_adv_share | directory | advanced | add | אני ממליצה: אפשר לשתף איש קשר או את ספר הטלפונים עם מישהו מהצוות, כשזה מתאים. |
 | 605 | directory_mid_edit_op | directory | intermediate | update | אפשר גם לתקן פרטים שכבר שמורים — «תעדכני את הטלפון של מיכל ל…» — ואחליף במקום. |
 | 606 | directory_mid_delete | directory | intermediate | remove | כדאי לנסות למחוק איש קשר שלא צריך — «תמחקי את מיכל מאנשי הקשר» — ואסיר אותו מהספר. |
+| 40 | prospect_onboard_tasks | (any / Prospect) | basic | — | לידיעתך: אפשר גם לבקש ממני מטלות במשפט — למשל «תוסיפי מטלה להתקשר לרופא» — בלי להירשם. |
+| 41 | prospect_onboard_shopping | (any / Prospect) | basic | — | דרך אגב, אפשר לכתוב «תוסיפי חלב לקניות» או «הציגי את הקניות» — ואשמור או אציג מיד. |
+| 42 | prospect_onboard_reminders | (any / Prospect) | basic | — | אפשר גם «תזכירי לי מחר ב־9 לקנות חלב» — התזכורות נשמרות אצלי בלי הרשמה מראש. |
 | 50 | guest_terms | guest | basic | — | לידיעתך (תמצית): כאורח אפשר בעיקר לצפות במה ששותף איתך ולהירשם בוואטסאפ עם שם ולשון פנייה (זכר/נקבה). אחרי ההרשמה תקבל/י חשבון משלך עם לוסי — בלי שם משתמש או סיסמה. |
 
 Source: `backend/src/services/tip-catalog.ts`.

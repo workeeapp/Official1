@@ -6135,6 +6135,24 @@ export async function sendChatMessage(input: {
       });
       workingReply = setEngineSpokenBubbles(workingReply, bubbles);
     }
+    const tipButtons = parseLlmReply(workingReply).buttons ?? [];
+    const tipButtonOnly =
+      tipButtons.length > 0 ||
+      Boolean(highRiskOffer) ||
+      Boolean(prospectJoinOffer) ||
+      collabInviteOffers.length > 0;
+    let prospectInboundTurns = 0;
+    if (recipientIsProspect && !consultFrom && !tipButtonOnly) {
+      prospectInboundTurns =
+        (await withoutFailingTurn("prospect_turn_count_failed", () =>
+          prisma.chatMessage.count({
+            where: {
+              conversationId: conversation.id,
+              author: { not: "assistant" },
+            },
+          }),
+        )) ?? 0;
+    }
     const tipTurn =
       (await withoutFailingTurn("tips_apply_failed", () =>
         resolveAndRecordTipsForTurn({
@@ -6150,6 +6168,14 @@ export async function sendChatMessage(input: {
             employeeId: employee.id,
             digitalEmployeeId: digital.id,
           },
+          ...(recipientIsProspect && !tipButtonOnly
+            ? {
+                prospectOnboarding: {
+                  enabled: true,
+                  inboundTurnCount: Math.max(1, prospectInboundTurns),
+                },
+              }
+            : {}),
         }),
       )) ?? { texts: [], tipIds: [] };
     const notice = [

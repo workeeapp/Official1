@@ -300,7 +300,9 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
           `kind: assign`,
           `asker_name: ${invite.askerName}`,
           `activity: ${invite.askSummary}`,
-          "Ask in warm Hebrew whether to accept this responsibility.",
+          "First exposure: warm Hebrew greeting that presents this responsibility from asker_name.",
+          "Mention they can manage tasks/shopping/reminders/filings with you right away (no signup).",
+          "Then ask whether to accept this responsibility. Gender-safe Hebrew (no masculine «ביקש» on a feminine asker name).",
         ].join("\n"),
       );
       continue;
@@ -315,7 +317,9 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
         invite.inviteValueText
           ? `INVITE_VALUE (scoped read only — not yet co-mutate):\n${invite.inviteValueText}`
           : "INVITE_VALUE: unavailable",
-        "Present this shared value warmly. Do not claim it was saved to their lists.",
+        "First exposure: warm Hebrew greeting presenting this shared value from asker_name.",
+        "Mention they can manage tasks/shopping/reminders/filings with you right away (no signup).",
+        "Do not claim it was saved to their lists. Gender-safe Hebrew (no masculine «ביקש»).",
       ].join("\n"),
     );
   }

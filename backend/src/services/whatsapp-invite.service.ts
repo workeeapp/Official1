@@ -50,10 +50,42 @@ export function businessDisplayPhoneDigits(): string {
   return normalizePhoneDigits(raw) || toWhatsAppAddress(raw) || "";
 }
 
+/** Clean bare `https://wa.me/<digits>` — no `?text=` (trustworthy preview). */
+export function buildWhatsAppBareUrl(phone: string): string | null {
+  const digits = toWhatsAppAddress(phone) || normalizePhoneDigits(phone);
+  if (!digits) {
+    return null;
+  }
+  return `https://wa.me/${digits}`;
+}
+
 export function buildWhatsAppComposeUrl(phone: string, text: string): string {
   const digits = toWhatsAppAddress(phone) || normalizePhoneDigits(phone);
   const encoded = encodeURIComponent(text);
   return `https://wa.me/${digits}?text=${encoded}`.slice(0, WHATSAPP_COMPOSE_URL_MAX);
+}
+
+/**
+ * Human ask-summary for drafts. Never leave the generic «לעדכן אותי» when we
+ * have a real item title; prefix assign chores as «משימה: …».
+ */
+export function formatInviteDraftSummary(input: {
+  askSummary: string;
+  intentKind?: InviteIntentKind;
+}): string {
+  const raw = input.askSummary.trim();
+  const body =
+    !raw || raw === "לעדכן אותי"
+      ? input.intentKind === "assign"
+        ? "משימה"
+        : input.intentKind === "share"
+          ? "פריט משותף"
+          : "הודעה"
+      : raw;
+  if (input.intentKind === "assign" && !/^משימה\s*:/i.test(body)) {
+    return `משימה: ${body}`;
+  }
+  return body;
 }
 
 export function parseInviteToken(text: string): string | null {
@@ -125,49 +157,51 @@ export async function cancelPendingInviteByAsker(input: {
 }
 
 /**
- * Draft Amit forwards from personal WhatsApp.
- * Check-with (`expectsReply`) uses «לברר»; pure send quotes the outbound text.
+ * Draft the asker forwards from personal WhatsApp.
  * Wave 1: intentKind selects Share/Assign/Send Lucy-branded wording.
+ * Gender-safe: no masculine «ביקש» / feminine-only verbs on asker names.
+ * Business link inside the draft is a **bare** `https://wa.me/<Lucy>` (no `?text=`).
  */
 export function buildFatherInviteDraft(input: {
   askerName: string;
   askSummary: string;
-  /** Full token including WRK-INV- prefix. */
+  /** Full token including WRK-INV- prefix (kept for bind; not required in body). */
   token: string;
   /** true = check-with / ask; false = pure info send. */
   expectsReply?: boolean;
   intentKind?: InviteIntentKind;
 }): { draftText: string; businessUrl: string | null } {
-  const body = input.askSummary.trim() || "לעדכן אותי";
-  const intent = input.intentKind ?? (input.expectsReply === false ? "send" : "send");
+  const intent =
+    input.intentKind ?? (input.expectsReply === false ? "send" : "send");
   const expectsReply =
     input.intentKind != null
       ? input.intentKind === "assign"
       : input.expectsReply !== false;
+  const body = formatInviteDraftSummary({
+    askSummary: input.askSummary,
+    intentKind: intent,
+  });
+  const asker = input.askerName.trim() || "מישהו";
   const businessPhone = businessDisplayPhoneDigits();
-  const opener = [
-    input.token,
-    `שלום, הגעתי דרך ההזמנה של ${input.askerName}`,
-  ].join("\n");
   const businessUrl = businessPhone
-    ? buildWhatsAppComposeUrl(businessPhone, opener)
+    ? buildWhatsAppBareUrl(businessPhone)
     : null;
   const linkLine = businessUrl
-    ? `לחץ כאן כדי לעדכן אותו דרכי:\n${businessUrl}`
-    : "כתוב למספר העסק של Workee כדי לעדכן אותו דרכי.";
+    ? businessUrl
+    : "כתבו למספר של לוסי בוואטסאפ כדי להמשיך.";
   let missionLine: string;
   if (intent === "share") {
-    missionLine = `${input.askerName} רוצה לשתף איתך דרכי: ${body}`;
+    missionLine = `יש שיתוף מ${asker} בלוסי: ${body}`;
   } else if (intent === "assign") {
-    missionLine = `${input.askerName} מבקש/ת שתקבל/י אחריות על: ${body}`;
+    missionLine = `הוקצתה לך משימה מ${asker} בלוסי: ${body.replace(/^משימה:\s*/i, "")}`;
   } else if (expectsReply) {
-    missionLine = `${input.askerName} שלח אותי לברר איתך: ${body}`;
+    missionLine = `בקשה לברר איתך (מאת ${asker}) בלוסי: ${body}`;
   } else {
-    missionLine = `${input.askerName} ביקש שאעביר לך: ${body}`;
+    missionLine = `הודעה מ${asker} בלוסי: ${body}`;
   }
   const draftText = [
     "היי, כאן לוסי",
-    `העוזרת האישית של ${input.askerName}`,
+    `העוזרת האישית של ${asker}`,
     missionLine,
     "",
     linkLine,
@@ -179,18 +213,18 @@ export function buildFatherInviteDraft(input: {
 export function formatAskerPendingNotice(input: {
   recipientLabel: string;
   intentKind: InviteIntentKind;
-  /** Cold Prospect / no 24h WhatsApp window with Lucy. */
+  /** Cold Prospect / no open WhatsApp chat with Lucy yet. */
   coldProspect?: boolean;
 }): string {
   const label = input.recipientLabel.trim() || "הנמען";
   if (input.coldProspect) {
     if (input.intentKind === "share") {
-      return `ממתין — השיתוף עם «${label}» עדיין לא הושלם. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ (אין חלון 24 שעות), אז לא שלחתי ישירות מהעסק.`;
+      return `ממתין — השיתוף עם «${label}» עדיין לא הושלם. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ, אז לא שלחתי ישירות.`;
     }
     if (input.intentKind === "assign") {
-      return `ממתין — האחריות ל«${label}» עדיין ממתינה. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ (אין חלון 24 שעות), אז לא שלחתי ישירות מהעסק.`;
+      return `ממתין — האחריות ל«${label}» עדיין ממתינה. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ, אז לא שלחתי ישירות.`;
     }
-    return `ממתין — ההודעה ל«${label}» עדיין ממתינה. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ (אין חלון 24 שעות), אז לא שלחתי ישירות מהעסק.`;
+    return `ממתין — ההודעה ל«${label}» עדיין ממתינה. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ, אז לא שלחתי ישירות.`;
   }
   if (input.intentKind === "share") {
     return `ממתין — השיתוף עם «${label}» עדיין לא הושלם (ממתין שהנמען יראה/יצטרף).`;
@@ -205,7 +239,7 @@ export function formatColdInviteNotice(input: {
   recipientLabel: string;
   draftText: string;
   intentKind?: InviteIntentKind;
-  /** When true, copy explains Cold Prospect / closed 24h window. */
+  /** When true, copy explains Cold Prospect / no open Lucy chat yet. */
   coldProspect?: boolean;
 }): string {
   const pending = formatAskerPendingNotice({
@@ -215,7 +249,7 @@ export function formatColdInviteNotice(input: {
   });
   return [
     pending,
-    "כדי לפתוח את השיחה עם לוסי, שלח/י את ההודעה הזו מהוואטסאפ שלך (לחץ/י «שלח בוואטסאפ» — קישור מוכן להעברה):",
+    "כדי לפתוח את השיחה עם לוסי, שלחו את ההודעה הזו מהוואטסאפ שלכם (לחצו «שלח בוואטסאפ» — קישור מוכן להעברה):",
     "",
     `«${input.draftText}»`,
   ].join("\n");
@@ -264,7 +298,14 @@ export async function createWhatsAppInvite(input: {
       digitalEmployeeId: input.digitalEmployeeId,
       recipientPhone: phone,
       recipientLabel: input.recipientLabel.slice(0, 100),
-      askSummary: input.askSummary.trim().slice(0, 500) || "לעדכן אותי",
+      askSummary: (
+        input.askSummary.trim() ||
+        (intentKind === "assign"
+          ? "משימה"
+          : intentKind === "share"
+            ? "פריט משותף"
+            : "הודעה")
+      ).slice(0, 500),
       draftText,
       status: "pending",
       ...(input.payload != null ? { payload: input.payload } : {}),
@@ -503,10 +544,13 @@ export function formatPendingInviteContext(ctx: PendingInviteContext): string {
 /** Opening subject for someone who already has their own Lucy. Not a gate. */
 export function formatInviteOpeningContext(ctx: PendingInviteContext): string {
   return [
-    "INVITE CONTEXT (why they arrived — opening subject only):",
+    "INVITE CONTEXT (first exposure — warm welcome):",
     `asker_name: ${ctx.askerName}`,
     `activity: ${ctx.askSummary}`,
-    "Open in this context: the first reply is about this activity from asker_name, in warm Hebrew.",
+    "First reply: warm Hebrew greeting that clearly presents this activity from asker_name.",
+    "Let them know they can immediately manage tasks, shopping lists, reminders, and filings with you — zero signup friction for that.",
+    "FORBIDDEN: product-brand jargon in spoken replies, login/password talk, or inventing a registration wall for ordinary chat/lists.",
+    "Explicit Join / outreach gate only when they try Member-only durable personal saves or invite/assign a new third-party contact.",
     "This is not a limit. Handle any other normal request on this turn the same way you would without this block.",
   ].join("\n");
 }
