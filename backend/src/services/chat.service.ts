@@ -3392,7 +3392,9 @@ export async function sendChatMessage(input: {
     let collabInviteOffers: NonNullable<
       Awaited<ReturnType<typeof stageCollabInviteConfirm>>
     >[] = [];
-    if (!guestSpeaker) {
+    // Prospects: skip Class V high-risk staging — ProspectWriteGate → Join owns
+    // durable / assign-out writes (R1). Members keep high-risk confirm as usual.
+    if (!guestSpeaker && !recipientIsProspect) {
       const speakerUtterance = stripWhatsAppReplyPrefix(input.message).trim();
       const gated = applyHighRiskActionGate(metadata, {
         speaker: employee,
@@ -3486,7 +3488,9 @@ export async function sendChatMessage(input: {
         ...(metadata.lists ?? []).filter((row) => row.action === "remove"),
       ],
     };
-    if (!guestSpeaker) {
+    // Prospects must not create cold deferred invites — route assign/share-out
+    // through ProspectWriteGate → Explicit Join first (R1).
+    if (!guestSpeaker && !recipientIsProspect) {
       const { isColdWhatsAppRecipient } = await import("./whatsapp-window.js");
       const coldPhones = new Set<string>();
       for (const contact of speakerContacts) {
@@ -6135,14 +6139,11 @@ export async function sendChatMessage(input: {
       });
       workingReply = setEngineSpokenBubbles(workingReply, bubbles);
     }
-    const tipButtons = parseLlmReply(workingReply).buttons ?? [];
-    const tipButtonOnly =
-      tipButtons.length > 0 ||
-      Boolean(highRiskOffer) ||
-      Boolean(prospectJoinOffer) ||
-      collabInviteOffers.length > 0;
+    // Prospect onboard Tip #1/#3 still append after Accept/Decline and Join CTA.
+    // Only high-risk confirm turns suppress the cadence (CTA owns the turn).
+    const suppressProspectOnboardTips = Boolean(highRiskOffer);
     let prospectInboundTurns = 0;
-    if (recipientIsProspect && !consultFrom && !tipButtonOnly) {
+    if (recipientIsProspect && !consultFrom && !suppressProspectOnboardTips) {
       prospectInboundTurns =
         (await withoutFailingTurn("prospect_turn_count_failed", () =>
           prisma.chatMessage.count({
@@ -6168,7 +6169,7 @@ export async function sendChatMessage(input: {
             employeeId: employee.id,
             digitalEmployeeId: digital.id,
           },
-          ...(recipientIsProspect && !tipButtonOnly
+          ...(recipientIsProspect && !suppressProspectOnboardTips
             ? {
                 prospectOnboarding: {
                   enabled: true,

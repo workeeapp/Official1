@@ -438,15 +438,20 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
       );
       {
         const draftBody = extractAskerDraftBody(confirmVisible);
-        const hasBareOrFallback =
-          /https:\/\/wa\.me\/\d+(?![\/?])/.test(draftBody) ||
+        const lucyLink = draftBody.match(
+          /https:\/\/wa\.me\/\d+\?text=[^\s»]+/,
+        )?.[0];
+        const openText = lucyLink
+          ? decodeURIComponent(lucyLink.split("?text=")[1] ?? "")
+          : "";
+        const hasPrefillOrFallback =
+          (/https:\/\/wa\.me\/\d+\?text=/.test(draftBody) &&
+            /היי לוסי, נכנסתי לראות/.test(openText)) ||
           /כתבו למספר של לוסי/.test(draftBody);
         check(
-          "AskerNotice draft has bare wa.me (no %D7) and no Workee/ביקש jargon",
+          "AskerNotice draft has Lucy wa.me ?text= Guest prefill and no Workee/ביקש jargon",
           /היי, כאן לוסי/.test(draftBody) &&
-            hasBareOrFallback &&
-            !/\?text=/.test(draftBody) &&
-            !/%D7/.test(draftBody) &&
+            hasPrefillOrFallback &&
             !/Workee/.test(confirmVisible) &&
             !/ביקש/.test(confirmVisible) &&
             !/אין חלון 24/.test(confirmVisible) &&
@@ -665,17 +670,22 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
       );
       {
         const milkDraft = extractAskerDraftBody(milkVisible);
-        const hasBareOrFallback =
-          /https:\/\/wa\.me\/\d+(?![\/?])/.test(milkDraft) ||
+        const lucyLink = milkDraft.match(
+          /https:\/\/wa\.me\/\d+\?text=[^\s»]+/,
+        )?.[0];
+        const openText = lucyLink
+          ? decodeURIComponent(lucyLink.split("?text=")[1] ?? "")
+          : "";
+        const hasPrefillOrFallback =
+          (/https:\/\/wa\.me\/\d+\?text=/.test(milkDraft) &&
+            /היי לוסי, נכנסתי לראות/.test(openText)) ||
           /כתבו למספר של לוסי/.test(milkDraft);
         check(
-          "Cold תקצי hrc:ok AskerNotice has draft + wa.me",
+          "Cold תקצי hrc:ok AskerNotice has draft + Guest wa.me ?text=",
           /ממתין/.test(milkVisible) &&
             /היי, כאן לוסי/.test(milkDraft) &&
             /להביא חלב|הוקצתה לך משימה/.test(milkDraft) &&
-            hasBareOrFallback &&
-            !/\?text=/.test(milkDraft) &&
-            !/%D7/.test(milkDraft) &&
+            hasPrefillOrFallback &&
             !/Workee/.test(milkVisible) &&
             !/ביקש/.test(milkVisible) &&
             !/לעדכן אותי/.test(milkDraft) &&

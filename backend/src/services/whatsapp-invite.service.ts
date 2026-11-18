@@ -66,6 +66,60 @@ export function buildWhatsAppComposeUrl(phone: string, text: string): string {
 }
 
 /**
+ * Guest→Lucy first message when opening the invite `wa.me` link.
+ * Concise, task-contextual; references the inviter (not the full draft).
+ */
+export function formatGuestInviteOpenText(input: {
+  inviterName: string;
+  /** Optional short task/share title — kept concise when present. */
+  taskTitle?: string;
+}): string {
+  const name = input.inviterName.trim() || "מישהו";
+  const task = (input.taskTitle ?? "").trim().replace(/^משימה:\s*/i, "");
+  if (task && task.length <= 40 && task !== "משימה" && task !== "פריט משותף") {
+    return `היי לוסי, נכנסתי לראות את המשימה «${task}» מ${name}`;
+  }
+  return `היי לוסי, נכנסתי לראות את המשימה מ${name}`;
+}
+
+/** Lucy business `wa.me` with `?text=` prefilled for the Guest's first inbound. */
+export function buildGuestInviteOpenUrl(input: {
+  inviterName: string;
+  taskTitle?: string;
+  businessPhone?: string;
+}): string | null {
+  const phone = (input.businessPhone ?? businessDisplayPhoneDigits()).trim();
+  const digits = toWhatsAppAddress(phone) || normalizePhoneDigits(phone);
+  if (!digits) {
+    return null;
+  }
+  return buildWhatsAppComposeUrl(
+    digits,
+    formatGuestInviteOpenText({
+      inviterName: input.inviterName,
+      taskTitle: input.taskTitle,
+    }),
+  );
+}
+
+/** Decode `?text=` from a wa.me compose URL (empty when missing/invalid). */
+export function decodeWhatsAppComposeText(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    if (!/wa\.me$/i.test(parsed.hostname) && !/wa\.me$/i.test(parsed.host)) {
+      // allow wa.me/PHONE paths
+    }
+    if (!/(^|\.)wa\.me$/i.test(parsed.hostname)) {
+      return null;
+    }
+    const text = parsed.searchParams.get("text");
+    return text != null && text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Human ask-summary for drafts. Never leave the generic «לעדכן אותי» when we
  * have a real item title; prefix assign chores as «משימה: …».
  */
@@ -160,7 +214,8 @@ export async function cancelPendingInviteByAsker(input: {
  * Draft the asker forwards from personal WhatsApp.
  * Wave 1: intentKind selects Share/Assign/Send Lucy-branded wording.
  * Gender-safe: no masculine «ביקש» / feminine-only verbs on asker names.
- * Business link inside the draft is a **bare** `https://wa.me/<Lucy>` (no `?text=`).
+ * Business link inside the draft is Lucy `wa.me` with contextual Guest `?text=`
+ * (e.g. «היי לוסי, נכנסתי לראות את המשימה ממיכל») — URL-encoded.
  */
 export function buildFatherInviteDraft(input: {
   askerName: string;
@@ -182,10 +237,11 @@ export function buildFatherInviteDraft(input: {
     intentKind: intent,
   });
   const asker = input.askerName.trim() || "מישהו";
-  const businessPhone = businessDisplayPhoneDigits();
-  const businessUrl = businessPhone
-    ? buildWhatsAppBareUrl(businessPhone)
-    : null;
+  const taskTitle = body.replace(/^משימה:\s*/i, "");
+  const businessUrl = buildGuestInviteOpenUrl({
+    inviterName: asker,
+    taskTitle,
+  });
   const linkLine = businessUrl
     ? businessUrl
     : "כתבו למספר של לוסי בוואטסאפ כדי להמשיך.";
@@ -193,7 +249,7 @@ export function buildFatherInviteDraft(input: {
   if (intent === "share") {
     missionLine = `יש שיתוף מ${asker} בלוסי: ${body}`;
   } else if (intent === "assign") {
-    missionLine = `הוקצתה לך משימה מ${asker} בלוסי: ${body.replace(/^משימה:\s*/i, "")}`;
+    missionLine = `הוקצתה לך משימה מ${asker} בלוסי: ${taskTitle}`;
   } else if (expectsReply) {
     missionLine = `בקשה לברר איתך (מאת ${asker}) בלוסי: ${body}`;
   } else {

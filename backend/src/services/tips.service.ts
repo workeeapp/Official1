@@ -953,6 +953,8 @@ export async function resolveAndRecordTipsForTurn(input: {
   }
 
   // Prospect first-exposure: engine may pick onboard tips without model keys.
+  // Cadence is turn 1/3 — skip seeded-general cross-cooldown (that gap is for
+  // ordinary catalog generals, not same-session PLG onboard tips).
   if (
     !chosen &&
     input.prospectOnboarding?.enabled &&
@@ -968,15 +970,11 @@ export async function resolveAndRecordTipsForTurn(input: {
         continue;
       }
       if (
-        !tipFullyEligibleForKeyPick(
-          tip,
-          eligible,
-          showCountByTip,
-          lastShownByTip,
-          keyToTipId,
-          now,
-        )
+        !tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip, now)
       ) {
+        continue;
+      }
+      if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
         continue;
       }
       onboard.push(tip);

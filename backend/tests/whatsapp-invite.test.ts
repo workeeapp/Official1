@@ -73,7 +73,7 @@ describe("whatsapp invite helpers", () => {
     expect(parseInviteToken("no token here")).toBeNull();
   });
 
-  it("builds bare Lucy wa.me in draft (no %D7 / ?text=) and real item title", () => {
+  it("builds Lucy wa.me with contextual Guest ?text= prefill and real item title", () => {
     const compose = buildWhatsAppComposeUrl("972549595333", "היי אבא");
     expect(compose).toMatch(/^https:\/\/wa\.me\/972549595333\?text=/);
 
@@ -95,10 +95,14 @@ describe("whatsapp invite helpers", () => {
     expect(draftText).not.toContain("Workee");
     expect(draftText).not.toContain("ביקש");
     expect(draftText).not.toContain("מבקש");
-    expect(businessUrl).toBe("https://wa.me/972501111111");
+    expect(businessUrl).toMatch(/^https:\/\/wa\.me\/972501111111\?text=/);
     expect(draftText).toContain(businessUrl!);
-    expect(draftText).not.toMatch(/\?text=/);
-    expect(draftText).not.toMatch(/%D7/);
+    const openText = decodeURIComponent(
+      businessUrl!.split("?text=")[1] ?? "",
+    );
+    expect(openText).toBe(
+      "היי לוסי, נכנסתי לראות את המשימה «להביא לחם דגנים» ממיכל",
+    );
     expect(formatInviteDraftSummary({
       askSummary: "להביא לחם דגנים",
       intentKind: "assign",

@@ -123,7 +123,14 @@ describe("Wave 1 Stage 1 drafts + ממתין", () => {
     expect(assign.draftText).toContain("הוקצתה לך משימה ממיכל בלוסי");
     expect(assign.draftText).toContain("לקחת תיק");
     expect(assign.draftText).not.toContain("ביקש");
-    expect(assign.draftText).not.toMatch(/\?text=/);
+    // Lucy business link carries Guest-open ?text= prefill when display phone is set.
+    if (assign.businessUrl) {
+      expect(assign.businessUrl).toMatch(/\?text=/);
+      expect(assign.draftText).toContain(assign.businessUrl);
+      expect(decodeURIComponent(assign.businessUrl.split("?text=")[1] ?? "")).toMatch(
+        /היי לוסי, נכנסתי לראות/,
+      );
+    }
   });
 
   it("asker notices say ממתין and never claim done", () => {
