@@ -337,6 +337,11 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
         where: { id: prospect.userId },
       });
       check("Prospect starts with consentPending=true", prospectUser0.consentPending === true);
+      // openProspect marks inbound — clear it so Share hits the Cold Prospect
+      // path (Pending + AskerNotice + wa.me), matching production cold send.
+      await prisma.whatsAppInbound
+        .deleteMany({ where: { phone: { contains: PROSPECT_PHONE.slice(-9) } } })
+        .catch(() => undefined);
 
       // Asker NL → HighRisk confirm UX, then durable deferred Share invite (ממתין).
       sayIn("Asker", `תשתפי את הקניות עם ${CONTACT_NAME}: ${SHARE_ITEM}`);
@@ -362,64 +367,62 @@ describe("Wave 1 PLG Prospect E2E simulation (eval-db)", () => {
       });
       sayOut("Asker", askerShare1.reply);
       const hrConfirm = confirmCommandFromReply(askerShare1.reply);
+      const shareTurn1Text = parseLlmReply(askerShare1.reply).response;
       check(
-        "Asker Share stripped to high-risk confirm (not silent done)",
-        Boolean(hrConfirm) &&
-          !/שיתפתי את הקניות/.test(parseLlmReply(askerShare1.reply).response),
-        hrConfirm ?? "missing hrc:ok",
+        "Asker Share not silently done (Class V or Pending AskerNotice)",
+        (Boolean(hrConfirm) || /ממתין/.test(shareTurn1Text)) &&
+          !/שיתפתי את הקניות/.test(shareTurn1Text),
+        hrConfirm ?? shareTurn1Text.slice(0, 180),
       );
 
-      sayIn("Asker", hrConfirm ?? "(missing confirm)");
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: asker.account.userId,
-        employeeId: asker.account.employeeId,
-        digitalEmployeeId: asker.digitalEmployeeId,
-        message: hrConfirm!,
-      });
-      // Production deferred Share row (same payload shape as createDeferredCollabInvites).
-      const shareRowId = randomUUID();
-      const sharePayload = {
-        v: 2 as const,
-        kind: "share" as const,
-        domain: "list" as const,
-        rowId: shareRowId,
-        action: {
-          action: "add" as const,
-          listType: "shopping" as const,
-          listName: "",
-          items: [{ "שם פריט": SHARE_ITEM }],
-          targets: [] as string[],
-        },
-      };
-      expect(parseCollabInvitePayload(sharePayload)).toBeTruthy();
-      const shareCreated = await createWhatsAppInvite({
-        userId: asker.account.userId,
-        askerEmployeeId: asker.account.employeeId,
-        digitalEmployeeId: asker.digitalEmployeeId,
-        askerName: asker.name,
-        recipientPhone: PROSPECT_PHONE,
-        recipientLabel: CONTACT_NAME,
-        askSummary: SHARE_ITEM,
-        expectsReply: false,
-        intentKind: "share",
-        payload: sharePayload,
-      });
-      const pendingNotice = formatAskerPendingNotice({
-        recipientLabel: CONTACT_NAME,
-        intentKind: "share",
-      });
-      const askerPendingReply = JSON.stringify({
-        responses: [{ text: `${pendingNotice}\n\n${shareCreated?.notice ?? ""}`, buttons: [] }],
-        metadata: {},
-      });
-      sayOut("Asker", askerPendingReply);
+      let askerPendingReply = askerShare1.reply;
+      if (hrConfirm) {
+        sayIn("Asker", hrConfirm);
+        setLlmClientForTests(null);
+        const askerConfirmTurn = await sendChatMessage({
+          userId: asker.account.userId,
+          employeeId: asker.account.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId,
+          message: hrConfirm,
+        });
+        sayOut("Asker", askerConfirmTurn.reply);
+        askerPendingReply = askerConfirmTurn.reply;
+      } else {
+        setLlmClientForTests(null);
+      }
+      const confirmParsed = parseLlmReply(askerPendingReply);
+      const confirmVisible = [
+        confirmParsed.response,
+        ...confirmParsed.responseBubbles.map((b) => b.text),
+        confirmParsed.whatsappComposeUrl ?? "",
+        ...confirmParsed.responseBubbles.map((b) => b.whatsappComposeUrl ?? ""),
+      ]
+        .filter(Boolean)
+        .join("\n");
       check(
         "Asker sees ממתין (not בוצע) after confirm",
-        pendingNotice.includes("ממתין") && !pendingNotice.includes("בוצע"),
-        pendingNotice,
+        /ממתין/.test(confirmVisible) && !/\bבוצע\b/.test(confirmVisible),
+        confirmVisible.slice(0, 240),
       );
-      const pendingShare = shareCreated?.invite ?? null;
+      check(
+        "Asker Cold Prospect reply includes wa.me + forwardable draft",
+        (/wa\.me\//.test(confirmVisible) ||
+          Boolean(confirmParsed.whatsappComposeUrl) ||
+          confirmParsed.responseBubbles.some((b) =>
+            Boolean(b.whatsappComposeUrl),
+          )) &&
+          (/היי, כאן לוסי|«/.test(confirmVisible) ||
+            /קישור מוכן|שלח בוואטסאפ|24/.test(confirmVisible)),
+        confirmVisible.slice(0, 280),
+      );
+      const pendingShare = await prisma.whatsAppInvite.findFirst({
+        where: {
+          userId: asker.account.userId,
+          recipientPhone: PROSPECT_PHONE,
+          status: "pending",
+        },
+        orderBy: { createdAt: "desc" },
+      });
       check("Share invite pending in DB", Boolean(pendingShare), pendingShare?.id ?? "");
 
       const factsSink = { facts: "", calls: 0 };

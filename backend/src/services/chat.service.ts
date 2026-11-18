@@ -112,7 +112,12 @@ import {
   applyStopSeriesAfterPingSafetyNet,
   formatStopSeriesAfterPingAck,
 } from "./stop-series-after-ping.js";
-import { phonesMatch } from "../utils/phone.js";
+import {
+  looksLikePhone,
+  normalizePhoneDigits,
+  phonesMatch,
+  toWhatsAppAddress,
+} from "../utils/phone.js";
 import {
   formatSessionClockContext,
   SESSION_CLOCK_RULES,
@@ -170,6 +175,7 @@ import {
   formatSpeakerContacts,
   getContactBookShare,
   listContactsForEmployee,
+  matchContact,
   resolveExternalSharePartners,
 } from "./contact.service.js";
 import {
@@ -214,6 +220,7 @@ import { prospectCircuitBreakerExceeded } from "./prospect-circuit-breaker.servi
 import { tryCancelAskerPendingInvite } from "./asker-invite-cancel.service.js";
 import {
   applyHighRiskActionGate,
+  collectKnownTargetNames,
   digitalWorkerGateNames,
   highRiskPrimaryKind,
   highRiskStripsToMisses,
@@ -3385,12 +3392,20 @@ export async function sendChatMessage(input: {
       Awaited<ReturnType<typeof stageCollabInviteConfirm>>
     >[] = [];
     if (!guestSpeaker) {
+      const speakerUtterance = stripWhatsAppReplyPrefix(input.message).trim();
       const gated = applyHighRiskActionGate(metadata, {
         speaker: employee,
         digitalWorkerNames: digitalWorkerGateNames(
           digitalEmployees(employees),
         ),
         allowAuthorizedSnapshot: Boolean(authorizedHighRiskConfirmId),
+        speakerText: speakerUtterance,
+        isButtonCommand: isOpaqueConfirmCommand(speakerUtterance),
+        knownTargetNames: collectKnownTargetNames({
+          contacts: speakerContacts,
+          employees: [...employees, ...externalPartners],
+          excludeEmployeeId: employee.id,
+        }),
       });
       metadata = gated.metadata;
       highRiskDidStrip = gated.didStrip;
@@ -3462,6 +3477,7 @@ export async function sendChatMessage(input: {
       collabInviteOffers = staged;
     }
     let deferredCollabNotice = "";
+    let deferredCollabComposeUrl: string | null = null;
     let metadataForApply = {
       ...metadata,
       lists: [
@@ -3470,6 +3486,30 @@ export async function sendChatMessage(input: {
       ],
     };
     if (!guestSpeaker) {
+      const { isColdWhatsAppRecipient } = await import("./whatsapp-window.js");
+      const coldPhones = new Set<string>();
+      for (const contact of speakerContacts) {
+        if (!contact.phone?.trim()) {
+          continue;
+        }
+        const digits =
+          toWhatsAppAddress(contact.phone) ||
+          normalizePhoneDigits(contact.phone);
+        if (digits && (await isColdWhatsAppRecipient(digits))) {
+          coldPhones.add(digits);
+        }
+      }
+      for (const partner of externalPartners) {
+        if (!partner.phone?.trim()) {
+          continue;
+        }
+        const digits =
+          toWhatsAppAddress(partner.phone) ||
+          normalizePhoneDigits(partner.phone);
+        if (digits && (await isColdWhatsAppRecipient(digits))) {
+          coldPhones.add(digits);
+        }
+      }
       const partitioned = partitionDeferredCollabTargets({
         lists: metadataForApply.lists,
         filing: metadataForApply.filing ?? [],
@@ -3478,6 +3518,7 @@ export async function sendChatMessage(input: {
         workers: digitalEmployees(employees),
         externalPartners,
         contacts: speakerContacts,
+        coldPhones,
       });
       metadataForApply = {
         ...metadataForApply,
@@ -3492,6 +3533,7 @@ export async function sendChatMessage(input: {
           deferred: partitioned.deferred,
         });
         deferredCollabNotice = deferred.notice;
+        deferredCollabComposeUrl = deferred.composeUrl;
       }
     }
     // Wave 1 Stage 2: ProspectWriteGate — block durable personal writes; stage join.
@@ -4515,6 +4557,9 @@ export async function sendChatMessage(input: {
     if (deferredCollabNotice) {
       inviteNotice = [inviteNotice, deferredCollabNotice].filter(Boolean).join("\n\n");
     }
+    if (!inviteComposeUrl && deferredCollabComposeUrl) {
+      inviteComposeUrl = deferredCollabComposeUrl;
+    }
     const skips = [...sharedWhatsAppSkips, ...outboundSkips];
     const whatsappNotice = [inviteNotice, formatWhatsAppSkipNotice(skips)]
       .filter(Boolean)
@@ -4526,10 +4571,19 @@ export async function sendChatMessage(input: {
           messages: metadata.messages ?? [],
           scheduledJobCount: scheduledJobDeliveryCount,
         });
+    // Cold AskerNotice: append after honest acks («ממתינה לתשובה…»).
+    // Replace only false «שלחתי/שיתפתי» claims or skip-only failures.
+    const spokenClaim = parseLlmReply(turn.reply).response;
+    const falseOutboundClaim =
+      inviteNotice.length > 0 &&
+      /שיתפ|שלחתי|נשלח|הוטל(?:ה)? האחריות|ביצעתי את השיתוף/.test(
+        spokenClaim,
+      );
     const deliveryFailed =
-      inviteNotice.length > 0 ||
-      formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
-      scheduleSkipNotice.length > 0;
+      falseOutboundClaim ||
+      ((formatWhatsAppSkipNotice(outboundSkips).length > 0 ||
+        scheduleSkipNotice.length > 0) &&
+        inviteNotice.length === 0);
     let workingReply = turn.reply;
     // Reply contract: the model always answers. The engine replaces the reply
     // only when apply proves a failure (ApplyResult / share / attach / unshare)
@@ -6495,6 +6549,56 @@ async function buildColdInvitesForNoSession(input: {
       askSummary: relay.askSummary?.trim() || relay.text,
       expectsReply: relay.expectsReply !== false,
     });
+  }
+
+  // Fallback: harvest cold recipients straight from messages[] so AskerNotice
+  // still surfaces when relay/phone planning missed a resolvable target
+  // (name mismatch, partner not in relay pool, etc.).
+  for (const message of input.messages) {
+    if (!message.text.trim() && !(message.askSummary ?? "").trim()) {
+      continue;
+    }
+    for (const raw of message.targets) {
+      const target = raw.trim();
+      if (!target) {
+        continue;
+      }
+      let phone = "";
+      let label = target;
+      const employeeHit = matchEmployee(target, input.employees);
+      if (employeeHit?.phone && employeeHit.id !== input.asker.id) {
+        phone =
+          toWhatsAppAddress(employeeHit.phone) ||
+          normalizePhoneDigits(employeeHit.phone);
+        label =
+          employeeHit.nickname?.trim() || employeeHit.name.trim() || target;
+      } else if (looksLikePhone(target)) {
+        phone = toWhatsAppAddress(target) || normalizePhoneDigits(target);
+        label = phone || target;
+      } else {
+        const contact = matchContact(target, input.contacts);
+        if (contact?.phone) {
+          phone =
+            toWhatsAppAddress(contact.phone) ||
+            normalizePhoneDigits(contact.phone);
+          label = contact.name.trim() || target;
+        }
+      }
+      if (!phone || seen.has(phone)) {
+        continue;
+      }
+      if (!(await needsColdInvite(phone, label, []))) {
+        continue;
+      }
+      seen.add(phone);
+      candidates.push({
+        phone,
+        label,
+        askSummary:
+          message.askSummary?.trim() || message.text.trim() || "לעדכן אותי",
+        expectsReply: message.expectsReply !== false,
+      });
+    }
   }
 
   if (candidates.length === 0) {

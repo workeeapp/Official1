@@ -155,6 +155,8 @@ Directory book share (`directory.share_book`) is unchanged.
 
 The recipient has no account, so there is no 24-hour session to send into. Reuse `formatColdInviteNotice` and the wa.me draft. The inviter forwards it, as they already do for a cold message. Do not add a WhatsApp template sender.
 
+**Architectural lock (broader than this phase):** This `Pending` + asker notice + `wa.me` deep-link path is the dual-purpose channel mechanism — 1:1 cold/out-of-window **fallback**, and later the **primary** distribution path for group tasks/lists/polls (Cloud API cannot post inside user groups). See `docs/product/adr-pending-asker-notice-wa-me.md`.
+
 `expectsReply` on this invite is `false` so the existing draft does not say “לברר” about a list item. Exact Hebrew is §10.
 
 ### 3.3 Present, then confirm

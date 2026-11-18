@@ -857,7 +857,7 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
     const attachments =
       stored.length > 0 ? await buildTurnAttachments(stored) : undefined;
 
-    // Wave 1 Stage 2: gated /as-prospect + /reset-me (never reach LLM).
+    // Wave 1 Stage 2: gated /as-prospect + /reset-me + /reset-cold (never reach LLM).
     if (isDevProspectToolCommand(spoken)) {
       const dev = await handleDevProspectTool({ phone: from, text: spoken });
       if (dev.handled) {

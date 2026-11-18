@@ -209,6 +209,68 @@ function Ensure-ClientOrigin {
   }
 }
 
+# Snapshot + restore DEV_TEST_PHONES so refresh never drops the allowlist in
+# non-production. In production the gate is code-disabled; strip the key.
+function Get-DotEnvValue([string]$envFile, [string]$key) {
+  if (-not (Test-Path $envFile)) { return $null }
+  $raw = Get-Content $envFile -Raw
+  if ($raw -match "(?m)^\s*$([regex]::Escape($key))\s*=\s*(.*)$") {
+    return $Matches[1].Trim().Trim('"').Trim("'")
+  }
+  return $null
+}
+
+function Set-DotEnvValue([string]$envFile, [string]$key, [string]$value) {
+  if (-not (Test-Path $envFile)) { return }
+  $raw = Get-Content $envFile -Raw
+  if ($raw -match "(?m)^\s*$([regex]::Escape($key))\s*=") {
+    $updated = [regex]::Replace(
+      $raw,
+      "(?m)^\s*$([regex]::Escape($key))\s*=\s*.*$",
+      "$key=$value"
+    )
+    Set-Content -Path $envFile -Value $updated -NoNewline
+  } else {
+    if (-not $raw.EndsWith("`n")) { $raw += "`r`n" }
+    Set-Content -Path $envFile -Value ($raw + "$key=$value`r`n") -NoNewline
+  }
+}
+
+function Remove-DotEnvKey([string]$envFile, [string]$key) {
+  if (-not (Test-Path $envFile)) { return }
+  $raw = Get-Content $envFile -Raw
+  if ($raw -notmatch "(?m)^\s*$([regex]::Escape($key))\s*=") { return }
+  $updated = [regex]::Replace($raw, "(?m)^\s*$([regex]::Escape($key))\s*=\s*.*\r?\n?", "")
+  Set-Content -Path $envFile -Value $updated -NoNewline
+}
+
+function Ensure-DevTestPhones {
+  param([string]$PreservedValue)
+  $envFile = Join-Path $root ".env"
+  if (-not (Test-Path $envFile)) {
+    Write-Warning ".env missing - skip DEV_TEST_PHONES preserve"
+    return
+  }
+  $nodeEnv = Get-DotEnvValue $envFile "NODE_ENV"
+  if ($nodeEnv -eq "production") {
+    Remove-DotEnvKey $envFile "DEV_TEST_PHONES"
+    Write-Step "NODE_ENV=production - removed DEV_TEST_PHONES (dev tools disabled)"
+    return
+  }
+  if ([string]::IsNullOrWhiteSpace($PreservedValue)) {
+    $current = Get-DotEnvValue $envFile "DEV_TEST_PHONES"
+    if ($current) {
+      $tail = $current.Substring([Math]::Max(0, $current.Length - 4))
+      Write-Step "DEV_TEST_PHONES already set (...$tail)"
+    } else {
+      Write-Step "DEV_TEST_PHONES unset (dev /as-prospect allowlist empty)"
+    }
+    return
+  }
+  Set-DotEnvValue $envFile "DEV_TEST_PHONES" $PreservedValue
+  Write-Step "Preserved DEV_TEST_PHONES across refresh (non-production)"
+}
+
 function Test-HttpOk([string]$url) {
   try {
     $res = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 3
@@ -291,6 +353,7 @@ try {
 
 Write-Step "Refreshing Workee in $root"
 $apiPort = Get-DotEnvPort
+$preservedDevTestPhones = Get-DotEnvValue (Join-Path $root ".env") "DEV_TEST_PHONES"
 
 $dirtyAny = @(git status --porcelain)
 if ($RequireClean -and $dirtyAny.Count -gt 0) {
@@ -359,6 +422,7 @@ if ($InheritConfig) {
 }
 
 Ensure-ClientOrigin
+Ensure-DevTestPhones -PreservedValue $preservedDevTestPhones
 
 Write-Step "Building frontend SPA (for $PublicOrigin via API)"
 npm run build -w frontend

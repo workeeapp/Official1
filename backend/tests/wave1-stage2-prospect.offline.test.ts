@@ -18,6 +18,7 @@ const {
   employeeDeleteMany,
   userDelete,
   auditCreate,
+  whatsAppInboundDeleteMany,
 } = vi.hoisted(() => ({
   userFindUnique: vi.fn(),
   userUpdateMany: vi.fn(),
@@ -33,6 +34,7 @@ const {
   employeeDeleteMany: vi.fn(),
   userDelete: vi.fn(),
   auditCreate: vi.fn(),
+  whatsAppInboundDeleteMany: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -62,6 +64,11 @@ vi.mock("../src/database/prisma.js", () => ({
     auditEvent: { create: auditCreate },
     deliveryAttempt: { deleteMany: vi.fn() },
     pendingHighRiskConfirm: { deleteMany: vi.fn() },
+    whatsAppInbound: {
+      deleteMany: whatsAppInboundDeleteMany,
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
   },
 }));
 
@@ -391,13 +398,15 @@ describe("Asker invite cancel NL", () => {
   });
 });
 
-describe("Dev /as-prospect and /reset-me", () => {
+describe("Dev /as-prospect, /reset-me, /reset-cold", () => {
   beforeEach(() => {
     employeeFindFirst.mockReset();
     employeeFindMany.mockReset();
     employeeUpdate.mockReset();
     employeeDeleteMany.mockReset();
     userDelete.mockReset();
+    whatsAppInboundDeleteMany.mockReset();
+    whatsAppInboundDeleteMany.mockResolvedValue({ count: 1 });
   });
 
   it("allows only DEV_TEST_PHONES outside production", () => {
@@ -434,7 +443,37 @@ describe("Dev /as-prospect and /reset-me", () => {
     expect(out.handled).toBe(false);
   });
 
-  it("ignores /as-prospect and /reset-me in production", async () => {
+  it("clears WhatsApp 24h inbound window on /reset-cold", async () => {
+    const out = await handleDevProspectTool({
+      phone: "972501111111",
+      text: "/reset-cold",
+    });
+    expect(out.handled).toBe(true);
+    expect(out.reply).toMatch(/reset-cold/i);
+    expect(out.reply).toMatch(/Cold|חלון 24/i);
+    expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
+  });
+
+  it("clears WhatsApp 24h inbound window on /reset-me after restore", async () => {
+    employeeFindFirst
+      .mockResolvedValueOnce(null) // no temp prospect on digits
+      .mockResolvedValueOnce({
+        id: "e-bak",
+        userId: "u-bak",
+        phone: `972501111111${PHONE_BACKUP_SUFFIX}`,
+      });
+    employeeUpdate.mockResolvedValue({});
+    const out = await handleDevProspectTool({
+      phone: "972501111111",
+      text: "/reset-me",
+    });
+    expect(out.handled).toBe(true);
+    expect(out.reply).toContain("972501111111");
+    expect(out.reply).toMatch(/חלון 24|Cold/i);
+    expect(whatsAppInboundDeleteMany).toHaveBeenCalled();
+  });
+
+  it("ignores /as-prospect, /reset-me, and /reset-cold in production", async () => {
     isProductionMock.mockReturnValue(true);
     getEnvMock.mockReturnValue({
       NODE_ENV: "production",
@@ -448,6 +487,9 @@ describe("Dev /as-prospect and /reset-me", () => {
       ).resolves.toEqual({ handled: false, reply: "" });
       await expect(
         handleDevProspectTool({ phone: "972501111111", text: "/reset-me" }),
+      ).resolves.toEqual({ handled: false, reply: "" });
+      await expect(
+        handleDevProspectTool({ phone: "972501111111", text: "/reset-cold" }),
       ).resolves.toEqual({ handled: false, reply: "" });
     } finally {
       isProductionMock.mockReturnValue(false);

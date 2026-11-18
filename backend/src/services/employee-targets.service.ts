@@ -4083,6 +4083,12 @@ export function partitionDeferredCollabTargets(input: {
   workers?: PublicEmployee[];
   externalPartners?: PublicEmployee[];
   contacts: SpeakerContact[];
+  /**
+   * Digits-only phones with no open Meta 24h window. Matched employees on
+   * these phones are deferred (Cold Prospect / cold partner) instead of
+   * in-app share — so AskerNotice + wa.me always surface.
+   */
+  coldPhones?: ReadonlySet<string>;
 }): {
   lists: LlmListAction[];
   filing: LlmFilingAction[];
@@ -4093,6 +4099,7 @@ export function partitionDeferredCollabTargets(input: {
     ...(input.workers ?? []),
     ...(input.externalPartners ?? []),
   ];
+  const coldPhones = input.coldPhones ?? new Set<string>();
   const deferred: DeferredCollabTarget[] = [];
   const lists: LlmListAction[] = [];
 
@@ -4114,6 +4121,17 @@ export function partitionDeferredCollabTargets(input: {
     for (const raw of list.targets) {
       const matched = matchEmployee(raw, pool);
       if (matched && !isGuestEmployee(matched)) {
+        const phone = matched.phone
+          ? toWhatsAppAddress(matched.phone) ||
+            normalizePhoneDigits(matched.phone)
+          : "";
+        if (phone && coldPhones.has(phone)) {
+          pending.push({
+            phone,
+            label: employeeDisplayName(matched),
+          });
+          continue;
+        }
         const label = employeeDisplayName(matched);
         if (!kept.includes(label)) {
           kept.push(label);
@@ -4121,6 +4139,17 @@ export function partitionDeferredCollabTargets(input: {
         continue;
       }
       if (matched && isGuestEmployee(matched)) {
+        const phone = matched.phone
+          ? toWhatsAppAddress(matched.phone) ||
+            normalizePhoneDigits(matched.phone)
+          : "";
+        if (phone && coldPhones.has(phone)) {
+          pending.push({
+            phone,
+            label: employeeDisplayName(matched) || raw.trim(),
+          });
+          continue;
+        }
         kept.push(raw.trim());
         continue;
       }
@@ -4189,6 +4218,17 @@ export function partitionDeferredCollabTargets(input: {
     for (const raw of row.targets) {
       const matched = matchEmployee(raw, pool);
       if (matched && !isGuestEmployee(matched)) {
+        const phone = matched.phone
+          ? toWhatsAppAddress(matched.phone) ||
+            normalizePhoneDigits(matched.phone)
+          : "";
+        if (phone && coldPhones.has(phone)) {
+          pending.push({
+            phone,
+            label: employeeDisplayName(matched),
+          });
+          continue;
+        }
         const label = employeeDisplayName(matched);
         if (!kept.includes(label)) {
           kept.push(label);
@@ -4196,6 +4236,17 @@ export function partitionDeferredCollabTargets(input: {
         continue;
       }
       if (matched && isGuestEmployee(matched)) {
+        const phone = matched.phone
+          ? toWhatsAppAddress(matched.phone) ||
+            normalizePhoneDigits(matched.phone)
+          : "";
+        if (phone && coldPhones.has(phone)) {
+          pending.push({
+            phone,
+            label: employeeDisplayName(matched) || raw.trim(),
+          });
+          continue;
+        }
         kept.push(raw.trim());
         continue;
       }

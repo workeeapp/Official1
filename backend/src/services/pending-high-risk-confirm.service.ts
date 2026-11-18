@@ -621,17 +621,24 @@ export async function finalizePendingConfirm(input: {
 }
 
 export function formatHighRiskConfirmOfferReply(summaryText: string): string {
-  return `${HIGH_RISK_NEEDS_CONFIRM}\n\n${summaryText}\n\nאשרי או בטלי:`;
+  const summary = summaryText.trim();
+  const body = summary
+    ? `${HIGH_RISK_NEEDS_CONFIRM}\n\n${summary}\n\nאפשר לאשר או לבטל:`
+    : `${HIGH_RISK_NEEDS_CONFIRM}\n\nאפשר לאשר או לבטל:`;
+  return body;
 }
 
 export function formatHighRiskConfirmDoneReply(summaryText: string): string {
-  return `בוצע לפי האישור:\n${summaryText}`;
+  const summary = summaryText.trim();
+  return summary
+    ? `בוצע לפי האישור שלך:\n${summary}`
+    : "בוצע לפי האישור שלך.";
 }
 
 export function formatHighRiskConfirmCancelReply(): string {
-  return "ביטלתי — לא בוצעה פעולה.";
+  return "ביטלתי — לא ביצעתי כלום.";
 }
 
 export function formatHighRiskConfirmDeadReply(): string {
-  return "האישור לא בתוקף או כבר טופל.";
+  return "האישור הזה כבר לא בתוקף (פג או שטופל).";
 }

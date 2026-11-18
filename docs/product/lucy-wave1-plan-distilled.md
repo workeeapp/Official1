@@ -33,6 +33,8 @@ Same Lucy system for everyone. Prospect vs Member = **authorization**, not a sec
 | TTL / cancel | 14 days lazy expiry; asker can cancel pending |
 | Out of Wave 1.0 | Cold Check-with, shell deferred invite, ReferralCampaign, Templates, Household, product view-only Share, soft-try growth |
 
+**Channel ADR (accepted):** Dual-purpose `Pending` + `AskerNotice` (`wa.me` deep-link) — 1:1 cold/out-of-window **fallback**, and **primary** distribution for future group tasks/lists/polls (Cloud API cannot join user groups). See `adr-pending-asker-notice-wa-me.md`.
+
 ---
 
 ## Must ship vs defer

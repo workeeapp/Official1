@@ -177,7 +177,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     async (input: {
       employeeId: string;
       speaker: string;
+      /** Payload sent to the API (opaque button command / typed text). */
       text: string;
+      /**
+       * Optional bubble copy. Interactive buttons pass the human label here
+       * while `text` stays the raw callback id (e.g. hrc:ok:…).
+       */
+      displayText?: string;
       digitalEmployeeId?: string;
       assistantSpeaker?: string;
       attachmentIds?: string[];
@@ -190,11 +196,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         ? chatThreadKey(input.employeeId, input.digitalEmployeeId)
         : input.employeeId;
 
+      const bubbleText = (input.displayText ?? input.text).trim() || input.text;
       const userMessage: ChatMessage = {
         id: crypto.randomUUID(),
         author: "you",
         speaker: input.speaker,
-        text: input.text,
+        text: bubbleText,
         createdAt: new Date().toISOString(),
       };
       pendingIdsRef.current.add(userMessage.id);

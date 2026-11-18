@@ -77,11 +77,18 @@ const envSchema = z.object({
   AVIATIONSTACK_ACCESS_KEY: z.string().optional(),
   /**
    * Wave 1 Stage 2: comma-separated E.164/digits phones allowed to use
-   * /as-prospect and /reset-me when NODE_ENV !== production.
+   * /as-prospect, /reset-me, and /reset-cold when NODE_ENV !== production.
    */
   DEV_TEST_PHONES: z.string().optional(),
   /** Prospect pre-LLM inbound message hard cap (circuit breaker). */
   PROSPECT_MAX_INBOUND_MESSAGES: z.coerce.number().int().min(1).max(500).default(15),
+  /**
+   * HighRiskActionGate P-Out / P-Share mode:
+   * - signal (default): allow frictionless outbound/share when targets are
+   *   known AND speaker text has an explicit intent lexicon / button.
+   * - strict: strip all non-self outbound/share (Class V always).
+   */
+  HIGH_RISK_P_OUT_MODE: z.enum(["signal", "strict"]).default("signal"),
 });
 
 export type Env = z.infer<typeof envSchema>;

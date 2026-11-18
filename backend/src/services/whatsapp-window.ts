@@ -59,3 +59,38 @@ export async function hasWhatsAppSession(
     return true;
   }
 }
+
+/**
+ * Dev / test helper: drop the Meta 24h customer-service window row so the
+ * phone is treated as cold (no open session). Prefer delete over nulling
+ * `lastInboundAt` (column is non-nullable).
+ */
+export async function clearWhatsAppInboundWindow(phone: string): Promise<boolean> {
+  const destination = toWhatsAppAddress(phone);
+  if (!destination || !prisma.whatsAppInbound) {
+    return false;
+  }
+  try {
+    const result = await prisma.whatsAppInbound.deleteMany({
+      where: { phone: destination },
+    });
+    return result.count > 0;
+  } catch (error) {
+    console.error(
+      "WhatsApp inbound window clear failed",
+      error instanceof Error ? error.message : "unknown",
+    );
+    return false;
+  }
+}
+
+/**
+ * Cold Prospect / cold recipient: no open Meta 24h customer-service window.
+ * Callers should skip free-form Graph send and queue a Pending invite + AskerNotice.
+ */
+export async function isColdWhatsAppRecipient(
+  phone: string,
+  now = new Date(),
+): Promise<boolean> {
+  return !(await hasWhatsAppSession(phone, now));
+}

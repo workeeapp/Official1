@@ -418,6 +418,15 @@ Statuses on `WhatsAppInvite` (existing vocabulary): `pending` | `consumed` | `ca
 
 **Explicit Join does not** by itself consume Assign or re-apply an already `consumed` Share.
 
+#### Channel pattern — `Pending` + `AskerNotice` (`wa.me`) — dual purpose
+
+Normative product/architecture decision (full write-up: **`adr-pending-asker-notice-wa-me.md`**):
+
+1. **1:1 fallback:** When the Meta 24h window is closed and an approved template is unavailable / skipped / rate-limited, outbound message/share/task stays **`Pending`** and the **asker** must receive a visible **`AskerNotice`** (explanation + forwardable Lucy draft + `wa.me` deep link) on WhatsApp **and** Web — so the recipient can open a $0 User-Initiated session.  
+2. **Group primary:** The same mechanism is the **primary** way to distribute group tasks, shared lists, and group polls/collections (Cloud API bots cannot join existing WhatsApp groups). The creator pastes one contextual `wa.me` invite into the group instead of paid Marketing fan-out; each clicker enters Lucy with the group action bound and a free 24h window (PLG viral loop).
+
+Do not treat group distribution as a separate invite product or as default template blast.
+
 ### 2.9 Prospect experience economics — three separate planes
 
 Prospects should get a **real Lucy trial** (same system, meaningful conversation). That trial can incur AI, WhatsApp, and infra cost even if they never join. Cost control must **not** be implemented by inventing a second, weaker Lucy or by collapsing “not a Member yet” into “cannot talk.”
@@ -848,6 +857,7 @@ Cold Check-with on invitee; shell deferred invite; ReferralCampaign; Templates; 
 |----|----------|--------|-------------|---------------------|
 | — | One system / one CORE / ConsentStage policy (§0) | **Accepted** | — | Dual Member/Prospect engines forbidden |
 | — | Architectural direction (mediation on CORE) | **Accepted** | — | — |
+| — | Dual-purpose `Pending` + `AskerNotice` (`wa.me`) — 1:1 cold fallback + primary group distribute | **Accepted** | See `adr-pending-asker-notice-wa-me.md` · §2.8 channel pattern | Group product UX/schema still follow-on |
 | — | Three planes: Permissions / Usage / Conversion (§2.9) | **Accepted as structure** | — | Numeric usage policy still **U1 Open** |
 | — | Plan approved to start Stage A coding | **Not yet** | Enables implementation PRs | Remains docs-only |
 | **D1b** | Exact Hebrew consent / join UX copy | **Open** | — | Must not invent copy; join hook waits on wording |

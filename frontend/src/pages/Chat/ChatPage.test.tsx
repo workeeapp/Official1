@@ -224,6 +224,55 @@ describe("Chat page", () => {
     );
   });
 
+  it("renders the button label in the user bubble while sending the opaque command id", async () => {
+    sendMock.mockResolvedValueOnce({
+      reply: JSON.stringify({
+        response: "רגע לפני שאמשיך — צריך אישור",
+        metadata: {
+          buttons: [
+            { label: "אשר", command: "hrc:ok:deadbeefcafebabe" },
+            { label: "בטל", command: "hrc:no:deadbeefcafebabe" },
+          ],
+        },
+      }),
+      raw: {},
+    });
+    sendMock.mockResolvedValueOnce({
+      reply: JSON.stringify({ response: "בוצע לפי האישור שלך." }),
+      raw: {},
+    });
+    const user = userEvent.setup();
+
+    renderApp(
+      <Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<ChatPage />} />
+        </Route>
+      </Routes>,
+      { route: "/chat" },
+    );
+
+    await user.type(await screen.findByLabelText("Message"), "תשלחי למיכל שלום");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    const confirm = await within(
+      await screen.findByTestId("chat-reply-buttons"),
+    ).findByRole("button", { name: "אשר" });
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(sendMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ message: "hrc:ok:deadbeefcafebabe" }),
+        expect.any(AbortSignal),
+      ),
+    );
+    const dialog = screen.getByTestId("chat-dialog");
+    expect(within(dialog).getAllByText("אשר").length).toBeGreaterThanOrEqual(1);
+    expect(
+      within(dialog).queryByText("hrc:ok:deadbeefcafebabe"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a Waze link for a reply with one address that stays enabled while sending", async () => {
     sendMock.mockResolvedValueOnce({
       reply: JSON.stringify({
@@ -320,7 +369,7 @@ describe("Chat page", () => {
     const buttons = await screen.findByTestId("chat-reply-buttons");
     expect(within(buttons).getByRole("button", { name: "הצג" })).toHaveAttribute(
       "title",
-      "הצג רשימת מטלות",
+      "הצג",
     );
   });
 

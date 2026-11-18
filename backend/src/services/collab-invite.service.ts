@@ -424,9 +424,10 @@ export async function createDeferredCollabInvites(input: {
   asker: PublicEmployee;
   digitalId: string;
   deferred: DeferredCollabTarget[];
-}): Promise<{ notice: string; inviteIds: string[] }> {
+}): Promise<{ notice: string; inviteIds: string[]; composeUrl: string | null }> {
   const inviteIds: string[] = [];
   const noticeParts: string[] = [];
+  let composeUrl: string | null = null;
   for (const row of input.deferred) {
     const rowId = randomUUID();
     const payload = buildCollabInvitePayloadV2({
@@ -462,15 +463,13 @@ export async function createDeferredCollabInvites(input: {
       continue;
     }
     inviteIds.push(created.invite.id);
-    noticeParts.push(
-      formatAskerPendingNotice({
-        recipientLabel: row.label,
-        intentKind,
-      }),
-    );
+    // created.notice already includes Pending AskerNotice + forwardable draft.
     noticeParts.push(created.notice);
+    if (!composeUrl) {
+      composeUrl = created.composeUrl;
+    }
   }
-  return { notice: noticeParts.join("\n\n"), inviteIds };
+  return { notice: noticeParts.join("\n\n"), inviteIds, composeUrl };
 }
 
 export type ConfirmCollabResult = "consumed" | "lost" | "failed" | "rolled_back";

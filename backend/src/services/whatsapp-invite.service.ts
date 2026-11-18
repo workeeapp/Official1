@@ -179,8 +179,19 @@ export function buildFatherInviteDraft(input: {
 export function formatAskerPendingNotice(input: {
   recipientLabel: string;
   intentKind: InviteIntentKind;
+  /** Cold Prospect / no 24h WhatsApp window with Lucy. */
+  coldProspect?: boolean;
 }): string {
   const label = input.recipientLabel.trim() || "הנמען";
+  if (input.coldProspect) {
+    if (input.intentKind === "share") {
+      return `ממתין — השיתוף עם «${label}» עדיין לא הושלם. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ (אין חלון 24 שעות), אז לא שלחתי ישירות מהעסק.`;
+    }
+    if (input.intentKind === "assign") {
+      return `ממתין — האחריות ל«${label}» עדיין ממתינה. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ (אין חלון 24 שעות), אז לא שלחתי ישירות מהעסק.`;
+    }
+    return `ממתין — ההודעה ל«${label}» עדיין ממתינה. «${label}» עדיין לא פתח/ה שיחה עם לוסי בוואטסאפ (אין חלון 24 שעות), אז לא שלחתי ישירות מהעסק.`;
+  }
   if (input.intentKind === "share") {
     return `ממתין — השיתוף עם «${label}» עדיין לא הושלם (ממתין שהנמען יראה/יצטרף).`;
   }
@@ -194,15 +205,17 @@ export function formatColdInviteNotice(input: {
   recipientLabel: string;
   draftText: string;
   intentKind?: InviteIntentKind;
+  /** When true, copy explains Cold Prospect / closed 24h window. */
+  coldProspect?: boolean;
 }): string {
   const pending = formatAskerPendingNotice({
     recipientLabel: input.recipientLabel,
     intentKind: input.intentKind ?? "send",
+    coldProspect: input.coldProspect ?? true,
   });
   return [
     pending,
-    `אי אפשר לשלוח ישירות ל«${input.recipientLabel}» מוואטסאפ העסק — הנמען עדיין לא כתב לנו.`,
-    "שלח את ההודעה הזו מהוואטסאפ שלך (לחץ «שלח בוואטסאפ»):",
+    "כדי לפתוח את השיחה עם לוסי, שלח/י את ההודעה הזו מהוואטסאפ שלך (לחץ/י «שלח בוואטסאפ» — קישור מוכן להעברה):",
     "",
     `«${input.draftText}»`,
   ].join("\n");
@@ -268,6 +281,9 @@ export async function createWhatsAppInvite(input: {
       recipientLabel: input.recipientLabel,
       draftText,
       intentKind: noticeIntent,
+      // Cold path only creates invites when free-form Graph send cannot run
+      // (no 24h window) — AskerNotice always explains Pending + wa.me forward.
+      coldProspect: true,
     }),
   };
 }

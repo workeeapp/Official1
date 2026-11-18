@@ -1,18 +1,25 @@
 /**
- * Wave 1 Stage 2 — gated /as-prospect and /reset-me (non-production + DEV_TEST_PHONES).
+ * Wave 1 Stage 2 — gated /as-prospect, /reset-me, /reset-cold
+ * (non-production + DEV_TEST_PHONES).
  */
 import { prisma } from "../database/prisma.js";
 import { getEnv, isProduction } from "../config/env.js";
 import { normalizePhoneDigits, phonesMatch, toWhatsAppAddress } from "../utils/phone.js";
 import { clearWhatsAppWorkerSticky } from "./whatsapp-worker-sticky.js";
+import { clearWhatsAppInboundWindow } from "./whatsapp-window.js";
 
 export const DEV_AS_PROSPECT_CMD = "/as-prospect";
 export const DEV_RESET_ME_CMD = "/reset-me";
+export const DEV_RESET_COLD_CMD = "/reset-cold";
 export const PHONE_BACKUP_SUFFIX = "_backup";
 
 export function isDevProspectToolCommand(text: string): boolean {
   const t = text.trim().toLowerCase();
-  return t === DEV_AS_PROSPECT_CMD || t === DEV_RESET_ME_CMD;
+  return (
+    t === DEV_AS_PROSPECT_CMD ||
+    t === DEV_RESET_ME_CMD ||
+    t === DEV_RESET_COLD_CMD
+  );
 }
 
 export function isDevTestPhoneAllowed(phone: string): boolean {
@@ -53,6 +60,9 @@ export async function handleDevProspectTool(input: {
   }
   if (cmd === DEV_AS_PROSPECT_CMD) {
     return { handled: true, reply: await runAsProspect(input.phone) };
+  }
+  if (cmd === DEV_RESET_COLD_CMD) {
+    return { handled: true, reply: await runResetCold(input.phone) };
   }
   return { handled: true, reply: await runResetMe(input.phone) };
 }
@@ -97,6 +107,26 @@ async function runAsProspect(phone: string): Promise<string> {
   return `as-prospect: המספר הועבר ל־${bak}. ההודעה הבאה תיצור Prospect חדש (consentPending).`;
 }
 
+/**
+ * Clear Meta 24h CS window for this phone. Must run after markWhatsAppInbound
+ * for the command message itself, otherwise the tool inbound would leave the
+ * session open.
+ */
+async function clearColdWindowForDevPhone(phone: string): Promise<string> {
+  const digits = digitsOrRaw(phone);
+  const cleared =
+    (await clearWhatsAppInboundWindow(phone)) ||
+    (await clearWhatsAppInboundWindow(digits));
+  return cleared
+    ? "חלון 24 שעות נוקה — המספר נחשב Cold (אין session)."
+    : "חלון 24 שעות כבר היה סגור (או שלא נמצאה רשומת inbound).";
+}
+
+async function runResetCold(phone: string): Promise<string> {
+  const note = await clearColdWindowForDevPhone(phone);
+  return `reset-cold: ${note}`;
+}
+
 async function runResetMe(phone: string): Promise<string> {
   const digits = digitsOrRaw(phone);
   const bak = backupPhone(digits);
@@ -129,7 +159,8 @@ async function runResetMe(phone: string): Promise<string> {
   if (!backupEmp) {
     clearWhatsAppWorkerSticky(phone);
     clearWhatsAppWorkerSticky(digits);
-    return "reset-me: אין משתמש _backup לשחזור (המספר הזמני נמחק אם היה).";
+    const coldNote = await clearColdWindowForDevPhone(phone);
+    return `reset-me: אין משתמש _backup לשחזור (המספר הזמני נמחק אם היה). ${coldNote}`;
   }
   await prisma.employee.update({
     where: { id: backupEmp.id },
@@ -138,5 +169,6 @@ async function runResetMe(phone: string): Promise<string> {
   clearWhatsAppWorkerSticky(phone);
   clearWhatsAppWorkerSticky(digits);
   clearWhatsAppWorkerSticky(bak);
-  return `reset-me: שוחזר המספר ${digits} למשתמש המקורי.`;
+  const coldNote = await clearColdWindowForDevPhone(phone);
+  return `reset-me: שוחזר המספר ${digits} למשתמש המקורי. ${coldNote}`;
 }

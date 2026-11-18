@@ -136,7 +136,11 @@ export function ChatPage() {
     await sendText(text || "📎", files);
   }
 
-  async function sendText(text: string, files: File[] = []) {
+  async function sendText(
+    text: string,
+    files: File[] = [],
+    displayText?: string,
+  ) {
     if ((!text && files.length === 0) || sending || !selectedEmployee) {
       return;
     }
@@ -161,10 +165,13 @@ export function ChatPage() {
         return;
       }
     }
+    const payload = text || "📎";
+    const label = displayText?.trim();
     await send({
       employeeId: selectedEmployee.id,
       speaker: employeeDisplayName(selectedEmployee),
-      text: text || "📎",
+      text: payload,
+      ...(label && label !== payload ? { displayText: label } : {}),
       digitalEmployeeId: selectedDigital?.id,
       assistantSpeaker: chatWithName,
       ...(attachmentIds?.length ? { attachmentIds } : {}),
@@ -427,9 +434,15 @@ export function ChatPage() {
                           key={button.command}
                           type="button"
                           dir="auto"
-                          title={button.command}
+                          title={button.label}
                           disabled={sending || !selectedEmployee}
-                          onClick={() => void sendText(button.command)}
+                          onClick={() =>
+                            void sendText(
+                              button.command,
+                              [],
+                              button.label || undefined,
+                            )
+                          }
                           className="min-h-11 rounded-xl border border-primary/40 bg-surface px-4 text-sm font-medium text-primary shadow-sm transition-colors hover:bg-primary-light focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
                         >
                           {button.label}
