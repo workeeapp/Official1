@@ -3559,9 +3559,15 @@ export function fallbackNotificationText(
     recipientIsPartner?: boolean;
     ownerName?: string;
     partnerNames?: string[];
+    /**
+     * Prefer roster/contact display name for the actor as seen by the
+     * notification recipient (e.g. «דני» instead of «אורח …8887»).
+     */
+    actorDisplayName?: string;
   },
 ): string {
-  const actorName = employeeDisplayName(actor);
+  const actorName =
+    options?.actorDisplayName?.trim() || employeeDisplayName(actor);
   const clocks = (metadata.reminders ?? []).filter(isClockAdd);
   const realLists = metadata.lists.filter(
     (row) => row.items.length > 0 && !isOpeningCustomList(row),
@@ -3708,6 +3714,9 @@ export function fallbackNotificationText(
 
   if (list?.listType === "tasks") {
     if (list.action === "remove") {
+      if (options?.completed || options?.purchased) {
+        return `${actorName} השלים משימה: ${itemText} ✅`;
+      }
       return `${actorName} הסיר משימה: ${itemText}`;
     }
     if (list.action === "update") {

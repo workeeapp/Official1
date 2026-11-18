@@ -56,6 +56,8 @@ export type PresentedCollabInvite = {
   askerName: string;
   askSummary: string;
   kind: "share" | "assign";
+  /** Asker WhatsApp digits — for «חסימת שולח» CTA. */
+  askerPhone?: string | null;
   /** Scoped invite value for Prospect Share live present (no visibleTo). */
   inviteValueText?: string;
 };
@@ -381,7 +383,7 @@ export async function loadPresentedCollabInvites(
     }
     const asker = await prisma.employee.findUnique({
       where: { id: row.askerEmployeeId },
-      select: { name: true, nickname: true },
+      select: { name: true, nickname: true, phone: true },
     });
     const askerName =
       asker?.nickname?.trim() || asker?.name?.trim() || "מישהו";
@@ -390,6 +392,7 @@ export async function loadPresentedCollabInvites(
       askerName,
       askSummary: row.askSummary.trim() || "פריט",
       kind: payload.kind,
+      askerPhone: asker?.phone ?? null,
       ...(payload.kind === "share"
         ? { inviteValueText: inviteValueTextFromPayload(payload) }
         : {}),
@@ -429,10 +432,22 @@ export async function createDeferredCollabInvites(input: {
   digitalId: string;
   deferred: DeferredCollabTarget[];
 }): Promise<{ notice: string; inviteIds: string[]; composeUrl: string | null }> {
+  const { gateExternalAssignInvite } = await import("./sender-block.service.js");
   const inviteIds: string[] = [];
   const noticeParts: string[] = [];
   let composeUrl: string | null = null;
   for (const row of input.deferred) {
+    const gate = await gateExternalAssignInvite({
+      userId: input.userId,
+      askerEmployeeId: input.asker.id,
+      askerPhone: input.asker.phone,
+      recipientPhone: row.phone,
+      kind: row.kind,
+    });
+    if (!gate.ok) {
+      noticeParts.push(gate.notice);
+      continue;
+    }
     const rowId = randomUUID();
     const payload = buildCollabInvitePayloadV2({
       kind: row.kind,

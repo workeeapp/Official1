@@ -868,6 +868,27 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
       }
     }
 
+    // Anti-abuse: opaque «חסימת שולח» (never free-text for the button path).
+    {
+      const { isBlockSenderCommand, parseBlockSenderCommand, handleBlockSenderAction } =
+        await import("./sender-block.service.js");
+      if (isBlockSenderCommand(spoken)) {
+        const blocked = parseBlockSenderCommand(spoken);
+        if (blocked) {
+          const blockedResult = await handleBlockSenderAction({
+            blockerPhone: from,
+            blockedPhone: blocked,
+          });
+          await sendWhatsAppText(from, blockedResult.spoken, {
+            ignoreSession: true,
+          });
+          turnAnswered = true;
+          recordWhatsAppEvent("sender_block", `ok=${blockedResult.ok}`);
+          return;
+        }
+      }
+    }
+
     // Wave 1 Stage 2: Explicit Join — opaque button only (R1: never free-text NLU).
     if (isExplicitJoinAcceptCommand(spoken)) {
       const joinResult = await handleExplicitJoinAccept({
@@ -885,6 +906,10 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
         });
         const payload = invite ? parseCollabInvitePayload(invite.payload) : null;
         if (invite && payload?.kind === "assign" && invite.status === "pending") {
+          const askerEmp = await prisma.employee.findUnique({
+            where: { id: invite.askerEmployeeId },
+            select: { phone: true, name: true, nickname: true },
+          });
           const offered = await stageCollabInviteConfirm({
             userId: speaker.userId,
             speakerEmployeeId: speaker.employeeId,
@@ -892,8 +917,12 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
             conversationId: `wa:${from}`,
             inviteId: invite.id,
             inviteKind: "assign",
-            askerName: "מישהו",
-              askSummary: invite.askSummary || "אחריות",
+            askerName:
+              askerEmp?.nickname?.trim() ||
+              askerEmp?.name?.trim() ||
+              "מישהו",
+            askSummary: invite.askSummary || "אחריות",
+            askerPhone: askerEmp?.phone,
           });
           if (offered?.buttons?.length) {
             assignButtons = offered.buttons;

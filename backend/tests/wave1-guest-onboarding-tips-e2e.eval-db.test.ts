@@ -80,7 +80,8 @@
  *  ┌─────────┐  Accept Michal's assign → "קניתי את הלחם דגנים"
  *  │  Danny  │ ──────────────────────────────────────────────► Lucy
  *  └─────────┘
- *       DB: assigned task soft-deleted; Michal assistant chatMessage notify
+ *       DB: assigned task soft-deleted
+ *       WA/chat (Michal): «דני השלים משימה: להביא לחם דגנים ✅»
  *
  *  STEP 8 — Cold direct Prospect (uninvited)
  *  ┌─────────┐  "שלום, מה את יודעת לעשות?" (new phone, no invite)
@@ -1194,6 +1195,7 @@ describe("Wave 1 Guest onboarding + tips E2E (eval-db)", () => {
       );
       step7.checks.push(completedOk ? "PASS completed" : "FAIL not deleted");
 
+      const expectedNotify = `${CONTACT_DANI} השלים משימה: ${ASSIGN_TASK} ✅`;
       const michalNotice = await prisma.chatMessage.findFirst({
         where: {
           conversation: {
@@ -1201,25 +1203,24 @@ describe("Wave 1 Guest onboarding + tips E2E (eval-db)", () => {
             employeeId: asker.employeeId,
           },
           author: "assistant",
-          OR: [
-            { text: { contains: "הסיר משימה" } },
-            { text: { contains: ASSIGN_TASK } },
-            { text: { contains: "לחם" } },
-            { text: { contains: CONTACT_DANI } },
-          ],
+          text: { contains: "השלים משימה" },
         },
         orderBy: { createdAt: "desc" },
       });
       recordDb(
         step7,
-        `michalNotice=${michalNotice?.text?.slice(0, 120) ?? "missing"}`,
+        `michalNotice=${michalNotice?.text?.slice(0, 160) ?? "missing"} expected=${expectedNotify}`,
       );
       check(
-        "Step7 Michal received completion notification",
-        Boolean(michalNotice?.text),
+        "Step7 Michal received polished completion notification",
+        michalNotice?.text?.trim() === expectedNotify,
         michalNotice?.text?.slice(0, 160) ?? "",
       );
-      step7.checks.push(michalNotice ? "PASS notify" : "FAIL no notify");
+      step7.checks.push(
+        michalNotice?.text?.trim() === expectedNotify
+          ? "PASS notify copy"
+          : "FAIL notify copy",
+      );
 
       // ------------------------------------------------------------------
       // STEP 8 — GIVEN a brand-new phone with no invite

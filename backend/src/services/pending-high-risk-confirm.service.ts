@@ -505,6 +505,8 @@ export async function stageCollabInviteConfirm(input: {
   inviteKind: "share" | "assign";
   askerName: string;
   askSummary: string;
+  /** When set, attach deterministic «חסימת שולח» for external askers. */
+  askerPhone?: string | null;
 }): Promise<{
   id: string;
   summaryText: string;
@@ -517,6 +519,21 @@ export async function stageCollabInviteConfirm(input: {
   if (!phone) {
     return null;
   }
+  const {
+    BLOCK_SENDER_BUTTON_LABEL,
+    blockSenderCommand,
+  } = await import("./sender-block.service.js");
+  const blockBtn =
+    input.askerPhone && toWhatsAppAddress(input.askerPhone)
+      ? {
+          label: BLOCK_SENDER_BUTTON_LABEL,
+          command: blockSenderCommand(input.askerPhone),
+        }
+      : null;
+  const withBlock = (
+    buttons: LlmReplyButton[],
+  ): LlmReplyButton[] => (blockBtn ? [...buttons, blockBtn] : buttons);
+
   const snapshot: CollabInviteConfirmSnapshot = {
     v: 1,
     type: "collab_invite",
@@ -558,10 +575,10 @@ export async function stageCollabInviteConfirm(input: {
         summaryText: row.summaryText,
         confirmCommand: row.confirmCommand,
         cancelCommand: row.cancelCommand,
-        buttons: [
+        buttons: withBlock([
           { label: "קבל", command: row.confirmCommand },
           { label: "דחה", command: row.cancelCommand },
-        ],
+        ]),
       };
     }
   }
@@ -588,10 +605,10 @@ export async function stageCollabInviteConfirm(input: {
     summaryText: built.summaryText,
     confirmCommand: built.confirmCommand,
     cancelCommand: built.cancelCommand,
-    buttons: [
+    buttons: withBlock([
       { label: "קבל", command: built.confirmCommand },
       { label: "דחה", command: built.cancelCommand },
-    ],
+    ]),
   };
 }
 

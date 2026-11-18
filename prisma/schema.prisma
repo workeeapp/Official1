@@ -38,6 +38,21 @@ model User {
 }
 
 /**
+ * Anti-abuse: recipient (blockerPhone) blocked external sender (blockedPhone).
+ * Phones are digits-only WhatsApp addresses. Enforced on assign/notify create.
+ */
+model SenderBlock {
+  id           String   @id @default(uuid()) @db.Uuid
+  blockerPhone String   @map("blocker_phone") @db.VarChar(32)
+  blockedPhone String   @map("blocked_phone") @db.VarChar(32)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([blockerPhone, blockedPhone])
+  @@index([blockedPhone])
+  @@map("SenderBlocks")
+}
+
+/**
  * Account teams. A User may have a personal team plus the shared
  * "New Registered 30 days" bucket for new registrants. Guests have no team.
  */

@@ -1866,6 +1866,7 @@ async function pushTargetNotification(input: {
   metadata: LlmMetadata;
   savedLabels?: ReadonlyMap<string, string>;
   purchased?: boolean;
+  completed?: boolean;
   shared?: boolean;
   unshared?: boolean;
   recipientIsOwner?: boolean;
@@ -1892,14 +1893,24 @@ async function pushTargetNotification(input: {
     digitalEmployeeId,
   );
   const labeled = withSavedItemLabels(input.metadata, input.savedLabels);
+  const { resolveNotifyActorDisplayName } = await import(
+    "./sender-block.service.js"
+  );
+  const actorDisplayName = await resolveNotifyActorDisplayName({
+    actor: input.actor,
+    recipientUserId: targetUserId,
+    recipientEmployeeId: input.target.id,
+  });
   const text = fallbackNotificationText(input.actor, labeled, {
     purchased: input.purchased,
+    completed: input.completed,
     shared: input.shared,
     unshared: input.unshared,
     recipientIsOwner: input.recipientIsOwner,
     recipientIsPartner: input.recipientIsPartner,
     ownerName: input.ownerName,
     partnerNames: input.partnerNames,
+    actorDisplayName,
   });
   const buttons = showButtonsForNotify(labeled);
   const raw = { notification: text };
@@ -2077,6 +2088,23 @@ export async function notifySharedItemEvents(input: {
     notified.add(target.id);
     const event = mergeEventsForTargetNotify(events, targetId);
     const owner = input.employees.find((item) => item.id === event.listOwnerId);
+    const isTaskRemove = (event.metadata.lists ?? []).some(
+      (row) => row.listType === "tasks" && row.action === "remove",
+    );
+    // Assignee completing an assigned task → notify asker with «השלים משימה».
+    const completed =
+      Boolean(event.purchased) ||
+      (isTaskRemove &&
+        Boolean(event.addedById) &&
+        event.addedById === target.id);
+    const { isSenderBlockedByPhones } = await import("./sender-block.service.js");
+    if (
+      input.actor.phone &&
+      target.phone &&
+      (await isSenderBlockedByPhones(target.phone, input.actor.phone))
+    ) {
+      continue;
+    }
     const pushed = await pushTargetNotification({
       userId: input.userId,
       actor: input.actor,
@@ -2084,6 +2112,7 @@ export async function notifySharedItemEvents(input: {
       metadata: event.metadata,
       savedLabels: input.savedLabels,
       purchased: event.purchased,
+      completed,
       shared: event.shared,
       unshared: event.unshared,
       recipientIsOwner: event.listOwnerId === target.id,
@@ -2769,6 +2798,37 @@ export async function sendChatMessage(input: {
   /** Pre-LLM circuit breaker turn must not be overwritten by collab offer buttons. */
   let prospectCircuitBreakerTripped = false;
   const inboundCommand = stripWhatsAppReplyPrefix(input.message).trim();
+  let senderBlockReply: string | null = null;
+  // Anti-abuse: opaque block_sender:… or free-text «תחסמי את …».
+  if (!guestSpeaker && !consultFrom && employee.phone) {
+    const {
+      isBlockSenderCommand,
+      parseBlockSenderCommand,
+      parseBlockSenderFreeText,
+      resolveBlockedPhoneFromLabel,
+      handleBlockSenderAction,
+    } = await import("./sender-block.service.js");
+    let blockedPhone: string | null = null;
+    if (isBlockSenderCommand(inboundCommand)) {
+      blockedPhone = parseBlockSenderCommand(inboundCommand);
+    } else {
+      const free = parseBlockSenderFreeText(inboundCommand);
+      if (free) {
+        blockedPhone = await resolveBlockedPhoneFromLabel({
+          userId: input.userId,
+          ownerEmployeeId: employee.id,
+          labelOrPhone: free,
+        });
+      }
+    }
+    if (blockedPhone) {
+      const blocked = await handleBlockSenderAction({
+        blockerPhone: employee.phone,
+        blockedPhone,
+      });
+      senderBlockReply = blocked.spoken;
+    }
+  }
   if (
     !guestSpeaker &&
     !consultFrom &&
@@ -2823,7 +2883,15 @@ export async function sendChatMessage(input: {
     let openaiRequest: Record<string, unknown> | ReturnType<typeof buildOpenAiRequest> =
       {};
     let llmMs = 0;
-    if (pendingConfirmCancelReply) {
+    if (senderBlockReply) {
+      turn = {
+        reply: JSON.stringify({
+          responses: [{ text: senderBlockReply, buttons: [] }],
+          metadata: {},
+        }),
+        raw: {},
+      };
+    } else if (pendingConfirmCancelReply) {
       turn = {
         reply: JSON.stringify({
           responses: [{ text: pendingConfirmCancelReply, buttons: [] }],
@@ -3471,6 +3539,7 @@ export async function sendChatMessage(input: {
             inviteKind: invite.kind,
             askerName: invite.askerName,
             askSummary: invite.askSummary,
+            askerPhone: invite.askerPhone,
           }),
         );
         if (offer) {
