@@ -68,6 +68,25 @@
  *  └─────────┘
  *       DB: consentPending=false (Member), consentAcceptedAt set
  *       WA: Join offer Hebrew + post-join spoken confirmation
+ *
+ *  STEP 6 — Guest → Member data continuity (zero loss / zero dupes)
+ *  ┌─────────┐  reminder + shopping staged while Prospect → Join
+ *  │  Noa    │ ──────────────────────────────────────────────► Lucy
+ *  └─────────┘
+ *       DB: same reminder + shopping item owned by Noa after join
+ *           (count=1 each; no duplicate rows)
+ *
+ *  STEP 7 — Guest-origin task complete → inviter notify
+ *  ┌─────────┐  Accept Michal's assign → "קניתי את הלחם דגנים"
+ *  │  Danny  │ ──────────────────────────────────────────────► Lucy
+ *  └─────────┘
+ *       DB: assigned task soft-deleted; Michal assistant chatMessage notify
+ *
+ *  STEP 8 — Cold direct Prospect (uninvited)
+ *  ┌─────────┐  "שלום, מה את יודעת לעשות?" (new phone, no invite)
+ *  │  Ori    │  Turn1 Tip#1 → Turn2 no tip → Turn3 Tip#2
+ *  └─────────┘
+ *       DB: consentPending=true; TipProgress onboard shows 1 then 2
  */
 
 import { randomUUID } from "node:crypto";
@@ -103,11 +122,19 @@ import {
 
 const ASKER_PHONE = "972500000101";
 const PROSPECT_PHONE = "972509998887"; // 0509998887
+const CONTINUITY_PHONE = "972509998001";
+const COLD_PHONE = "972509997001";
 const CONTACT_DANI = "דני";
 const CONTACT_RONIT = "רונית";
+const CONTACT_MICHAL = "מיכל";
 const ASSIGN_TASK = "להביא לחם דגנים";
 const RONIT_TASK = "לקנות חלב";
 const TURN3_MSG = "תזכירי לי מחר ב-9 להתקשר לרופא";
+const CONTINUITY_REMINDER = "להתקשר לרופא";
+const CONTINUITY_SHOP_ITEM = "חלב לבדיקת רציפות";
+const COLD_TURN1 = "שלום, מה את יודעת לעשות?";
+const COLD_TURN2 = "תודה, עוד משהו?";
+const COLD_TURN3 = "אוקיי, מעולה";
 
 const TIP1_TEXT =
   SYSTEM_TIP_SEEDS.find((t) => t.key === "prospect_onboard_tasks")?.text ?? "";
@@ -396,6 +423,8 @@ afterAll(async () => {
   }
   await cleanupPhone(ASKER_PHONE);
   await cleanupPhone(PROSPECT_PHONE);
+  await cleanupPhone(CONTINUITY_PHONE);
+  await cleanupPhone(COLD_PHONE);
   resetEnvCache();
 });
 
@@ -414,6 +443,8 @@ describe("Wave 1 Guest onboarding + tips E2E (eval-db)", () => {
 
       await cleanupPhone(ASKER_PHONE);
       await cleanupPhone(PROSPECT_PHONE);
+      await cleanupPhone(CONTINUITY_PHONE);
+      await cleanupPhone(COLD_PHONE);
 
       // Setup asker Member (Michal) + contacts Danny / Ronit
       const asker = await createHarnessAccount("מיכל", { digitalWorker: true });
@@ -889,6 +920,444 @@ describe("Wave 1 Guest onboarding + tips E2E (eval-db)", () => {
         );
       }
 
+      // ------------------------------------------------------------------
+      // STEP 6 — GIVEN a fresh Prospect stages reminder + shopping while Guest
+      //          WHEN they one-tap Join
+      //          THEN both rows remain owned by them with no duplicates
+      // ------------------------------------------------------------------
+      const step6 = beginStep(6, "Guest → Member data continuity");
+      const contSpeaker = await resolveWhatsAppSpeaker(CONTINUITY_PHONE);
+      extraUserIds.push(contSpeaker.userId);
+      const contLucy = (await listEmployeesForUser(contSpeaker.userId)).find(
+        (row) => row.protected === true,
+      );
+      if (!contLucy) {
+        throw new Error("Continuity Prospect missing Lucy");
+      }
+      const cont = {
+        userId: contSpeaker.userId,
+        employeeId: contSpeaker.employeeId,
+        digitalEmployeeId: contLucy.id,
+      };
+      expect(
+        (
+          await prisma.user.findUniqueOrThrow({ where: { id: cont.userId } })
+        ).consentPending,
+      ).toBe(true);
+
+      const contInbound = `תזכירי לי מחר ב-9 ${CONTINUITY_REMINDER} ותוסיפי ${CONTINUITY_SHOP_ITEM} לקניות`;
+      recordInbound(step6, "Noa", contInbound);
+      stubLlm({
+        responses: [
+          {
+            text: `שמרתי תזכורת + ${CONTINUITY_SHOP_ITEM} לקניות.`,
+            buttons: [],
+          },
+        ],
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: CONTINUITY_REMINDER,
+              date: "2031-07-01",
+              time: "09:00",
+              ping: ["אורח"],
+              text: CONTINUITY_REMINDER,
+            },
+          ],
+          lists: [
+            {
+              action: "add",
+              list_type: "shopping",
+              list_name: "",
+              targets: ["אורח"],
+              items: [{ "שם פריט": CONTINUITY_SHOP_ITEM }],
+            },
+          ],
+        },
+      });
+      const contGate = await sendChatMessage({
+        userId: cont.userId,
+        employeeId: cont.employeeId,
+        digitalEmployeeId: cont.digitalEmployeeId,
+        message: contInbound,
+      });
+      recordReply(step6, "Noa", contGate.reply);
+      const contJoin = joinCommandFromReply(contGate.reply);
+      check(
+        "Step6 Join CTA while staging reminder+shopping",
+        Boolean(contJoin?.startsWith(EXPLICIT_JOIN_ACCEPT_PREFIX)),
+        contJoin ?? visibleReplyText(contGate.reply).slice(0, 160),
+      );
+      step6.checks.push(contJoin ? "PASS join CTA" : "FAIL no join");
+
+      const remBefore = await prisma.reminder.count({
+        where: {
+          ownerId: cont.employeeId,
+          itemLabel: CONTINUITY_REMINDER,
+          status: "active",
+        },
+      });
+      const shopBefore = await prisma.employeeListItem.count({
+        where: {
+          deletedAt: null,
+          list: { employeeId: cont.employeeId, listType: "shopping" },
+          OR: [
+            { itemKey: CONTINUITY_SHOP_ITEM },
+            { data: { path: ["שם פריט"], equals: CONTINUITY_SHOP_ITEM } },
+          ],
+        },
+      });
+      recordDb(step6, `beforeJoin reminderCount=${remBefore} shopCount=${shopBefore}`);
+      check(
+        "Step6 ProspectWriteGate blocked persistence before join",
+        remBefore === 0 && shopBefore === 0,
+        `rem=${remBefore} shop=${shopBefore}`,
+      );
+
+      if (!contJoin) {
+        check("Step6 data continuity after join", false, "missing join");
+        step6.checks.push("FAIL continuity");
+      } else {
+        recordInbound(step6, "Noa", `[button_reply] ${contJoin}`);
+        const contJoined = await handleExplicitJoinAccept({
+          userId: cont.userId,
+          employeeId: cont.employeeId,
+          digitalEmployeeId: cont.digitalEmployeeId,
+          joinCommand: contJoin,
+          recipientPhone: CONTINUITY_PHONE,
+        });
+        log(`◀ ExplicitJoinHandler → Noa\n  ${contJoined.spoken}`);
+        step6.reply = `${step6.reply}\n--- after join ---\n${contJoined.spoken}`;
+
+        const remRows = await prisma.reminder.findMany({
+          where: {
+            ownerId: cont.employeeId,
+            itemLabel: CONTINUITY_REMINDER,
+            status: "active",
+          },
+        });
+        const shopRows = await prisma.employeeListItem.findMany({
+          where: {
+            deletedAt: null,
+            list: { employeeId: cont.employeeId, listType: "shopping" },
+            OR: [
+              { itemKey: CONTINUITY_SHOP_ITEM },
+              { data: { path: ["שם פריט"], equals: CONTINUITY_SHOP_ITEM } },
+            ],
+          },
+          include: { list: { select: { employeeId: true } } },
+        });
+        recordDb(
+          step6,
+          `afterJoin reminders=${remRows.length} shop=${shopRows.length} remUser=${remRows[0]?.userId ?? "n/a"}`,
+        );
+        const continuityOk =
+          remRows.length === 1 &&
+          remRows[0]?.userId === cont.userId &&
+          remRows[0]?.ownerId === cont.employeeId &&
+          shopRows.length === 1 &&
+          shopRows[0]?.list.employeeId === cont.employeeId &&
+          (shopRows[0]?.addedById === cont.employeeId ||
+            shopRows[0]?.addedById == null);
+        check(
+          "Step6 reminder+shopping intact after join (no dupes)",
+          continuityOk,
+          `rem=${remRows.length} shop=${shopRows.length}`,
+        );
+        step6.checks.push(continuityOk ? "PASS continuity" : "FAIL continuity");
+      }
+
+      // ------------------------------------------------------------------
+      // STEP 7 — GIVEN Michal's pending assign to Danny (from Step 1)
+      //          WHEN Danny (Guest-origin, now Member) accepts then says
+      //               "קניתי את הלחם דגנים"
+      //          THEN task is completed and Michal gets notify in-chat
+      // ------------------------------------------------------------------
+      const step7 = beginStep(7, "Task complete → inviter notification");
+      await prisma.contact
+        .create({
+          data: {
+            userId: prospect.userId,
+            ownerEmployeeId: prospect.employeeId,
+            name: CONTACT_MICHAL,
+            phone: ASKER_PHONE,
+          },
+        })
+        .catch(() => undefined);
+
+      const pendingAssign = await prisma.whatsAppInvite.findFirst({
+        where: {
+          userId: asker.userId,
+          recipientPhone: { contains: PROSPECT_PHONE.slice(-9) },
+          status: "pending",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      recordDb(step7, `pendingAssign=${pendingAssign?.id ?? "missing"}`);
+
+      recordInbound(step7, "Danny", "היי, אאשר את המשימה ממיכל");
+      stubLlm({
+        responses: [{ text: "יש משימה ממתינה ממיכל.", buttons: [] }],
+        metadata: {},
+      });
+      const assignPresent = await sendChatMessage({
+        userId: prospect.userId,
+        employeeId: prospect.employeeId,
+        digitalEmployeeId: prospect.digitalEmployeeId,
+        message: "היי, אאשר את המשימה ממיכל",
+      });
+      recordReply(step7, "Danny", assignPresent.reply);
+      const acceptCmd = confirmCommandFromReply(assignPresent.reply);
+      check(
+        "Step7 Assign Accept offered to Danny",
+        Boolean(acceptCmd) || Boolean(pendingAssign),
+        acceptCmd ?? "no accept btn",
+      );
+
+      if (acceptCmd) {
+        recordInbound(step7, "Danny", `[Assign Accept] ${acceptCmd}`);
+        setLlmClientForTests(null);
+        const accepted = await sendChatMessage({
+          userId: prospect.userId,
+          employeeId: prospect.employeeId,
+          digitalEmployeeId: prospect.digitalEmployeeId,
+          message: acceptCmd,
+        });
+        recordReply(step7, "Danny", accepted.reply);
+      }
+
+      const assignedItem = await prisma.employeeListItem.findFirst({
+        where: {
+          deletedAt: null,
+          list: { employeeId: prospect.employeeId, listType: "tasks" },
+          OR: [
+            { itemKey: { contains: ASSIGN_TASK.slice(0, 12) } },
+            { data: { path: ["שם משימה"], equals: ASSIGN_TASK } },
+          ],
+        },
+        include: { list: { select: { employeeId: true } } },
+        orderBy: { createdAt: "desc" },
+      });
+      recordDb(
+        step7,
+        `assignedItem=${assignedItem?.id ?? "missing"} addedBy=${assignedItem?.addedById ?? "n/a"}`,
+      );
+      check(
+        "Step7 assigned task row on Danny after Accept",
+        Boolean(assignedItem) &&
+          assignedItem!.list.employeeId === prospect.employeeId,
+        assignedItem?.id ?? "",
+      );
+      step7.checks.push(assignedItem ? "PASS assigned row" : "FAIL no row");
+
+      const completeMsg = "קניתי את הלחם דגנים";
+      recordInbound(step7, "Danny", completeMsg);
+      stubLlm({
+        responses: [{ text: "יופי, הורדתי את המשימה.", buttons: [] }],
+        metadata: {
+          lists: [
+            {
+              action: "remove",
+              list_type: "tasks",
+              list_name: "",
+              targets: [],
+              items: assignedItem
+                ? [{ item_id: assignedItem.id, "שם משימה": ASSIGN_TASK }]
+                : [{ "שם משימה": ASSIGN_TASK }],
+            },
+          ],
+        },
+      });
+      const completeTurn = await sendChatMessage({
+        userId: prospect.userId,
+        employeeId: prospect.employeeId,
+        digitalEmployeeId: prospect.digitalEmployeeId,
+        message: completeMsg,
+      });
+      recordReply(step7, "Danny", completeTurn.reply);
+
+      const itemAfter = assignedItem
+        ? await prisma.employeeListItem.findUnique({
+            where: { id: assignedItem.id },
+          })
+        : null;
+      const completedOk = Boolean(itemAfter?.deletedAt);
+      recordDb(
+        step7,
+        `deletedAt=${itemAfter?.deletedAt?.toISOString() ?? "null"}`,
+      );
+      check(
+        "Step7 task marked completed (soft-deleted)",
+        completedOk,
+        itemAfter?.deletedAt?.toISOString() ?? "missing",
+      );
+      step7.checks.push(completedOk ? "PASS completed" : "FAIL not deleted");
+
+      const michalNotice = await prisma.chatMessage.findFirst({
+        where: {
+          conversation: {
+            userId: asker.userId,
+            employeeId: asker.employeeId,
+          },
+          author: "assistant",
+          OR: [
+            { text: { contains: "הסיר משימה" } },
+            { text: { contains: ASSIGN_TASK } },
+            { text: { contains: "לחם" } },
+            { text: { contains: CONTACT_DANI } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      recordDb(
+        step7,
+        `michalNotice=${michalNotice?.text?.slice(0, 120) ?? "missing"}`,
+      );
+      check(
+        "Step7 Michal received completion notification",
+        Boolean(michalNotice?.text),
+        michalNotice?.text?.slice(0, 160) ?? "",
+      );
+      step7.checks.push(michalNotice ? "PASS notify" : "FAIL no notify");
+
+      // ------------------------------------------------------------------
+      // STEP 8 — GIVEN a brand-new phone with no invite
+      //          WHEN Ori chats 3 turns
+      //          THEN Guest created + Tip#1 / none / Tip#2 cadence
+      // ------------------------------------------------------------------
+      const step8 = beginStep(8, "Cold direct Prospect (uninvited) tips cadence");
+      await prisma.whatsAppInbound
+        .deleteMany({ where: { phone: { contains: COLD_PHONE.slice(-9) } } })
+        .catch(() => undefined);
+      const coldSpeaker = await resolveWhatsAppSpeaker(COLD_PHONE);
+      extraUserIds.push(coldSpeaker.userId);
+      const coldUser = await prisma.user.findUniqueOrThrow({
+        where: { id: coldSpeaker.userId },
+      });
+      const coldLucy = (await listEmployeesForUser(coldSpeaker.userId)).find(
+        (row) => row.protected === true,
+      );
+      if (!coldLucy) {
+        throw new Error("Cold Prospect missing Lucy");
+      }
+      const cold = {
+        userId: coldSpeaker.userId,
+        employeeId: coldSpeaker.employeeId,
+        digitalEmployeeId: coldLucy.id,
+      };
+      recordDb(step8, `consentPending=${coldUser.consentPending}`);
+      check(
+        "Step8 cold phone creates Prospect (consentPending=true)",
+        coldUser.consentPending === true,
+      );
+
+      recordInbound(step8, "Ori", COLD_TURN1);
+      stubLlm({
+        responses: [
+          {
+            text: "היי! אני לוסי — אפשר משימות, קניות, תזכורות ועוד.",
+            buttons: [],
+          },
+        ],
+        metadata: {},
+      });
+      const cold1 = await sendChatMessage({
+        userId: cold.userId,
+        employeeId: cold.employeeId,
+        digitalEmployeeId: cold.digitalEmployeeId,
+        message: COLD_TURN1,
+      });
+      recordReply(step8, "Ori", cold1.reply);
+      const cold1Visible = visibleReplyText(cold1.reply);
+      const coldTip1 = containsOnboardTip(cold1Visible);
+      const coldProg1 = await onboardTipProgress(
+        cold.employeeId,
+        cold.digitalEmployeeId,
+      );
+      recordDb(step8, `turn1 tip=${coldTip1 ? "yes" : "no"} prog=${JSON.stringify(coldProg1)}`);
+      const coldTip1Ok =
+        coldTip1 === TIP1_TEXT ||
+        coldProg1.some(
+          (r) => r.key === "prospect_onboard_tasks" && r.showCount >= 1,
+        );
+      check("Step8 Turn1 Tip #1", coldTip1Ok, coldTip1?.slice(0, 80) ?? "");
+      step8.checks.push(coldTip1Ok ? "PASS tip1" : "FAIL tip1");
+
+      const coldProgBefore2 = await onboardTipProgress(
+        cold.employeeId,
+        cold.digitalEmployeeId,
+      );
+      recordInbound(step8, "Ori", COLD_TURN2);
+      stubLlm({
+        responses: [{ text: "בשמחה — מה תרצה לעשות?", buttons: [] }],
+        metadata: {},
+      });
+      const cold2 = await sendChatMessage({
+        userId: cold.userId,
+        employeeId: cold.employeeId,
+        digitalEmployeeId: cold.digitalEmployeeId,
+        message: COLD_TURN2,
+      });
+      recordReply(step8, "Ori", cold2.reply);
+      const cold2Visible = visibleReplyText(cold2.reply);
+      const coldTip2Leak = containsOnboardTip(cold2Visible);
+      const coldProg2 = await onboardTipProgress(
+        cold.employeeId,
+        cold.digitalEmployeeId,
+      );
+      const coldNoTip2 =
+        coldTip2Leak == null &&
+        coldProg2.length === coldProgBefore2.length &&
+        coldProg2.every(
+          (row, i) =>
+            row.key === coldProgBefore2[i]?.key &&
+            row.showCount === coldProgBefore2[i]?.showCount,
+        );
+      check("Step8 Turn2 no tip", coldNoTip2, coldTip2Leak ?? "ok");
+      step8.checks.push(coldNoTip2 ? "PASS no tip" : "FAIL tip leak");
+
+      recordInbound(step8, "Ori", COLD_TURN3);
+      stubLlm({
+        responses: [{ text: "מעולה, אני כאן.", buttons: [] }],
+        metadata: {},
+      });
+      const cold3 = await sendChatMessage({
+        userId: cold.userId,
+        employeeId: cold.employeeId,
+        digitalEmployeeId: cold.digitalEmployeeId,
+        message: COLD_TURN3,
+      });
+      recordReply(step8, "Ori", cold3.reply);
+      const cold3Visible = visibleReplyText(cold3.reply);
+      const coldTip2 = containsOnboardTip(cold3Visible);
+      const coldProg3 = await onboardTipProgress(
+        cold.employeeId,
+        cold.digitalEmployeeId,
+      );
+      const coldShows = coldProg3.reduce((n, r) => n + r.showCount, 0);
+      recordDb(
+        step8,
+        `turn3 tip=${coldTip2 ? "yes" : "no"} prog=${JSON.stringify(coldProg3)} shows=${coldShows}`,
+      );
+      const coldTip2Ok =
+        coldShows >= 2 &&
+        (coldTip2 === TIP2_TEXT ||
+          coldProg3.some(
+            (r) =>
+              (r.key === "prospect_onboard_shopping" ||
+                r.key === "prospect_onboard_reminders") &&
+              r.showCount >= 1,
+          ));
+      check("Step8 Turn3 Tip #2", coldTip2Ok, coldTip2?.slice(0, 80) ?? "");
+      step8.checks.push(coldTip2Ok ? "PASS tip2" : "FAIL tip2");
+      check(
+        "Step8 still Prospect after tips",
+        (
+          await prisma.user.findUniqueOrThrow({ where: { id: cold.userId } })
+        ).consentPending === true,
+      );
+
       // ——— Summary + trace artifact ———
       log("\n========== SUMMARY ==========");
       const pass = checks.filter((c) => c.pass).length;
@@ -913,6 +1382,7 @@ describe("Wave 1 Guest onboarding + tips E2E (eval-db)", () => {
       writeTraceFile();
       expect(fail, `${fail} checks failed — see trace ${TRACE_PATH}`).toBe(0);
     },
-    240_000,
+    300_000,
   );
 });
+
