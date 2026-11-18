@@ -473,7 +473,7 @@ export async function applyDirectoryActions(input: {
   employees?: PublicEmployee[];
 }): Promise<{
   saved: SpeakerContact[];
-  removed: string[];
+  removed: Array<{ id: string; name: string }>;
   /** Speaker-owned add hit an existing phone — no silent rename. */
   alreadyExisting: SpeakerContact[];
   shareNotices: DirectoryShareNotice[];
@@ -481,7 +481,7 @@ export async function applyDirectoryActions(input: {
   attachmentOutcome: AttachmentApplyOutcome;
 }> {
   const saved: SpeakerContact[] = [];
-  const removed: string[] = [];
+  const removed: Array<{ id: string; name: string }> = [];
   const alreadyExisting: SpeakerContact[] = [];
   const shareNotices: DirectoryShareNotice[] = [];
   let bookShared = false;
@@ -583,7 +583,7 @@ export async function applyDirectoryActions(input: {
         continue;
       }
       await prisma.contact.delete({ where: { id: existing.id } });
-      removed.push(existing.name);
+      removed.push({ id: existing.id, name: existing.name });
       continue;
     }
 
@@ -925,7 +925,7 @@ function matchDirectoryTarget(
 
 export function formatDirectoryApplyNotice(result: {
   saved: SpeakerContact[];
-  removed: string[];
+  removed: Array<{ id: string; name: string }>;
   bookShared?: boolean;
 }): string {
   const parts: string[] = [];
@@ -935,8 +935,8 @@ export function formatDirectoryApplyNotice(result: {
   for (const row of result.saved) {
     parts.push(`שמרתי את «${row.name}» באנשי הקשר שלך.`);
   }
-  for (const name of result.removed) {
-    parts.push(`הסרתי את «${name}» מאנשי הקשר שלך.`);
+  for (const row of result.removed) {
+    parts.push(`הסרתי את «${row.name}» מאנשי הקשר שלך.`);
   }
   return parts.join("\n");
 }

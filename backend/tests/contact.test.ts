@@ -143,4 +143,13 @@ describe("contact directory POC", () => {
       }),
     ).toContain("מיכל");
   });
+
+  it("formats a remove notice from id+name rows", () => {
+    expect(
+      formatDirectoryApplyNotice({
+        saved: [],
+        removed: [{ id: contacts[0].id, name: contacts[0].name }],
+      }),
+    ).toContain("הסרתי את «מיכל» מאנשי הקשר שלך.");
+  });
 });
