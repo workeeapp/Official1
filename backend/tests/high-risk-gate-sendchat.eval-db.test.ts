@@ -380,11 +380,13 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
           },
         }),
       );
+      // No share-intent verb: under signal mode, "שתפי" would allow-through
+      // and never stage Class V. Staging requires a strip (same as P-Share case).
       await sendChatMessage({
         userId: account.userId,
         employeeId: account.employeeId,
         digitalEmployeeId: lucyId,
-        message: "שתפי",
+        message: "מה יש בקניות?",
       });
       const pending = await prisma.pendingHighRiskConfirm.findFirst({
         where: {
@@ -628,6 +630,13 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
         where: { id: job.id, deletedAt: null },
       });
       expect(stillOpen).toBeTruthy();
+      const localMeta = (stillOpen?.data as Record<string, unknown>)?.[
+        JOB_META_KEY
+      ] as Record<string, unknown>;
+      expect(localMeta?.state).toBe("answered_pending_report");
+      expect(localMeta?.reportStatus).toBe("pending");
+      expect(localMeta?.answerText).toBe("הכל טוב");
+      expect(localMeta?.reportConfirmId).toBe(pending!.id);
 
       const deliveries = await prisma.deliveryAttempt.count({
         where: { userId: account.userId, confirmId: pending!.id },
@@ -782,11 +791,16 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
       expect(otherResult.reply).toMatch(/אישור מפורש/);
       expect(otherResult.reply).toMatch(/דיווח אל עמית/);
       expect(otherResult.reply).toMatch(/טל מוסר שהכול טוב/);
-      expect(
-        await prisma.employeeListItem.findFirst({
-          where: { id: otherJob.id, deletedAt: null },
-        }),
-      ).toBeTruthy();
+      const otherRow = await prisma.employeeListItem.findFirst({
+        where: { id: otherJob.id, deletedAt: null },
+      });
+      expect(otherRow).toBeTruthy();
+      const otherMeta = (otherRow?.data as Record<string, unknown>)?.[
+        JOB_META_KEY
+      ] as Record<string, unknown>;
+      expect(otherMeta?.state).toBe("answered_pending_report");
+      expect(otherMeta?.reportStatus).toBe("pending");
+      expect(otherMeta?.answerText).toBe("הכל טוב");
       const pending = await prisma.pendingHighRiskConfirm.findFirst({
         where: {
           userId: account.userId,
@@ -797,6 +811,7 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
       expect(pending?.summaryText).toMatch(/דיווח אל עמית/);
       expect(JSON.stringify(pending?.snapshot)).toContain(otherJob.id);
       expect(JSON.stringify(pending?.snapshot)).not.toContain(selfJob.id);
+      expect(otherMeta?.reportConfirmId).toBe(pending?.id);
     },
     90_000,
   );

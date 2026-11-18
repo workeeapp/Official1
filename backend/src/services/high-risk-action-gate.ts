@@ -695,8 +695,20 @@ export function applyHighRiskActionGate(
       jobs.push(row);
       continue;
     }
+    // Third-party answer → always Class V for External Report (Local Answer is
+    // applied separately before staging). Never signal-bypass: cancel must not
+    // undo a silent asker send, and recovery after fail/cancel must re-offer.
+    if (row.action === "answer" && jobActionHasExternalEffect(row, ctx)) {
+      stripped.push({
+        policy: "P-Out",
+        kind: "job_outbound",
+        detail: `jobs.${row.action}`,
+      });
+      snap.jobs = [...(snap.jobs ?? []), row];
+      continue;
+    }
     if (JOB_OUTBOUND_ACTIONS.has(row.action) || row.reportText.trim()) {
-      // Explicit answer/decline in speaker channel → allow under signal.
+      // Explicit decline/counter/… in speaker channel → allow under signal.
       if (
         resolveHighRiskPOutMode(ctx.pOutMode) === "signal" &&
         hasOutboundIntentSignal(ctx.speakerText, ctx.isButtonCommand)

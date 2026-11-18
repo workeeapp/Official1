@@ -50,6 +50,8 @@ function urgencyRank(urgency: JobUrgency): number {
 export interface JobReport {
   employeeId: string;
   text: string;
+  /** Present when report delivery must finalize this job's reportStatus/close. */
+  jobId?: string;
 }
 
 export interface JobApplyResult {
@@ -62,6 +64,16 @@ export interface JobApplyResult {
   progressed: string[];
   /** Asks the speaker must choose among when a job action had no job_id. */
   askWhich: string[];
+  /**
+   * Third-party answers that were stored locally and still need an asker
+   * report (High Risk confirm / authorized delivery).
+   */
+  pendingExternalReports: Array<{
+    jobId: string;
+    askerId: string;
+    answerText: string;
+    reportText: string;
+  }>;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -1114,25 +1126,31 @@ export function formatOpenJobsContext(
       state: job.meta.state,
       ...urgencyFields(job, clock),
       ...(job.meta.progress ? { progress: job.meta.progress } : {}),
-      ...(scheduled
-        ? { scheduled: true, raisable: false }
-        : snoozed
-          ? { reminder_at: clock, raisable: false }
-          : {
-              ...(job.meta.deferredAt ? { deferred: true } : {}),
-              raisable:
-                job.meta.subjectId === viewerId &&
-                !(
-                  job.meta.overdueItemIds &&
-                  job.meta.overdueItemIds.length > 0 &&
-                  job.meta.overdueOffered
-                ) &&
-                !(
-                  job.meta.staleUndatedItemIds &&
-                  job.meta.staleUndatedItemIds.length > 0 &&
-                  job.meta.staleOffered
-                ),
-            }),
+      ...(job.meta.answerText ? { answer: job.meta.answerText } : {}),
+      ...(job.meta.reportStatus
+        ? { report_status: job.meta.reportStatus }
+        : {}),
+      ...(job.meta.state === "answered_pending_report"
+        ? { answered_pending_report: true, raisable: false }
+        : scheduled
+          ? { scheduled: true, raisable: false }
+          : snoozed
+            ? { reminder_at: clock, raisable: false }
+            : {
+                ...(job.meta.deferredAt ? { deferred: true } : {}),
+                raisable:
+                  job.meta.subjectId === viewerId &&
+                  !(
+                    job.meta.overdueItemIds &&
+                    job.meta.overdueItemIds.length > 0 &&
+                    job.meta.overdueOffered
+                  ) &&
+                  !(
+                    job.meta.staleUndatedItemIds &&
+                    job.meta.staleUndatedItemIds.length > 0 &&
+                    job.meta.staleOffered
+                  ),
+              }),
       ...(job.meta.needsBook
         ? {
             book_on_yes: true,
@@ -1170,7 +1188,7 @@ export function formatOpenJobsContext(
     "The same job also appears in WORKER_SAVED_DATA as a «לבדוק עם X: …» task line (for mutate/cancel). The server omits that shadow from the משימות dump and shows the consult only under ממתינים. Never read that label out loud when raising — say it the way THIS speaker should hear it, in your own words (the quoted examples show the perspective, not wording to copy):",
     "viewer_is=subject → this speaker owes the answer. Speak to them in second person and name the asker: «עמית ביקש ממני לתאם איתך פגישת עבודה ליום שלישי» / «אני צריכה לבדוק מה שלומך (משימה מעמית)». Never say «לבדוק עם ערן» to ערן himself. Self-job (asker===subject) → their own check in second person: «רצית שאבדוק איתך אם קנית שוקו — קנית?» — never «עמית ביקש ממני…», «<name> מחכה לתשובה», or first-person ask copy (הכנתי / קניתי).",
     "viewer_is=asker → this speaker is waiting for it. Third person about the subject: «אני צריכה לבדוק עם ערן לתאם פגישת עבודה ליום שלישי (בשבילך)».",
-    "Row fields: raisable=false — a clock is set, wait for it. scheduled=true — a deferred check waiting for its clock (the server sends at fire; listed under ממתינים). deferred=true — they said not now with no clock; still raisable. urgency urgent / very_urgent — the server sends the subject follow-ups itself (follow_ups_sent / follow_ups_left / next_follow_up_at). book_on_yes / book_date / book_time / book_end_time / book_window / book_title — the proposed meeting slot. overdue_tasks / stale_undated — engine-opened self-jobs for the speaker's own tasks.",
+    "Row fields: raisable=false — a clock is set, wait for it, OR state=answered_pending_report (subject already answered; do not raise again even if report was cancelled/failed). answered_pending_report + report_status — local answer kept; external asker report may be pending/sent/declined/failed/unknown. scheduled=true — a deferred check waiting for its clock (the server sends at fire; listed under ממתינים). deferred=true — they said not now with no clock; still raisable. urgency urgent / very_urgent — the server sends the subject follow-ups itself (follow_ups_sent / follow_ups_left / next_follow_up_at). book_on_yes / book_date / book_time / book_end_time / book_window / book_title — the proposed meeting slot. overdue_tasks / stale_undated — engine-opened self-jobs for the speaker's own tasks.",
     "How to raise, answer, counter, book, snooze, decline and close these rows: OPEN JOBS RULES (the only copy of those rules).",
     JSON.stringify(rows),
   ].join("\n");
@@ -1301,18 +1319,176 @@ function addReport(
   speakerId: string,
   employeeId: string,
   text: string,
+  jobId?: string,
 ): void {
   const body = text.trim();
   if (!body || employeeId === speakerId) {
     return;
   }
-  result.reports.push({ employeeId, text: body });
+  result.reports.push({
+    employeeId,
+    text: body,
+    ...(jobId ? { jobId } : {}),
+  });
 }
 
 function defaultReport(job: OpenJobRow, outcome: string, said: string): string {
   const quoted = job.meta.ask ? ` בקשר ל«${job.meta.ask}»` : "";
   const detail = said.trim() ? `: ${said.trim()}` : "";
   return `${job.meta.subjectName} ${outcome}${detail}${quoted}`;
+}
+
+function appendReportHistory(
+  meta: JobMeta,
+  status: NonNullable<JobMeta["reportStatus"]>,
+  at: string = new Date().toISOString(),
+): JobMeta["reportHistory"] {
+  const prev = meta.reportHistory ?? [];
+  return [...prev, { status, at }].slice(-20);
+}
+
+function buildAnswerReportText(
+  job: OpenJobRow,
+  action: LlmJobAction,
+): string {
+  return (
+    action.reportText.trim() ||
+    job.meta.pendingReportText?.trim() ||
+    defaultReport(job, "מוסר", action.answerText || job.meta.answerText || "")
+  );
+}
+
+/**
+ * Link staged High Risk confirm id onto locally-answered jobs (idempotency).
+ */
+export async function linkJobReportConfirm(input: {
+  jobIds: string[];
+  confirmId: string;
+}): Promise<void> {
+  const confirmId = input.confirmId.trim();
+  if (!confirmId || input.jobIds.length === 0) {
+    return;
+  }
+  for (const jobId of input.jobIds) {
+    const id = jobId.trim();
+    if (!id) continue;
+    const row = await prisma.employeeListItem.findUnique({ where: { id } });
+    if (!row || row.deletedAt) continue;
+    const meta = jobMetaFrom(row.data);
+    if (!meta || meta.state !== "answered_pending_report") continue;
+    if (meta.reportStatus === "sent" || meta.reportStatus === "declined") {
+      continue;
+    }
+    await patchJobMeta(id, {
+      ...meta,
+      reportConfirmId: confirmId,
+      reportStatus: meta.reportStatus === "failed" || meta.reportStatus === "unknown"
+        ? "pending"
+        : meta.reportStatus ?? "pending",
+      reportHistory: appendReportHistory(
+        meta,
+        meta.reportStatus === "failed" || meta.reportStatus === "unknown"
+          ? "pending"
+          : meta.reportStatus ?? "pending",
+      ),
+    });
+  }
+}
+
+/**
+ * Cancel path: keep local answer; mark external report declined. Never reopen.
+ */
+export async function markJobReportsDeclinedForConfirm(
+  confirmId: string,
+): Promise<void> {
+  const id = confirmId.trim();
+  if (!id) return;
+  const confirm = await prisma.pendingHighRiskConfirm.findUnique({
+    where: { id },
+  });
+  if (!confirm) return;
+  const snapshot = asRecord(confirm.snapshot);
+  const jobIds = new Set<string>();
+  if (Array.isArray(snapshot.jobs)) {
+    for (const raw of snapshot.jobs) {
+      const row = asRecord(raw);
+      const jobId =
+        typeof row.job_id === "string"
+          ? row.job_id
+          : typeof row.jobId === "string"
+            ? row.jobId
+            : "";
+      if (jobId.trim()) jobIds.add(jobId.trim());
+    }
+  }
+  for (const jobId of jobIds) {
+    const row = await prisma.employeeListItem.findUnique({
+      where: { id: jobId },
+    });
+    if (!row || row.deletedAt) continue;
+    const meta = jobMetaFrom(row.data);
+    if (!meta) continue;
+    if (
+      meta.reportConfirmId &&
+      meta.reportConfirmId !== id &&
+      !jobIds.has(jobId)
+    ) {
+      continue;
+    }
+    if (meta.state !== "answered_pending_report") continue;
+    if (meta.reportStatus === "sent") continue;
+    const at = new Date().toISOString();
+    await patchJobMeta(jobId, {
+      ...meta,
+      reportStatus: "declined",
+      reportConfirmId: undefined,
+      reportHistory: appendReportHistory(meta, "declined", at),
+    });
+  }
+}
+
+export type JobReportDeliveryStatus = "accepted" | "failed" | "unknown";
+
+/**
+ * After asker-report Graph attempt: close only on accepted; keep answer forever.
+ */
+export async function finalizeJobReportDelivery(input: {
+  jobId: string;
+  status: JobReportDeliveryStatus;
+}): Promise<void> {
+  const row = await prisma.employeeListItem.findUnique({
+    where: { id: input.jobId },
+  });
+  if (!row) return;
+  const meta = jobMetaFrom(row.data);
+  if (!meta) return;
+  const at = new Date().toISOString();
+  if (input.status === "accepted") {
+    if (meta.reportStatus === "sent" && row.deletedAt) {
+      return;
+    }
+    await patchJobMeta(input.jobId, {
+      ...meta,
+      reportStatus: "sent",
+      reportConfirmId: undefined,
+      reportHistory: appendReportHistory(meta, "sent", at),
+    });
+    if (!row.deletedAt) {
+      await closeJobRow(input.jobId);
+    }
+    return;
+  }
+  if (meta.state !== "answered_pending_report") {
+    // Still record outcome if local answer exists.
+  }
+  const nextStatus: JobMeta["reportStatus"] =
+    input.status === "failed" ? "failed" : "unknown";
+  await patchJobMeta(input.jobId, {
+    ...meta,
+    state: "answered_pending_report",
+    reportStatus: nextStatus,
+    reportHistory: appendReportHistory(meta, nextStatus!, at),
+  });
 }
 
 type NudgeableJob = Pick<OpenJobRow, "id" | "meta" | "urgency">;
@@ -1629,6 +1805,11 @@ export async function applyJobActions(input: {
   speaker: { id: string; name: string };
   actions: LlmJobAction[];
   jobs: OpenJobRow[];
+  /**
+   * When true (authorized High Risk confirm), third-party answers may emit
+   * asker reports for delivery. When false, third-party answers stay local.
+   */
+  commitExternalReports?: boolean;
 }): Promise<JobApplyResult> {
   const result: JobApplyResult = {
     reports: [],
@@ -1638,10 +1819,12 @@ export async function applyJobActions(input: {
     cleared: [],
     progressed: [],
     askWhich: [],
+    pendingExternalReports: [],
   };
   if (input.actions.length === 0 || input.jobs.length === 0) {
     return result;
   }
+  const commitExternal = Boolean(input.commitExternalReports);
   const byId = new Map(input.jobs.map((job) => [job.id, job] as const));
   const handled = new Set<string>();
   for (const raw of input.actions) {
@@ -1663,6 +1846,121 @@ export async function applyJobActions(input: {
     const speakerIsAsker = job.meta.askerId === input.speaker.id;
     try {
       if (action.action === "answer" || action.action === "decline") {
+        const isSelfJob = job.meta.askerId === job.meta.subjectId;
+        const thirdPartyAnswer =
+          action.action === "answer" && !isSelfJob && !speakerIsAsker;
+
+        // Local Answer / External Report split (third-party answer only).
+        // Decline / self-job stay atomic as before.
+        if (thirdPartyAnswer && !commitExternal) {
+          await sweepNudge(job.meta, input.userId, input.speaker.id);
+          const at = new Date().toISOString();
+          const answerText =
+            action.answerText.trim() || job.meta.answerText || "";
+          const reportText = buildAnswerReportText(job, action);
+          const alreadyLocal =
+            job.meta.state === "answered_pending_report" &&
+            Boolean(job.meta.answeredAt);
+          const nextMeta: JobMeta = {
+            ...job.meta,
+            state: "answered_pending_report",
+            answerText,
+            pendingReportText: reportText,
+            reportStatus:
+              job.meta.reportStatus === "declined" ||
+              job.meta.reportStatus === "failed" ||
+              job.meta.reportStatus === "unknown"
+                ? "pending"
+                : job.meta.reportStatus ?? "pending",
+            answeredAt: job.meta.answeredAt || at,
+            reportHistory: alreadyLocal
+              ? job.meta.reportHistory
+              : appendReportHistory(
+                  job.meta,
+                  job.meta.reportStatus ?? "pending",
+                  at,
+                ),
+            deferredAt: undefined,
+          };
+          await patchJobMeta(job.id, nextMeta);
+          job.meta = nextMeta;
+          result.answered.push(job.id);
+          result.pendingExternalReports.push({
+            jobId: job.id,
+            askerId: job.meta.askerId,
+            answerText,
+            reportText,
+          });
+          await recordAuditEvent({
+            userId: input.userId,
+            actorEmployeeId: input.speaker.id,
+            action: "job_answer_local",
+            entityType: "EmployeeListItem",
+            entityId: job.id,
+            summary: `local answer job: ${job.label}`,
+            detail: { answer: answerText },
+          });
+          continue;
+        }
+
+        if (thirdPartyAnswer && commitExternal) {
+          if (job.meta.reportStatus === "sent") {
+            result.answered.push(job.id);
+            continue;
+          }
+          await sweepNudge(job.meta, input.userId, input.speaker.id);
+          const answerText =
+            action.answerText.trim() || job.meta.answerText || "";
+          const reportText = buildAnswerReportText(job, {
+            ...action,
+            answerText,
+          });
+          if (job.meta.state !== "answered_pending_report") {
+            const at = new Date().toISOString();
+            const nextMeta: JobMeta = {
+              ...job.meta,
+              state: "answered_pending_report",
+              answerText,
+              pendingReportText: reportText,
+              reportStatus: "pending",
+              answeredAt: job.meta.answeredAt || at,
+              reportHistory: appendReportHistory(job.meta, "pending", at),
+              deferredAt: undefined,
+            };
+            await patchJobMeta(job.id, nextMeta);
+            job.meta = nextMeta;
+          } else if (answerText && answerText !== job.meta.answerText) {
+            await patchJobMeta(job.id, {
+              ...job.meta,
+              answerText,
+              pendingReportText: reportText,
+            });
+            job.meta = {
+              ...job.meta,
+              answerText,
+              pendingReportText: reportText,
+            };
+          }
+          result.answered.push(job.id);
+          addReport(
+            result,
+            input.speaker.id,
+            job.meta.askerId,
+            reportText,
+            job.id,
+          );
+          await recordAuditEvent({
+            userId: input.userId,
+            actorEmployeeId: input.speaker.id,
+            action: "job_answer_report",
+            entityType: "EmployeeListItem",
+            entityId: job.id,
+            summary: `authorized report job: ${job.label}`,
+            detail: { answer: answerText },
+          });
+          continue;
+        }
+
         await sweepNudge(job.meta, input.userId, input.speaker.id);
         await closeJobRow(job.id);
         result.answered.push(job.id);

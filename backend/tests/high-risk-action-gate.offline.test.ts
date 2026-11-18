@@ -522,6 +522,40 @@ describe("applyHighRiskActionGate", () => {
     expect(result.didStrip).toBe(true);
     expect(result.strippedSnapshot.jobs?.[0]?.jobId).toBe("third-party");
   });
+
+  it("always Class-V strips third-party answer even under signal + תשלחי", () => {
+    const result = applyHighRiskActionGate(
+      meta({
+        jobs: [
+          {
+            action: "answer",
+            jobId: "third-party",
+            answerText: "פסטה",
+            reportText: "טל מוסר: פסטה",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      {
+        speaker,
+        pOutMode: "signal",
+        speakerText: "תשלחי למיכל",
+        knownTargetNames: ["מיכל"],
+        openJobs: [
+          {
+            id: "third-party",
+            askerId: "michal-id",
+            subjectId: speaker.id,
+            askerName: "מיכל",
+          },
+        ],
+      },
+    );
+    expect(result.didStrip).toBe(true);
+    expect(result.stripped.some((s) => s.kind === "job_outbound")).toBe(true);
+    expect(result.metadata.jobs ?? []).toHaveLength(0);
+  });
 });
 
 describe("summarizeHighRiskSnapshot / confirm copy", () => {

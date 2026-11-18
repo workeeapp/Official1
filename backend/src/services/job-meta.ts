@@ -20,8 +20,28 @@ export interface JobMeta {
   subjectName: string;
   /** The asker's question in their own words, quoted when reporting back. */
   ask: string;
-  state: "open" | "progress";
+  /**
+   * open / progress — still in flight (may be raisable).
+   * answered_pending_report — subject answered locally; external asker report
+   * may still be pending / declined / failed; never raisable again from cancel.
+   */
+  state: "open" | "progress" | "answered_pending_report";
   createdAt: string;
+  /** Local answer text kept after cancel / send / fail. */
+  answerText?: string;
+  /** Asker-facing report staged for High Risk confirm. */
+  pendingReportText?: string;
+  /**
+   * External report lifecycle. `failed` = certain Graph failure (retry ok).
+   * `unknown` = in-flight / ambiguous (must not auto-resend).
+   */
+  reportStatus?: "pending" | "sent" | "declined" | "failed" | "unknown";
+  /** Open PendingHighRiskConfirm id for the asker report (idempotency link). */
+  reportConfirmId?: string;
+  /** ISO time when local answer was first stored. */
+  answeredAt?: string;
+  /** Append-only status transitions for the external report. */
+  reportHistory?: Array<{ status: string; at: string }>;
   /** Model asked to hold off without naming a time. Still raised at the next opening. */
   deferredAt?: string;
   /** Active follow-up clock for this job (soft reference; no cascade onto the job). */
@@ -107,11 +127,53 @@ export function jobMetaFrom(data: unknown): JobMeta | null {
     subjectId,
     subjectName: typeof meta.subjectName === "string" ? meta.subjectName : "",
     ask: typeof meta.ask === "string" ? meta.ask : "",
-    state: meta.state === "progress" ? "progress" : "open",
+    state:
+      meta.state === "progress"
+        ? "progress"
+        : meta.state === "answered_pending_report"
+          ? "answered_pending_report"
+          : "open",
     createdAt:
       typeof meta.createdAt === "string"
         ? meta.createdAt
         : new Date().toISOString(),
+    ...(typeof meta.answerText === "string" && meta.answerText.trim()
+      ? { answerText: meta.answerText.trim() }
+      : {}),
+    ...(typeof meta.pendingReportText === "string" &&
+    meta.pendingReportText.trim()
+      ? { pendingReportText: meta.pendingReportText.trim() }
+      : {}),
+    ...(meta.reportStatus === "pending" ||
+    meta.reportStatus === "sent" ||
+    meta.reportStatus === "declined" ||
+    meta.reportStatus === "failed" ||
+    meta.reportStatus === "unknown"
+      ? { reportStatus: meta.reportStatus }
+      : {}),
+    ...(typeof meta.reportConfirmId === "string" && meta.reportConfirmId.trim()
+      ? { reportConfirmId: meta.reportConfirmId.trim() }
+      : {}),
+    ...(typeof meta.answeredAt === "string" && meta.answeredAt.trim()
+      ? { answeredAt: meta.answeredAt.trim() }
+      : {}),
+    ...(Array.isArray(meta.reportHistory)
+      ? {
+          reportHistory: meta.reportHistory
+            .filter(
+              (row): row is { status: string; at: string } =>
+                Boolean(row) &&
+                typeof row === "object" &&
+                typeof (row as { status?: unknown }).status === "string" &&
+                typeof (row as { at?: unknown }).at === "string",
+            )
+            .map((row) => ({
+              status: String(row.status).slice(0, 40),
+              at: String(row.at).slice(0, 40),
+            }))
+            .slice(-20),
+        }
+      : {}),
     ...(typeof meta.deferredAt === "string"
       ? { deferredAt: meta.deferredAt }
       : {}),

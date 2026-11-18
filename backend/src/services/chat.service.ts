@@ -130,13 +130,17 @@ import {
   createScheduledJobsFromRelays,
   ensureOverdueTasksJob,
   ensureStaleUndatedTasksJob,
+  finalizeJobReportDelivery,
   formatOpenJobsContext,
   formatOpenJobsWaitingDump,
+  linkJobReportConfirm,
   listOpenJobsForViewer,
+  markJobReportsDeclinedForConfirm,
   markOverdueJobsOffered,
   markStaleUndatedJobsOffered,
   meetingListsForAnswers,
   sweepJobNudgesForRemovedItems,
+  type JobReportDeliveryStatus,
 } from "./jobs.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import {
@@ -2854,7 +2858,15 @@ export async function sendChatMessage(input: {
       conversationId: conversation.id,
     });
     if (ingest?.kind === "cancel") {
-      pendingConfirmCancelReply = formatHighRiskConfirmCancelReply();
+      if (ingest.actionKind === "job_outbound") {
+        await markJobReportsDeclinedForConfirm(ingest.confirmId).catch(
+          () => undefined,
+        );
+        pendingConfirmCancelReply =
+          "ביטלתי את הדיווח — התשובה נשמרה אצלי. לא שלחתי עדכון לשואל.";
+      } else {
+        pendingConfirmCancelReply = formatHighRiskConfirmCancelReply();
+      }
     } else if (ingest?.kind === "confirm") {
       // Execute-time integrity: dump/intent guards stay skipped for authorized
       // snapshots, but hash/TTL/status must still pass before side effects.
@@ -3467,6 +3479,11 @@ export async function sendChatMessage(input: {
     let highRiskMissesForResult: ResultIntentMiss[] = [];
     let highRiskOffer: Awaited<ReturnType<typeof stageHighRiskConfirm>> = null;
     let highRiskDidStrip = false;
+    let jobReportFinalizeStatus:
+      | "consumed"
+      | "consumed_partial"
+      | "failed_partial"
+      | null = null;
     /** Stage 5a: opaque Accept/Decline offers for presented pending invites. */
     let collabInviteOffers: NonNullable<
       Awaited<ReturnType<typeof stageCollabInviteConfirm>>
@@ -3508,6 +3525,41 @@ export async function sendChatMessage(input: {
             .slice(0, 8)
             .join(",")}`,
         );
+        // Safe order: Local Answer BEFORE staging External Report confirm.
+        // Never leave a staged confirm without a durable local answer, and
+        // never rely on cancel to undo a missing local write.
+        const strippedAnswers = (gated.strippedSnapshot.jobs ?? []).filter(
+          (row) => row.action === "answer" && row.jobId.trim(),
+        );
+        if (strippedAnswers.length > 0) {
+          const localApply = await withoutFailingTurn(
+            "job_local_answer_failed",
+            () =>
+              applyJobActions({
+                userId: input.userId,
+                digitalEmployeeId: digital.id,
+                speaker: { id: employee.id, name: speakerName(employee) },
+                actions: strippedAnswers,
+                jobs: openJobs,
+                commitExternalReports: false,
+              }),
+          );
+          if (localApply) {
+            for (const pending of localApply.pendingExternalReports) {
+              const open = openJobs.find((job) => job.id === pending.jobId);
+              if (open) {
+                open.meta = {
+                  ...open.meta,
+                  state: "answered_pending_report",
+                  answerText: pending.answerText,
+                  pendingReportText: pending.reportText,
+                  reportStatus: "pending",
+                  answeredAt: open.meta.answeredAt || new Date().toISOString(),
+                };
+              }
+            }
+          }
+        }
         if (employee.phone) {
           highRiskOffer =
             (await withoutFailingTurn("high_risk_stage_failed", () =>
@@ -3528,6 +3580,14 @@ export async function sendChatMessage(input: {
                 })),
               }),
             )) ?? null;
+          if (highRiskOffer && strippedAnswers.length > 0) {
+            await withoutFailingTurn("job_report_confirm_link_failed", () =>
+              linkJobReportConfirm({
+                jobIds: strippedAnswers.map((row) => row.jobId),
+                confirmId: highRiskOffer!.id,
+              }),
+            );
+          }
         }
       }
     }
@@ -4155,6 +4215,7 @@ export async function sendChatMessage(input: {
             speaker: { id: employee.id, name: speakerName(employee) },
             actions: metadata.jobs ?? [],
             jobs: openJobs,
+            commitExternalReports: Boolean(authorizedHighRiskConfirmId),
           }),
         );
     const missionApply = guestSpeaker
@@ -4568,14 +4629,21 @@ export async function sendChatMessage(input: {
     }
     // Reports back to the asker: Lucy's own words about the subject, not a
     // forwarded relay, so they skip the "מאת X" attribution.
-    const jobReports = [...(jobResult?.reports ?? []), ...removedJobReports].flatMap(
-      (report) => {
-        const target = employees.find((row) => row.id === report.employeeId);
-        return target && !isDigitalEmployee(target) && target.id !== employee.id
-          ? [{ target, text: report.text }]
-          : [];
-      },
-    );
+    const jobReports = [
+      ...(jobResult?.reports ?? []),
+      ...removedJobReports,
+    ].flatMap((report) => {
+      const target = employees.find((row) => row.id === report.employeeId);
+      return target && !isDigitalEmployee(target) && target.id !== employee.id
+        ? [
+            {
+              target,
+              text: report.text,
+              jobId: report.jobId,
+            },
+          ]
+        : [];
+    });
     for (const report of jobReports) {
       notifications.push(
         await pushRelayMessage({
@@ -4587,7 +4655,35 @@ export async function sendChatMessage(input: {
         }),
       );
     }
-    await deliverWhatsAppRelays(jobReports, employee.id);
+    if (authorizedHighRiskConfirmId && jobReports.some((row) => row.jobId)) {
+      const delivered = await deliverJobReportsWithDeliveryLedger({
+        userId: input.userId,
+        confirmId: authorizedHighRiskConfirmId,
+        actorId: employee.id,
+        relays: jobReports.filter((row) => row.jobId),
+      });
+      for (const outcome of delivered.outcomes) {
+        await finalizeJobReportDelivery({
+          jobId: outcome.jobId,
+          status: outcome.status,
+        });
+      }
+      const statuses = delivered.outcomes.map((row) => row.status);
+      if (statuses.length === 0) {
+        jobReportFinalizeStatus = "consumed";
+      } else if (statuses.every((status) => status === "accepted")) {
+        jobReportFinalizeStatus = "consumed";
+      } else if (statuses.every((status) => status === "failed")) {
+        jobReportFinalizeStatus = "failed_partial";
+      } else if (statuses.some((status) => status === "accepted")) {
+        jobReportFinalizeStatus = "consumed_partial";
+      } else {
+        // unknown / mixed non-accepted — do not auto-resend
+        jobReportFinalizeStatus = "failed_partial";
+      }
+    } else {
+      await deliverWhatsAppRelays(jobReports, employee.id);
+    }
     const involvedNotices = planInvolvedChangeNotices({
       actor: employee,
       humans,
@@ -6475,7 +6571,7 @@ export async function sendChatMessage(input: {
       await withoutFailingTurn("high_risk_finalize_failed", () =>
         finalizePendingConfirm({
           confirmId: authorizedHighRiskConfirmId!,
-          status: "consumed",
+          status: jobReportFinalizeStatus ?? "consumed",
         }),
       );
     }
@@ -6543,6 +6639,88 @@ export async function sendChatMessage(input: {
     }
     throw new ServiceUnavailableError();
   }
+}
+
+/**
+ * Job asker-report ledger: keyed by job id (not confirm id) so a retry after
+ * certain failure cannot double-send, and unknown/accepted never auto-resend.
+ */
+let jobReportWhatsAppSendForTests:
+  | typeof deliverWhatsAppRelays
+  | null = null;
+
+export function setJobReportWhatsAppSendForTests(
+  fn: typeof deliverWhatsAppRelays | null,
+): void {
+  jobReportWhatsAppSendForTests = fn;
+}
+
+async function deliverJobReportsWithDeliveryLedger(input: {
+  userId: string;
+  confirmId: string;
+  actorId: string;
+  relays: Array<{
+    target: PublicEmployee;
+    text: string;
+    jobId?: string;
+    buttons?: LlmReplyButton[];
+  }>;
+}): Promise<{
+  outcomes: Array<{ jobId: string; status: JobReportDeliveryStatus }>;
+}> {
+  const outcomes: Array<{ jobId: string; status: JobReportDeliveryStatus }> =
+    [];
+  const sendFn = jobReportWhatsAppSendForTests ?? deliverWhatsAppRelays;
+  for (const relay of input.relays) {
+    const jobId = relay.jobId?.trim();
+    if (!jobId) continue;
+    if (relay.target.id === input.actorId) {
+      outcomes.push({ jobId, status: "failed" });
+      continue;
+    }
+    const phone = relay.target.phone?.trim() || "";
+    // No phone → in-app push (caller) is the delivery; still ledger for idempotency.
+    const destination = phone || `in_app:${relay.target.id}`;
+    const claim = await claimDeliverySend({
+      userId: input.userId,
+      destination,
+      purpose: "job_report",
+      sourceKey: `job:${jobId}`,
+    });
+    if (!claim.maySend) {
+      outcomes.push({
+        jobId,
+        status:
+          claim.skipReason === "already_accepted" ? "accepted" : "unknown",
+      });
+      continue;
+    }
+    let status: JobReportDeliveryStatus = "accepted";
+    if (phone) {
+      const result = await sendFn(
+        [{ target: relay.target, text: relay.text, buttons: relay.buttons }],
+        input.actorId,
+      );
+      if (result.skips.some((skip) => skip.reason === "failed")) {
+        status = "failed";
+      } else if (result.skips.some((skip) => skip.reason === "no_session")) {
+        status = "failed";
+      } else if (
+        result.skips.length > 0 &&
+        result.sentLabels.length === 0
+      ) {
+        status = "failed";
+      }
+    }
+    if (claim.attemptId) {
+      await completeDeliveryAttempt({
+        attemptId: claim.attemptId,
+        status,
+      });
+    }
+    outcomes.push({ jobId, status });
+  }
+  return { outcomes };
 }
 
 /** Stage 4: claim DeliveryAttempt before Graph; never resend accepted|unknown. */
