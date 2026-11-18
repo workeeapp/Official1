@@ -21,6 +21,16 @@ import {
   formatWeatherRegionAskCity,
   formatWeatherRegionRepresentativeLabel,
 } from "./weather-region.js";
+import type { LlmWebLookupCacheScope } from "@workee/shared";
+import { withExternalCache } from "./external-cache.service.js";
+import {
+  getExternalLookupProviderConfig,
+  providerTtlSeconds,
+} from "./external-lookup.config.js";
+import {
+  burnExternalLookupQuota,
+  buildWebLookupCacheQueryToken,
+} from "./external-lookup.service.js";
 
 /** OM city first, then area providers — preserves pre-Core weather ladder. */
 export function weatherGeographicProviders(): GeographicProvider[] {
@@ -537,7 +547,63 @@ export async function fetchWeatherFacts(input: {
   contacts?: SavedLocationContactRef[] | null;
   pending?: PendingLocation | null;
   providers?: GeographicProvider[];
+  /** Quota + cache accounting (authenticated speaker). */
+  userId?: string | null;
+  cacheScope?: LlmWebLookupCacheScope;
+  forceRefresh?: boolean;
+  skipExternalCache?: boolean;
 }): Promise<WeatherFacts | null> {
+  const cfg = getExternalLookupProviderConfig("weather");
+  if (!cfg.enabled) {
+    return null;
+  }
+  if (!input.skipExternalCache) {
+    const place = String(input.place ?? "").trim() || "IL";
+    const dateTok = String(input.date ?? "").trim() || "today";
+    const aspects = parseWeatherAspects(input.aspects).slice().sort().join(",");
+    const baseQuery = `${place}|${dateTok}|${aspects}`;
+    const cacheQuery = buildWebLookupCacheQueryToken({
+      query: baseQuery,
+      cacheScope: input.cacheScope ?? cfg.defaultCacheScope,
+      userId: input.userId,
+    });
+    const scope = input.cacheScope ?? cfg.defaultCacheScope;
+    if (scope === "none") {
+      if (input.userId && cfg.burnsQuota) {
+        const gate = await burnExternalLookupQuota(input.userId);
+        if (!gate.allowed) return null;
+      }
+      return fetchWeatherFacts({ ...input, skipExternalCache: true });
+    }
+    const { ttlTier, ttlSeconds } = providerTtlSeconds("weather");
+    let quotaBurned = false;
+    const cached = await withExternalCache<WeatherFacts | null>({
+      provider: cfg.provider,
+      scope: cfg.scope,
+      query: cacheQuery,
+      region: "IL",
+      lat: input.latitude,
+      lng: input.longitude,
+      date: /^\d{4}-\d{2}-\d{2}$/.test(dateTok) ? dateTok : undefined,
+      ttlTier,
+      ttlSeconds,
+      forceRefresh: input.forceRefresh === true,
+      fetcher: async () => {
+        if (input.userId && cfg.burnsQuota && !quotaBurned) {
+          const gate = await burnExternalLookupQuota(input.userId);
+          quotaBurned = true;
+          if (!gate.allowed) return null;
+        }
+        return fetchWeatherFacts({
+          ...input,
+          skipExternalCache: true,
+          forceRefresh: false,
+        });
+      },
+    });
+    return cached.payload;
+  }
+
   const fetchImpl = input.fetchImpl ?? fetch;
   const aspects = parseWeatherAspects(input.aspects);
 

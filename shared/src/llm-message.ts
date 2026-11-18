@@ -384,6 +384,16 @@ export type LlmComposeCondition =
       airport: string;
       direction: "arrivals" | "departures";
       flight: string;
+    }
+  | {
+      /**
+       * Poll cached sports schedule; notify when next match for `team` is
+       * within minutesBefore of kickoff. Deduped per matchId via lastReportSha.
+       */
+      type: "sports_match";
+      team: string;
+      minutesBefore: number;
+      competition: string;
     };
 
 export interface LlmReminderAction {
@@ -437,7 +447,8 @@ export interface LlmReminderAction {
     | "jewish"
     | "places"
     | "flights"
-    | "routes";
+    | "routes"
+    | "sports";
   /**
    * Hours of git history for windowed digests.
    * 0 = recurring since-last-report mode (one-shot defaults to 168h at fire).
@@ -450,9 +461,10 @@ export interface LlmReminderAction {
   composePlace: string;
   /**
    * Event-relative schedule. Empty / omit = wall clock.
-   * jewish_candles = fire from next Hebcal candle lighting + scheduleOffsetMinutes.
+   * jewish_candles = next Hebcal candle lighting + scheduleOffsetMinutes.
+   * external_event = composePlace holds event ISO (+ optional |label) + offset.
    */
-  scheduleAnchor?: "" | "jewish_candles";
+  scheduleAnchor?: "" | "jewish_candles" | "external_event";
   /**
    * Minutes relative to scheduleAnchor (negative = before). 10 דקות לפני → -10.
    */
@@ -2882,7 +2894,8 @@ function parseComposeSource(
   | "jewish"
   | "places"
   | "flights"
-  | "routes" {
+  | "routes"
+  | "sports" {
   const raw = String(
     record.compose_source ??
       record.composeSource ??
@@ -2974,6 +2987,16 @@ function parseComposeSource(
   ) {
     return "routes";
   }
+  if (
+    raw === "sports" ||
+    raw === "sport" ||
+    raw === "football" ||
+    raw === "soccer" ||
+    raw === "ספורט" ||
+    raw === "כדורגל"
+  ) {
+    return "sports";
+  }
   return "";
 }
 
@@ -2994,7 +3017,7 @@ function parseComposePlace(record: Record<string, unknown>): string {
 
 function parseScheduleAnchor(
   record: Record<string, unknown>,
-): "" | "jewish_candles" {
+): "" | "jewish_candles" | "external_event" {
   const raw = String(
     record.schedule_anchor ??
       record.scheduleAnchor ??
@@ -3012,6 +3035,16 @@ function parseScheduleAnchor(
     raw === "הדלקת נרות"
   ) {
     return "jewish_candles";
+  }
+  if (
+    raw === "external_event" ||
+    raw === "event" ||
+    raw === "match" ||
+    raw === "kickoff" ||
+    raw === "אירוע" ||
+    raw === "משחק"
+  ) {
+    return "external_event";
   }
   return "";
 }
@@ -3394,6 +3427,47 @@ export function parseComposeCondition(raw: unknown): LlmComposeCondition | null 
       airport,
       direction,
       flight,
+    };
+  }
+  if (
+    type === "sports_match" ||
+    type === "sport_match" ||
+    type === "match_reminder" ||
+    type === "sports_fixture"
+  ) {
+    const team = readText(record, [
+      "team",
+      "club",
+      "side",
+      "קבוצה",
+      "נבחרת",
+    ]).slice(0, 120);
+    const competition = readText(record, [
+      "competition",
+      "league",
+      "ליגה",
+      "מפעל",
+    ]).slice(0, 120);
+    const minutesRaw =
+      record.minutes_before ??
+      record.minutesBefore ??
+      record.offset_minutes ??
+      record.offsetMinutes ??
+      record.minutes;
+    const minutesBefore =
+      typeof minutesRaw === "number"
+        ? Math.round(minutesRaw)
+        : typeof minutesRaw === "string" && /^-?\d+$/.test(minutesRaw.trim())
+          ? Number(minutesRaw.trim())
+          : 60;
+    if (!team || !Number.isFinite(minutesBefore) || minutesBefore === 0) {
+      return null;
+    }
+    return {
+      type: "sports_match",
+      team,
+      minutesBefore: Math.abs(minutesBefore),
+      competition,
     };
   }
   if (type === "expr" || type === "expression" || type === "numeric") {

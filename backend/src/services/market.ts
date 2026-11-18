@@ -1,3 +1,15 @@
+import type { LlmWebLookupCacheScope } from "@workee/shared";
+import { withExternalCache } from "./external-cache.service.js";
+import {
+  getExternalLookupProviderConfig,
+  isFxMarketQuery,
+  providerTtlSeconds,
+} from "./external-lookup.config.js";
+import {
+  burnExternalLookupQuota,
+  buildWebLookupCacheQueryToken,
+} from "./external-lookup.service.js";
+
 export type MarketAspect = "summary" | "price" | "change" | "range";
 
 export type MarketQuote = {
@@ -205,7 +217,61 @@ function roundMoney(n: number | null | undefined): number | null {
 export async function fetchQuote(
   query: string,
   fetchImpl: typeof fetch = fetch,
+  options?: {
+    userId?: string | null;
+    cacheScope?: LlmWebLookupCacheScope;
+    forceRefresh?: boolean;
+    skipExternalCache?: boolean;
+  },
 ): Promise<MarketQuote | null> {
+  const providerId = isFxMarketQuery(query) ? "fx" : "market";
+  const cfg = getExternalLookupProviderConfig(providerId);
+  if (!cfg.enabled) {
+    return null;
+  }
+  if (!options?.skipExternalCache) {
+    const scope = options?.cacheScope ?? cfg.defaultCacheScope;
+    const cacheQuery = buildWebLookupCacheQueryToken({
+      query: query.trim(),
+      cacheScope: scope,
+      userId: options?.userId,
+    });
+    if (scope === "none") {
+      if (options?.userId && cfg.burnsQuota) {
+        const gate = await burnExternalLookupQuota(options.userId);
+        if (!gate.allowed) return null;
+      }
+      return fetchQuote(query, fetchImpl, {
+        ...options,
+        skipExternalCache: true,
+      });
+    }
+    const { ttlTier, ttlSeconds } = providerTtlSeconds(providerId);
+    let quotaBurned = false;
+    const cached = await withExternalCache<MarketQuote | null>({
+      provider: cfg.provider,
+      scope: cfg.scope,
+      query: cacheQuery,
+      region: "IL",
+      ttlTier,
+      ttlSeconds,
+      forceRefresh: options?.forceRefresh === true,
+      fetcher: async () => {
+        if (options?.userId && cfg.burnsQuota && !quotaBurned) {
+          const gate = await burnExternalLookupQuota(options.userId);
+          quotaBurned = true;
+          if (!gate.allowed) return null;
+        }
+        return fetchQuote(query, fetchImpl, {
+          ...options,
+          skipExternalCache: true,
+          forceRefresh: false,
+        });
+      },
+    });
+    return cached.payload;
+  }
+
   const resolved = await resolveSymbol(query, fetchImpl);
   if (!resolved) {
     return null;
@@ -288,6 +354,10 @@ export async function fetchMarketFacts(input: {
   queries: string[] | unknown;
   aspects?: MarketAspect[] | unknown;
   fetchImpl?: typeof fetch;
+  userId?: string | null;
+  cacheScope?: LlmWebLookupCacheScope;
+  forceRefresh?: boolean;
+  skipExternalCache?: boolean;
 }): Promise<MarketFacts> {
   const queries = parseMarketQueries(input.queries);
   const aspects = parseMarketAspects(input.aspects);
@@ -296,7 +366,12 @@ export async function fetchMarketFacts(input: {
   const missing: string[] = [];
   for (const query of queries) {
     try {
-      const quote = await fetchQuote(query, fetchImpl);
+      const quote = await fetchQuote(query, fetchImpl, {
+        userId: input.userId,
+        cacheScope: input.cacheScope,
+        forceRefresh: input.forceRefresh,
+        skipExternalCache: input.skipExternalCache,
+      });
       if (quote) {
         quotes.push(quote);
       } else {

@@ -48,6 +48,10 @@ import {
 import { applyClockRuleToTask, itemRecurrence } from "./list-recurrence.js";
 import { nextCandleLighting } from "./jewish.js";
 import {
+  decodeExternalEventPlace,
+  fireAtFromExternalEvent,
+} from "./fact-followup.service.js";
+import {
   conditionFromReminderJson,
   normalizeMarketPriceForLiveQuote,
 } from "./compose-condition.js";
@@ -3140,14 +3144,19 @@ export async function applyReminders(input: {
         : "";
 
     let scheduleAnchor =
-      reminder.scheduleAnchor === "jewish_candles"
-        ? "jewish_candles"
-        : canReuseClock && existingAnchor === "jewish_candles"
-          ? "jewish_candles"
+      reminder.scheduleAnchor === "jewish_candles" ||
+      reminder.scheduleAnchor === "external_event"
+        ? reminder.scheduleAnchor
+        : canReuseClock &&
+            (existingAnchor === "jewish_candles" ||
+              existingAnchor === "external_event")
+          ? existingAnchor
           : "";
     const rawOffset = Number(reminder.scheduleOffsetMinutes ?? 0);
     let scheduleOffsetMinutes =
-      reminder.scheduleAnchor === "jewish_candles" || rawOffset !== 0
+      reminder.scheduleAnchor === "jewish_candles" ||
+      reminder.scheduleAnchor === "external_event" ||
+      rawOffset !== 0
         ? rawOffset
         : canReuseClock
           ? existingOffset
@@ -3160,9 +3169,11 @@ export async function applyReminders(input: {
       .trim()
       .slice(0, 255);
 
-    // Candle-offset clocks: engine fills fire_at from Hebcal (no wall time/in).
+    // Event-relative clocks: engine fills fire_at (no wall time/in).
     let recurring =
-      reminder.recurrence && scheduleAnchor !== "jewish_candles"
+      reminder.recurrence &&
+      scheduleAnchor !== "jewish_candles" &&
+      scheduleAnchor !== "external_event"
         ? resolveRecurringFireAt(
             reminder.recurrence,
             reminder.date,
@@ -3172,7 +3183,9 @@ export async function applyReminders(input: {
           )
         : null;
     const interval =
-      reminder.recurrence || scheduleAnchor === "jewish_candles"
+      reminder.recurrence ||
+      scheduleAnchor === "jewish_candles" ||
+      scheduleAnchor === "external_event"
         ? null
         : intervalOf(reminder);
     let fireAt: Date | null = null;
@@ -3195,6 +3208,18 @@ export async function applyReminders(input: {
         reminder.recurrence && reminder.recurrence.freq === "weekly"
           ? { fireAt, recurrence: reminder.recurrence }
           : null;
+    } else if (scheduleAnchor === "external_event") {
+      if (!schedulePlace) {
+        skipped.push({ item: reminder.item.trim(), reason: "no_place" });
+        continue;
+      }
+      const { eventAtIso } = decodeExternalEventPlace(schedulePlace);
+      fireAt = fireAtFromExternalEvent(eventAtIso, scheduleOffsetMinutes);
+      if (!fireAt) {
+        skipped.push({ item: reminder.item.trim(), reason: "anchor_failed" });
+        continue;
+      }
+      recurring = null;
     } else {
       fireAt = reminder.recurrence
         ? (recurring?.fireAt ?? null)
@@ -3378,6 +3403,7 @@ export async function applyReminders(input: {
         "places",
         "flights",
         "routes",
+        "sports",
       ]);
       const nextSource = COMPOSE_SOURCES.has(reminder.composeSource)
         ? reminder.composeSource
@@ -3411,7 +3437,9 @@ export async function applyReminders(input: {
         nextSource === "market" ||
         nextSource === "mashov" ||
         nextSource === "smartschool" ||
-        scheduleAnchor === "jewish_candles"
+        nextSource === "sports" ||
+        scheduleAnchor === "jewish_candles" ||
+        scheduleAnchor === "external_event"
           ? (schedulePlace ||
               reminder.composePlace.trim() ||
               (canReuseClock ? existingPlace : "") ||
@@ -3420,13 +3448,16 @@ export async function applyReminders(input: {
               .slice(0, 255)
           : "";
       const nextScheduleAnchor =
-        scheduleAnchor === "jewish_candles"
-          ? "jewish_candles"
+        scheduleAnchor === "jewish_candles" ||
+        scheduleAnchor === "external_event"
+          ? scheduleAnchor
           : canReuseClock && existingAnchor && !reminder.scheduleAnchor
             ? existingAnchor
             : "";
       const nextScheduleOffset =
-        scheduleAnchor === "jewish_candles" || rawOffset !== 0
+        scheduleAnchor === "jewish_candles" ||
+        scheduleAnchor === "external_event" ||
+        rawOffset !== 0
           ? scheduleOffsetMinutes
           : canReuseClock
             ? existingOffset

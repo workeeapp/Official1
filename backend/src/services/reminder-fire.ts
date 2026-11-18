@@ -52,6 +52,12 @@ import {
   fetchFlightEtaWatch,
   flightEtaThresholdMinutes,
 } from "./flights.js";
+import {
+  fetchSportsSchedule,
+  minutesUntilKickoff,
+  nextUpcomingMatch,
+  sportsMatchFingerprint,
+} from "./sports-schedule.service.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { sendWhatsAppButtons } from "./whatsapp-send.js";
 import {
@@ -587,6 +593,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     let outboundBody = reminder.messageText;
     let busEtaDefaultBody: string | null = null;
     let flightDefaultBody: string | null = null;
+    let sportsDefaultBody: string | null = null;
     let skipSend = false;
     let conditionShaAfterSend: string | undefined;
     /** Persistent bus_eta poll failure: send honesty once; skip condition gate. */
@@ -741,6 +748,34 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             flightDefaultBody = `עדכון בטיסה: ${changed.summary}.`;
           }
         }
+        if (condition.type === "sports_match") {
+          const schedule = await fetchSportsSchedule({
+            team: condition.team,
+            competition: condition.competition,
+            userId: reminder.userId,
+            now,
+          });
+          const match = nextUpcomingMatch(schedule, now);
+          const mins = match
+            ? minutesUntilKickoff(match.kickoffIso, now)
+            : null;
+          const fp = match
+            ? sportsMatchFingerprint(match).slice(0, 64)
+            : "";
+          evalFacts = {
+            ...evalFacts,
+            sportsMatchEtaMinutes: mins,
+            sportsMatchFingerprint: fp,
+          };
+          if (
+            match &&
+            mins != null &&
+            mins <= condition.minutesBefore &&
+            fp
+          ) {
+            sportsDefaultBody = `משחק של ${condition.team} נגד ${match.opponent} בעוד כ־${mins} דקות.`;
+          }
+        }
         if (
           condition.type === "expr" ||
           condition.type === "field_changed"
@@ -833,7 +868,8 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         kind: factsBundle?.kind,
         fixedBody: factsBundle?.fixedBody,
       });
-      const conditionDefaultBody = busEtaDefaultBody || flightDefaultBody;
+      const conditionDefaultBody =
+        busEtaDefaultBody || flightDefaultBody || sportsDefaultBody;
       const preferConditionDefault =
         Boolean(conditionDefaultBody) &&
         (forceBusEtaPollFailNotify ||

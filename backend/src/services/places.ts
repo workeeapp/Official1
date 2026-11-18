@@ -17,6 +17,10 @@ import {
   burnExternalLookupQuota,
   detectForceRefreshIntent,
 } from "./external-lookup.service.js";
+import {
+  getExternalLookupProviderConfig,
+  providerTtlSeconds,
+} from "./external-lookup.config.js";
 import { withExternalCache } from "./external-cache.service.js";
 import type { ComposeLlmBilling } from "./llm-usage.service.js";
 import {
@@ -1008,17 +1012,23 @@ export async function fetchPlacesFacts(input: {
       includedType ?? "",
     ].join("|");
     let quotaBurnedForMiss = false;
+    const placesCfg = getExternalLookupProviderConfig("places");
+    if (!placesCfg.enabled) {
+      return facts;
+    }
+    const { ttlTier, ttlSeconds } = providerTtlSeconds("places");
     const cached = await withExternalCache<PlacesFacts>({
-      provider: "places",
-      scope: "local_search",
+      provider: placesCfg.provider,
+      scope: placesCfg.scope,
       query: cacheQuery,
       region: "IL",
       lat,
       lng,
-      ttlTier: "STATIC",
+      ttlTier,
+      ttlSeconds,
       forceRefresh,
       fetcher: async () => {
-        if (input.userId && !quotaBurnedForMiss) {
+        if (input.userId && placesCfg.burnsQuota && !quotaBurnedForMiss) {
           const gate = await burnExternalLookupQuota(input.userId);
           quotaBurnedForMiss = true;
           if (!gate.allowed) {

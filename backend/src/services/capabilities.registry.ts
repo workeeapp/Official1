@@ -28,8 +28,18 @@ export const CAPABILITY_REGISTRY: readonly CapabilityDef[] = [
   { id: "checks_nudges", labelHe: "בדיקות ונדנודים", audience: "member" },
   { id: "reminders", labelHe: "תזכורות", audience: "member" },
   { id: "scheduled_digests", labelHe: "שליחות מתוזמנות וסיכומים חיים", audience: "member" },
-  { id: "weather", labelHe: "מזג אוויר עכשיו או מתוזמן", audience: "member" },
-  { id: "markets", labelHe: "מניות, מדדים וקריפטו", audience: "member" },
+  {
+    id: "weather",
+    labelHe: "מזג אוויר עכשיו או מתוזמן (מטמון ExternalDataCache)",
+    audience: "member",
+    externalLookup: true,
+  },
+  {
+    id: "markets",
+    labelHe: "מניות, מדדים, קריפטו ושערי FX (מטמון ExternalDataCache)",
+    audience: "member",
+    externalLookup: true,
+  },
   { id: "mashov", labelHe: "משוב בית־ספר (ציונים/שיעורים)", audience: "member" },
   { id: "places", labelHe: "חיפוש עסקים מקומיים (שעות פתיחה / בעל מקצוע בעיר)", audience: "member", externalLookup: true },
   {
@@ -38,7 +48,12 @@ export const CAPABILITY_REGISTRY: readonly CapabilityDef[] = [
     audience: "member",
   },
   { id: "transit", labelHe: "תחבורה ציבורית / יציאה עד / קווים בתחנה", audience: "member" },
-  { id: "flights", labelHe: "לוח טיסות ו־ETA", audience: "member" },
+  {
+    id: "flights",
+    labelHe: "לוח טיסות נתב״ג / TLV (מטמון קצר + ETA/שינויים)",
+    audience: "member",
+    externalLookup: true,
+  },
   { id: "waze", labelHe: "ניווט Waze", audience: "member" },
   { id: "handoff", labelHe: "העברה לעובד דיגיטלי אחר", audience: "member" },
   {
@@ -50,6 +65,12 @@ export const CAPABILITY_REGISTRY: readonly CapabilityDef[] = [
   {
     id: "events_cinema",
     labelHe: "אירועים, קונצרטים ולוח קולנוע (דרך חיפוש מאומת + מטמון)",
+    audience: "member",
+    externalLookup: true,
+  },
+  {
+    id: "sports",
+    labelHe: "לוח משחקים ותזכורות למשחק (מטמון + watch sports_match)",
     audience: "member",
     externalLookup: true,
   },

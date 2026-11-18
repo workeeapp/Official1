@@ -23,14 +23,16 @@ import {
   isJewishCalendarQuery,
   resolveLocalJewishInline,
 } from "./jewish-calendar.service.js";
+import { getExternalLookupConfig } from "./external-lookup.config.js";
 
+/** @deprecated Prefer getExternalLookupConfig().dailyMissQuota */
 export const EXTERNAL_LOOKUP_DAILY_QUOTA = 30;
 
 export const WEB_LOOKUP_EMPTY_HE =
-  "לא מצאתי מקור מאומת לזה כרגע — אבדוק שוב אם תרצו, בלי לנחש.";
+  getExternalLookupConfig().emptyReplyHe;
 
 export const EXTERNAL_LOOKUP_QUOTA_HE =
-  "הגעתם למכסת החיפושים להיום — נסו שוב מחר, או בקשו משהו שכבר בדקנו (מהמטמון).";
+  getExternalLookupConfig().quotaExceededHe;
 
 export type CachedWebSearchPayload = {
   text: string;
@@ -138,13 +140,16 @@ export async function burnExternalLookupQuota(
   const existing = await prisma.externalDataCache.findUnique({
     where: { cacheKey },
   });
+  const cfg = getExternalLookupConfig();
   const prev = (existing?.payload as { used?: number } | null)?.used ?? 0;
   const used = Math.max(0, Math.floor(Number(prev) || 0));
-  if (used >= EXTERNAL_LOOKUP_DAILY_QUOTA) {
+  if (used >= cfg.dailyMissQuota) {
     return { allowed: false, used };
   }
   const next = used + 1;
-  const expiresAt = new Date(now.getTime() + 36 * 60 * 60 * 1000);
+  const expiresAt = new Date(
+    now.getTime() + cfg.quotaTtlHours * 60 * 60 * 1000,
+  );
   const payload = { used: next } as Prisma.InputJsonValue;
   await prisma.externalDataCache.upsert({
     where: { cacheKey },

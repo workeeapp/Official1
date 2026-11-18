@@ -31,6 +31,10 @@ export type ComposeEvalFacts = {
   flightEtaFingerprint?: string;
   /** Fingerprint of flight status (status/delay/gate/times). */
   flightChangedFingerprint?: string;
+  /** Minutes until sports kickoff. */
+  sportsMatchEtaMinutes?: number | null;
+  /** Fingerprint of sports match (matchId+kickoff) for dedupe. */
+  sportsMatchFingerprint?: string;
   /** Resolved catalog field values for expr / field_changed. */
   exprFieldValues?: Record<string, number | null>;
 };
@@ -356,6 +360,30 @@ export function evaluateComposeCondition(input: {
     };
   }
 
+  if (input.condition.type === "sports_match") {
+    const minutes = input.facts.sportsMatchEtaMinutes;
+    const fp = String(input.facts.sportsMatchFingerprint ?? "").trim();
+    const threshold = Math.abs(Math.round(input.condition.minutesBefore || 0));
+    if (
+      minutes == null ||
+      !Number.isFinite(minutes) ||
+      !fp ||
+      threshold <= 0
+    ) {
+      return { skipSend: true };
+    }
+    if (minutes > threshold) {
+      return { skipSend: true };
+    }
+    if (fp === last) {
+      return { skipSend: true };
+    }
+    return {
+      skipSend: false,
+      shaAfterSend: fp.slice(0, 64),
+    };
+  }
+
   if (input.condition.type === "expr") {
     const values = input.facts.exprFieldValues ?? {};
     const left = evalWatchExprNode(input.condition.left, values);
@@ -456,6 +484,10 @@ export function baselineShaForWatch(input: {
   }
   if (input.condition.type === "flight_changed") {
     const fp = String(input.facts.flightChangedFingerprint ?? "").trim();
+    return fp || null;
+  }
+  if (input.condition.type === "sports_match") {
+    const fp = String(input.facts.sportsMatchFingerprint ?? "").trim();
     return fp || null;
   }
   if (input.condition.type === "expr") {

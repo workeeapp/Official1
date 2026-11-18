@@ -11,6 +11,12 @@ import {
   fetchFlightChangedWatch,
   fetchFlightEtaWatch,
 } from "./flights.js";
+import {
+  fetchSportsSchedule,
+  minutesUntilKickoff,
+  nextUpcomingMatch,
+  sportsMatchFingerprint,
+} from "./sports-schedule.service.js";
 import { enrichEvalFactsForExpr } from "./watch-expr.js";
 
 export type WatchBaselineSeedResult = {
@@ -95,6 +101,24 @@ export async function seedWatchBaseline(input: {
       evalFacts = {
         ...evalFacts,
         flightChangedFingerprint: changed.fingerprint,
+      };
+    }
+    if (condition.type === "sports_match") {
+      const schedule = await fetchSportsSchedule({
+        team: condition.team,
+        competition: condition.competition,
+        userId: undefined,
+        now,
+      });
+      const match = nextUpcomingMatch(schedule, now);
+      evalFacts = {
+        ...evalFacts,
+        sportsMatchEtaMinutes: match
+          ? minutesUntilKickoff(match.kickoffIso, now)
+          : null,
+        sportsMatchFingerprint: match
+          ? sportsMatchFingerprint(match).slice(0, 64)
+          : "",
       };
     }
     if (condition.type === "expr" || condition.type === "field_changed") {

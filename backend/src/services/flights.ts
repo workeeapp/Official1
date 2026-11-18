@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   flightsClockHmToMinutes,
   normalizeFlightsClockHm,
+  type LlmWebLookupCacheScope,
 } from "@workee/shared";
 import { getEnv } from "../config/env.js";
 import type { ComposeLlmBilling } from "./llm-usage.service.js";
@@ -22,6 +23,15 @@ import {
   isLocallyTruncated,
   type RetrievalStats,
 } from "./retrieval-window.js";
+import { withExternalCache } from "./external-cache.service.js";
+import {
+  getExternalLookupProviderConfig,
+  providerTtlSeconds,
+} from "./external-lookup.config.js";
+import {
+  burnExternalLookupQuota,
+  buildWebLookupCacheQueryToken,
+} from "./external-lookup.service.js";
 
 export const DEFAULT_FLIGHT_AIRPORT = "TLV";
 
@@ -660,6 +670,10 @@ export async function fetchFlightsBoard(input: {
   fetchImpl?: typeof fetch;
   /** Override env key (empty string → missing-key error). */
   apiKey?: string | null;
+  userId?: string | null;
+  cacheScope?: LlmWebLookupCacheScope;
+  forceRefresh?: boolean;
+  skipExternalCache?: boolean;
 }): Promise<FlightsBoardResult> {
   const airport = normalizeAirportCode(input.airport ?? "");
   const directionRaw = String(input.direction ?? "both")
@@ -701,6 +715,72 @@ export async function fetchFlightsBoard(input: {
     Math.max(input.limit ?? (wantWidePage ? 100 : 40), 1),
     100,
   );
+
+  const flightsCfg = getExternalLookupProviderConfig("flights");
+  if (!input.skipExternalCache) {
+    if (!flightsCfg.enabled) {
+      return { rows: [], providerLimit: limit, providerLimitSaturated: false };
+    }
+    const baseQuery = [
+      airport,
+      direction,
+      airlines.slice().sort().join(","),
+      city,
+      flight,
+      dateKey,
+      withinMinutes ?? "",
+      timeFrom,
+      timeTo,
+      limit,
+    ].join("|");
+    const scope = input.cacheScope ?? flightsCfg.defaultCacheScope;
+    const cacheQuery = buildWebLookupCacheQueryToken({
+      query: baseQuery,
+      cacheScope: scope,
+      userId: input.userId,
+    });
+    if (scope === "none") {
+      if (input.userId && flightsCfg.burnsQuota) {
+        const gate = await burnExternalLookupQuota(input.userId, now);
+        if (!gate.allowed) {
+          return { rows: [], providerLimit: limit, providerLimitSaturated: false };
+        }
+      }
+      return fetchFlightsBoard({ ...input, skipExternalCache: true });
+    }
+    const { ttlTier, ttlSeconds } = providerTtlSeconds("flights");
+    let quotaBurned = false;
+    const cached = await withExternalCache<FlightsBoardResult>({
+      provider: flightsCfg.provider,
+      scope: flightsCfg.scope,
+      query: cacheQuery,
+      region: "IL",
+      date: dateKey || undefined,
+      ttlTier,
+      ttlSeconds,
+      forceRefresh: input.forceRefresh === true,
+      fetcher: async () => {
+        if (input.userId && flightsCfg.burnsQuota && !quotaBurned) {
+          const gate = await burnExternalLookupQuota(input.userId, now);
+          quotaBurned = true;
+          if (!gate.allowed) {
+            return {
+              rows: [],
+              providerLimit: limit,
+              providerLimitSaturated: false,
+            };
+          }
+        }
+        return fetchFlightsBoard({
+          ...input,
+          skipExternalCache: true,
+          forceRefresh: false,
+        });
+      },
+    });
+    return cached.payload;
+  }
+
   const fetchImpl = input.fetchImpl ?? fetch;
   const apiKey = input.apiKey;
 
