@@ -32,7 +32,11 @@ export const CAPABILITY_REGISTRY: readonly CapabilityDef[] = [
   { id: "markets", labelHe: "מניות, מדדים וקריפטו", audience: "member" },
   { id: "mashov", labelHe: "משוב בית־ספר (ציונים/שיעורים)", audience: "member" },
   { id: "places", labelHe: "חיפוש עסקים מקומיים (שעות פתיחה / בעל מקצוע בעיר)", audience: "member", externalLookup: true },
-  { id: "jewish", labelHe: "שבת ולוח עברי (זמנים + תזכורת לפני הדלקה)", audience: "member", externalLookup: true },
+  {
+    id: "jewish",
+    labelHe: "שבת ולוח עברי מקומי (הדלקה/הבדלה/פרשה/חגים — חישוב דטרמיניסטי בלי רשת)",
+    audience: "member",
+  },
   { id: "transit", labelHe: "תחבורה ציבורית / יציאה עד / קווים בתחנה", audience: "member" },
   { id: "flights", labelHe: "לוח טיסות ו־ETA", audience: "member" },
   { id: "waze", labelHe: "ניווט Waze", audience: "member" },

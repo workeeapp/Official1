@@ -826,7 +826,7 @@ export const SYSTEM_TIP_SEEDS: TipSeedDef[] = [
     order: 45,
     minIntervalMinutes: 0,
     outputMode: "dynamic",
-    text: "After a verified web/places lookup about «{search_topic}», write one short Hebrew tip offering to save a reminder or share that info. Ground only in FACTS. Skip/empty if search_topic missing.",
+    text: "After a verified web/places/Shabbat lookup about «{search_topic}», write one short Hebrew tip: for Shabbat/city topics offer a recurring Friday reminder before candle lighting; otherwise offer saving a reminder or sharing. Ground only in FACTS. Skip/empty if search_topic missing.",
   },
 
   // —— Prospect / cold first-exposure (Wave 1 PLG) ——

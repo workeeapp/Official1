@@ -20,6 +20,7 @@
     "expand:live-coverage": "tsx scripts/expand-live-coverage.ts"
   },
   "dependencies": {
+    "@hebcal/core": "^6.16.1",
     "@prisma/client": "^6.16.1",
     "@workee/shared": "*",
     "argon2": "^0.44.0",

@@ -4,6 +4,7 @@
  * for multi-step research/portal browsing.
  */
 import type { Prisma } from "@prisma/client";
+import type { LlmWebLookupCacheScope } from "@workee/shared";
 import {
   HOSTED_WEB_SEARCH_MODEL,
   runHostedWebSearch,
@@ -18,6 +19,10 @@ import {
   type WithExternalCacheResult,
 } from "./external-cache.service.js";
 import { prisma } from "../database/prisma.js";
+import {
+  isJewishCalendarQuery,
+  resolveLocalJewishInline,
+} from "./jewish-calendar.service.js";
 
 export const EXTERNAL_LOOKUP_DAILY_QUOTA = 30;
 
@@ -42,6 +47,12 @@ export type CachedWebSearchOptions = {
   lat?: number | null;
   lng?: number | null;
   scope?: string;
+  /**
+   * Semantic cache policy (server-enforced).
+   * none = no ExternalDataCache R/W; user = key includes authenticated userId;
+   * global = shared normalized key.
+   */
+  cacheScope?: LlmWebLookupCacheScope;
   ttlTier?: ExternalCacheTtlTier;
   forceRefresh?: boolean;
   model?: string;
@@ -53,6 +64,8 @@ export type CachedWebSearchOptions = {
 export type CachedWebSearchResult = WithExternalCacheResult<CachedWebSearchPayload> & {
   quotaBurned: boolean;
   quotaBlocked: boolean;
+  /** True when cacheScope=none (no ExternalDataCache write). */
+  cacheSkipped?: boolean;
 };
 
 const FORCE_REFRESH_RE =
@@ -155,7 +168,30 @@ export async function burnExternalLookupQuota(
 }
 
 /**
+ * Build deterministic cache key query token.
+ * `user` scope appends authenticated userId (never model-supplied).
+ */
+export function buildWebLookupCacheQueryToken(input: {
+  query: string;
+  cacheScope?: LlmWebLookupCacheScope;
+  userId?: string | null;
+}): string {
+  const q = input.query.trim();
+  if (input.cacheScope === "user") {
+    const uid = (input.userId ?? "").trim();
+    if (!uid) {
+      // No authenticated user → degrade to none-style unique ephemeral token
+      // (caller should treat as unscoped; we still isolate from global).
+      return `user:anon|${q}`;
+    }
+    return `user:${uid}|${q}`;
+  }
+  return q;
+}
+
+/**
  * Read-through hosted web search. Cache HIT burns 0 quota; MISS burns 1 when userId set.
+ * cacheScope=none → fetch without ExternalDataCache R/W.
  */
 export async function cachedHostedWebSearch(
   options: CachedWebSearchOptions,
@@ -165,6 +201,7 @@ export async function cachedHostedWebSearch(
     throw new Error("cachedHostedWebSearch requires query");
   }
   const forceRefresh = options.forceRefresh === true;
+  const cacheScope: LlmWebLookupCacheScope = options.cacheScope ?? "global";
   const ttlTier = options.ttlTier ?? inferWebLookupTtlTier(query);
   const scope = options.scope ?? inferWebLookupScope(query);
   const model = options.model?.trim() || HOSTED_WEB_SEARCH_MODEL;
@@ -176,16 +213,53 @@ export async function cachedHostedWebSearch(
     (async (q: string, m: string) =>
       runHostedWebSearch({ query: q, model: m, now }));
 
+  const cacheQuery = buildWebLookupCacheQueryToken({
+    query,
+    cacheScope,
+    userId: options.userId,
+  });
   const keyInput = {
     provider: "web_search",
     scope,
-    query,
+    query: cacheQuery,
     region,
     date,
     lat: options.lat,
     lng: options.lng,
   };
   const cacheKey = buildNormalizedCacheKey(keyInput);
+
+  // cacheScope=none: execute without reading or writing ExternalDataCache.
+  if (cacheScope === "none") {
+    if (options.userId) {
+      const gate = await burnExternalLookupQuota(options.userId, now);
+      if (!gate.allowed) {
+        return {
+          payload: { text: "", sources: [], model },
+          cacheHit: false,
+          ageSeconds: 0,
+          cacheKey,
+          quotaBurned: false,
+          quotaBlocked: true,
+          cacheSkipped: true,
+        };
+      }
+    }
+    const r = await searchImpl(query, model);
+    return {
+      payload: {
+        text: r.text.trim(),
+        sources: r.sources.slice(0, 8),
+        model,
+      },
+      cacheHit: false,
+      ageSeconds: 0,
+      cacheKey,
+      quotaBurned: Boolean(options.userId),
+      quotaBlocked: false,
+      cacheSkipped: true,
+    };
+  }
 
   if (!forceRefresh) {
     const existing = await prisma.externalDataCache.findUnique({
@@ -207,6 +281,7 @@ export async function cachedHostedWebSearch(
         cacheKey,
         quotaBurned: false,
         quotaBlocked: false,
+        cacheSkipped: false,
       };
     }
   }
@@ -221,19 +296,17 @@ export async function cachedHostedWebSearch(
         cacheKey,
         quotaBurned: false,
         quotaBlocked: true,
+        cacheSkipped: false,
       };
     }
   }
 
-  // Miss / forceRefresh — store via shared withExternalCache (fetcher runs once).
-  let fetchCount = 0;
   const stored = await withExternalCache<CachedWebSearchPayload>({
     ...keyInput,
     ttlTier,
     ttlSeconds: resolveTtlSeconds(ttlTier),
     forceRefresh: true,
     fetcher: async () => {
-      fetchCount += 1;
       const r = await searchImpl(query, model);
       return {
         text: r.text.trim(),
@@ -248,10 +321,9 @@ export async function cachedHostedWebSearch(
     cacheHit: false,
     quotaBurned: Boolean(options.userId),
     quotaBlocked: false,
-    // ensure fetcher ran
+    cacheSkipped: false,
     payload: stored.payload,
   };
-  void fetchCount;
 }
 
 export type InlineWebLookupResult = {
@@ -261,6 +333,12 @@ export type InlineWebLookupResult = {
   quotaBlocked: boolean;
   searchTopic: string;
   sources: string[];
+  /** Local @hebcal/core answer — zero network / zero cache. */
+  localJewish?: boolean;
+  externalCalls?: number;
+  webSearchCalls?: number;
+  cacheWrites?: number;
+  cacheSkipped?: boolean;
 };
 
 /** Format verified answer or honest Hebrew fallback (never invent). */
@@ -311,7 +389,10 @@ export function formatInlineWebLookupReply(
 /** Same-turn inline grounding for chat (not multi-step missions). */
 export async function resolveInlineWebLookup(input: {
   query: string;
+  /** Prefer over query when set (self-contained follow-up resolution). */
+  canonicalQuery?: string | null;
   userId?: string | null;
+  cacheScope?: LlmWebLookupCacheScope;
   forceRefresh?: boolean;
   speakerMessage?: string;
   lat?: number | null;
@@ -319,18 +400,50 @@ export async function resolveInlineWebLookup(input: {
   searchImpl?: CachedWebSearchOptions["searchImpl"];
   now?: Date;
 }): Promise<InlineWebLookupResult> {
-  const query = input.query.trim();
+  const query = (input.canonicalQuery?.trim() || input.query.trim()).trim();
+  // Shabbat / holiday / Hebrew calendar → local @hebcal/core (zero network/cache).
+  if (isJewishCalendarQuery(query) || isJewishCalendarQuery(input.speakerMessage ?? "")) {
+    const local = resolveLocalJewishInline({
+      query: input.speakerMessage?.trim() || query,
+      place: undefined,
+      now: input.now,
+    });
+    if (local) {
+      return {
+        text: local.text,
+        verified: true,
+        cacheHit: false,
+        quotaBlocked: false,
+        searchTopic: local.searchTopic,
+        sources: [],
+        localJewish: true,
+        externalCalls: 0,
+        webSearchCalls: 0,
+        cacheWrites: 0,
+        cacheSkipped: true,
+      };
+    }
+  }
+
   const forceRefresh =
     input.forceRefresh === true ||
     detectForceRefreshIntent(input.speakerMessage ?? "");
   const cached = await cachedHostedWebSearch({
     query,
     userId: input.userId,
+    cacheScope: input.cacheScope,
     forceRefresh,
     lat: input.lat,
     lng: input.lng,
     searchImpl: input.searchImpl,
     now: input.now,
   });
-  return formatInlineWebLookupReply(cached, query);
+  const formatted = formatInlineWebLookupReply(cached, query);
+  return {
+    ...formatted,
+    cacheSkipped: cached.cacheSkipped === true,
+    cacheWrites: cached.cacheSkipped || cached.cacheHit ? 0 : 1,
+    webSearchCalls: cached.cacheHit ? 0 : 1,
+    externalCalls: cached.cacheHit ? 0 : 1,
+  };
 }

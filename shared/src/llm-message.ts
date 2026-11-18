@@ -3986,12 +3986,37 @@ function parseOptionalCoord(raw: unknown): number | null {
   return null;
 }
 
+/** Semantic ExternalDataCache hint for inline web_lookup (server-enforced). */
+export type LlmWebLookupCacheScope = "global" | "user" | "none";
+
 /** Fast inline web grounding (same-turn; not a multi-step mission). */
 export interface LlmWebLookupAction {
   query: string;
+  /**
+   * Self-contained normalized query (follow-ups like «ומתי הם סוגרים?» →
+   * standalone). Server prefers this over `query` when set.
+   */
+  canonicalQuery?: string;
+  /**
+   * Cache policy hint — server enforces with authenticated userId:
+   * global = shared key; user = keyed by server userId; none = no cache write.
+   */
+  cacheScope?: LlmWebLookupCacheScope;
   /** Explicit refresh — bypass ExternalDataCache. */
   forceRefresh?: boolean;
   scope?: string;
+}
+
+export function normalizeWebLookupCacheScope(
+  raw: unknown,
+): LlmWebLookupCacheScope | undefined {
+  const v = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (v === "global" || v === "user" || v === "none") {
+    return v;
+  }
+  return undefined;
 }
 
 /** metadata.web_lookup — hosted web_search + cache; engine replaces response. */
@@ -4015,7 +4040,12 @@ export function parseWebLookupAction(
     "חיפוש",
     "שאלה",
   ]).slice(0, 500);
-  if (!query) {
+  const canonicalQuery = readText(row, [
+    "canonical_query",
+    "canonicalQuery",
+    "canonical",
+  ]).slice(0, 500);
+  if (!query && !canonicalQuery) {
     return null;
   }
   const forceRaw = row.force_refresh ?? row.forceRefresh ?? row.refresh;
@@ -4025,8 +4055,13 @@ export function parseWebLookupAction(
     (typeof forceRaw === "string" &&
       ["1", "true", "yes", "כן"].includes(forceRaw.trim().toLowerCase()));
   const scope = readText(row, ["scope", "kind", "domain"]).slice(0, 64);
+  const cacheScope = normalizeWebLookupCacheScope(
+    row.cache_scope ?? row.cacheScope,
+  );
   return {
-    query,
+    query: query || canonicalQuery,
+    ...(canonicalQuery ? { canonicalQuery } : {}),
+    ...(cacheScope ? { cacheScope } : {}),
     ...(forceRefresh ? { forceRefresh: true } : {}),
     ...(scope ? { scope } : {}),
   };

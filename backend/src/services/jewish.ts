@@ -21,6 +21,13 @@ import {
   formatSavedRouteNotice,
   type SavedLocationContactRef,
 } from "./saved-route-location.js";
+import {
+  computeShabbatTimes,
+  computeUpcomingHolidays,
+  locationFromCoords,
+  nextLocalCandleLighting,
+  resolveHebcalLocation,
+} from "./jewish-calendar.service.js";
 
 export type JewishAspect =
   | "summary"
@@ -403,6 +410,19 @@ export async function resolveJewishLocation(
       tzid: DEFAULT_TZ,
     };
   }
+  // Prefer zero-network @hebcal/core Location DB / aliases.
+  const local = resolveHebcalLocation(trimmed);
+  if (local) {
+    return {
+      label: local.getName() || trimmed,
+      latitude: local.getLatitude(),
+      longitude: local.getLongitude(),
+      tzid: local.getTzid() || DEFAULT_TZ,
+      ...(lookupIlGeonameid(trimmed) != null
+        ? { geonameid: lookupIlGeonameid(trimmed)! }
+        : {}),
+    };
+  }
   const known = lookupIlGeonameid(trimmed);
   if (known != null) {
     return { label: trimmed, geonameid: known, tzid: DEFAULT_TZ };
@@ -456,24 +476,48 @@ function appendLocationParams(
 async function fetchShabbat(
   loc: JewishLocation,
   gy?: string,
-  fetchImpl: typeof fetch = fetch,
+  _fetchImpl: typeof fetch = fetch,
 ): Promise<ShabbatResponse> {
-  const url = new URL(SHABBAT_URL);
-  url.searchParams.set("cfg", "json");
-  url.searchParams.set("M", "on");
-  url.searchParams.set("i", "on");
-  url.searchParams.set("lg", "h");
-  appendLocationParams(url, loc);
-  if (gy && /^\d{4}-\d{2}-\d{2}$/.test(gy)) {
-    url.searchParams.set("gy", gy.slice(0, 4));
-    url.searchParams.set("gm", String(Number(gy.slice(5, 7))));
-    url.searchParams.set("gd", String(Number(gy.slice(8, 10))));
+  // Zero-network: @hebcal/core local astronomy (never ExternalDataCache / HTTP).
+  void _fetchImpl;
+  const location =
+    loc.latitude != null && loc.longitude != null
+      ? locationFromCoords(loc.latitude, loc.longitude, loc.label)
+      : resolveHebcalLocation(loc.label);
+  const local = computeShabbatTimes({
+    place: loc.label,
+    date: gy,
+    location,
+  });
+  if (!local) {
+    throw new Error("local hebcal shabbat unresolved");
   }
-  const res = await fetchImpl(url.toString());
-  if (!res.ok) {
-    throw new Error(`hebcal shabbat HTTP ${res.status}`);
+  const items: HebcalItem[] = [];
+  if (local.candles) {
+    items.push({
+      category: "candles",
+      title: local.candles.title,
+      date: local.candles.dateIso,
+    });
   }
-  return (await res.json()) as ShabbatResponse;
+  if (local.havdalah) {
+    items.push({
+      category: "havdalah",
+      title: local.havdalah.title,
+      date: local.havdalah.dateIso,
+    });
+  }
+  if (local.parasha) {
+    items.push({
+      category: "parashat",
+      title: local.parasha.title,
+      date: local.parasha.dateIso,
+    });
+  }
+  return {
+    location: { title: local.placeLabel },
+    items,
+  };
 }
 
 /** Strip Hebrew niqqud / cantillation so «עֶרֶב פֶּסַח» matches «ערב פסח». */
@@ -537,52 +581,34 @@ export function filterHolidaysByQuery(
 async function fetchUpcomingHolidays(
   loc: JewishLocation,
   startYmd: string,
-  fetchImpl: typeof fetch = fetch,
+  _fetchImpl: typeof fetch = fetch,
   opts?: { lookaheadDays?: number; collectCap?: number },
 ): Promise<{ holidays: JewishTimedItem[]; collectCapped: boolean }> {
+  // Zero-network: @hebcal/core local calendar (never ExternalDataCache / HTTP).
+  void _fetchImpl;
   const start = /^\d{4}-\d{2}-\d{2}$/.test(startYmd)
     ? startYmd
     : new Date().toISOString().slice(0, 10);
-  const lookahead =
-    opts?.lookaheadDays ?? JEWISH_HOLIDAYS_LOOKAHEAD_DAYS;
-  const collectCap = opts?.collectCap ?? JEWISH_HOLIDAYS_COLLECT_CAP;
-  const endDate = new Date(`${start}T12:00:00Z`);
-  endDate.setUTCDate(endDate.getUTCDate() + lookahead);
-  const end = endDate.toISOString().slice(0, 10);
-
-  const url = new URL(HEBCAL_URL);
-  url.searchParams.set("v", "1");
-  url.searchParams.set("cfg", "json");
-  url.searchParams.set("maj", "on");
-  url.searchParams.set("min", "on");
-  url.searchParams.set("mod", "on");
-  url.searchParams.set("nx", "on");
-  url.searchParams.set("ss", "on");
-  url.searchParams.set("mf", "on");
-  url.searchParams.set("i", "on");
-  url.searchParams.set("lg", "h");
-  url.searchParams.set("start", start);
-  url.searchParams.set("end", end);
-  appendLocationParams(url, loc);
-
-  const res = await fetchImpl(url.toString());
-  if (!res.ok) {
-    throw new Error(`hebcal holidays HTTP ${res.status}`);
-  }
-  const json = (await res.json()) as HebcalResponse;
-  const out: JewishTimedItem[] = [];
-  let collectCapped = false;
-  for (const row of json.items ?? []) {
-    if (String(row.category ?? "") !== "holiday") {
-      continue;
-    }
-    out.push(mapItem(row, "holiday"));
-    if (out.length >= collectCap) {
-      collectCapped = true;
-      break;
-    }
-  }
-  return { holidays: out, collectCapped };
+  const location =
+    loc.latitude != null && loc.longitude != null
+      ? locationFromCoords(loc.latitude, loc.longitude, loc.label)
+      : resolveHebcalLocation(loc.label);
+  const local = computeUpcomingHolidays({
+    place: loc.label,
+    startYmd: start,
+    lookaheadDays: opts?.lookaheadDays ?? JEWISH_HOLIDAYS_LOOKAHEAD_DAYS,
+    collectCap: opts?.collectCap ?? JEWISH_HOLIDAYS_COLLECT_CAP,
+    location,
+  });
+  return {
+    holidays: local.holidays.map((h) => ({
+      category: "holiday" as const,
+      title: h.title,
+      dateIso: h.dateIso,
+      clock: h.clock,
+    })),
+    collectCapped: local.collectCapped,
+  };
 }
 
 function pickFromShabbat(items: HebcalItem[] | undefined): {
@@ -701,38 +727,12 @@ export async function nextCandleLighting(input: {
   if (!place) {
     return null;
   }
-  const offsetMs = (input.offsetMinutes ?? 0) * 60_000;
-  const from = input.from ?? new Date();
-  const fetchImpl = input.fetchImpl ?? fetch;
-  try {
-    const loc = await resolveJewishLocation(place, fetchImpl);
-    if (!loc) {
-      return null;
-    }
-    // Probe this week, then next week if the offset fire already passed.
-    for (const dayOffset of [0, 7]) {
-      const probe = new Date(from.getTime() + dayOffset * 24 * 60 * 60 * 1000);
-      const ymd = probe.toLocaleDateString("en-CA", {
-        timeZone: "Asia/Jerusalem",
-      });
-      const shabbat = await fetchShabbat(loc, ymd, fetchImpl);
-      const candles = pickFromShabbat(shabbat.items).candles;
-      if (!candles?.dateIso) {
-        continue;
-      }
-      const candlesAt = new Date(candles.dateIso);
-      if (!Number.isFinite(candlesAt.getTime())) {
-        continue;
-      }
-      const fireAt = new Date(candlesAt.getTime() + offsetMs);
-      if (fireAt.getTime() > from.getTime()) {
-        return fireAt;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  void input.fetchImpl;
+  return nextLocalCandleLighting({
+    place,
+    offsetMinutes: input.offsetMinutes,
+    from: input.from,
+  });
 }
 
 /** Hint for LAST_LIVE pack — never invents a place; null on ask/fail/default. */
