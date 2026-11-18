@@ -1,8 +1,8 @@
 # Wave 1 — Distilled implementation plan
 
-**Status:** Working baseline for review — **no coding until you approve this plan for implementation**  
+**Status:** **APPROVED** (Stage 0) — Stage 1 done · **Stage 2 done** (gate + join + breaker + asker-cancel NL + `/as-prospect`/`/reset-me`)  
 **Updated:** 2026-11-18  
-**Locks:** `lucy-wave0-decisions.md` (Approved) · D0: existing CORE unchanged  
+**Locks:** `lucy-wave0-decisions.md` (Approved) · D0: existing CORE unchanged · **C1 / C1-A / C1-M2 approved**  
 **Detail archive (not the working plan):** `lucy-wave1-implementation-plan.md`, `lucy-wave1-spikes-s0-s1-s1b.md`
 
 ---

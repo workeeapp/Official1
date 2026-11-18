@@ -8,6 +8,11 @@ export const INVITE_TOKEN_RE = /\bWRK-INV-([A-Z0-9]{8,16})\b/i;
 export const WHATSAPP_COMPOSE_LABEL = "שלח בוואטסאפ";
 export const WHATSAPP_COMPOSE_URL_MAX = 2000;
 
+/** Wave 1 D4b — lazy 14-day invite TTL. */
+export const INVITE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
+export type InviteIntentKind = "send" | "share" | "assign";
+
 export type WhatsAppInviteRow = {
   id: string;
   token: string;
@@ -22,6 +27,7 @@ export type WhatsAppInviteRow = {
   guestEmployeeId: string | null;
   /** Null for a legacy message invite. */
   payload: unknown | null;
+  createdAt: Date;
 };
 
 export type PendingInviteContext = {
@@ -77,9 +83,51 @@ export function saveContactReplyButton(
   };
 }
 
+export function inviteIsPastTtl(
+  createdAt: Date,
+  now: Date = new Date(),
+): boolean {
+  return createdAt.getTime() + INVITE_TTL_MS <= now.getTime();
+}
+
+/** Lazy expire one pending invite past TTL. Returns true when THIS call expired it. */
+export async function lazyExpireInvite(input: {
+  id: string;
+  status: string;
+  createdAt: Date;
+}): Promise<boolean> {
+  if (input.status !== "pending" || !inviteIsPastTtl(input.createdAt)) {
+    return false;
+  }
+  const updated = await prisma.whatsAppInvite.updateMany({
+    where: { id: input.id, status: "pending" },
+    data: { status: "expired" },
+  });
+  return updated.count === 1;
+}
+
+/** Asker cancels their own still-pending invite (Wave 1 Stage 1). */
+export async function cancelPendingInviteByAsker(input: {
+  inviteId: string;
+  userId: string;
+  askerEmployeeId: string;
+}): Promise<"cancelled" | "lost"> {
+  const updated = await prisma.whatsAppInvite.updateMany({
+    where: {
+      id: input.inviteId,
+      userId: input.userId,
+      askerEmployeeId: input.askerEmployeeId,
+      status: "pending",
+    },
+    data: { status: "cancelled" },
+  });
+  return updated.count === 1 ? "cancelled" : "lost";
+}
+
 /**
  * Draft Amit forwards from personal WhatsApp.
  * Check-with (`expectsReply`) uses «לברר»; pure send quotes the outbound text.
+ * Wave 1: intentKind selects Share/Assign/Send Lucy-branded wording.
  */
 export function buildFatherInviteDraft(input: {
   askerName: string;
@@ -88,9 +136,14 @@ export function buildFatherInviteDraft(input: {
   token: string;
   /** true = check-with / ask; false = pure info send. */
   expectsReply?: boolean;
+  intentKind?: InviteIntentKind;
 }): { draftText: string; businessUrl: string | null } {
   const body = input.askSummary.trim() || "לעדכן אותי";
-  const expectsReply = input.expectsReply !== false;
+  const intent = input.intentKind ?? (input.expectsReply === false ? "send" : "send");
+  const expectsReply =
+    input.intentKind != null
+      ? input.intentKind === "assign"
+      : input.expectsReply !== false;
   const businessPhone = businessDisplayPhoneDigits();
   const opener = [
     input.token,
@@ -102,9 +155,16 @@ export function buildFatherInviteDraft(input: {
   const linkLine = businessUrl
     ? `לחץ כאן כדי לעדכן אותו דרכי:\n${businessUrl}`
     : "כתוב למספר העסק של Workee כדי לעדכן אותו דרכי.";
-  const missionLine = expectsReply
-    ? `${input.askerName} שלח אותי לברר איתך: ${body}`
-    : `${input.askerName} ביקש שאעביר לך: ${body}`;
+  let missionLine: string;
+  if (intent === "share") {
+    missionLine = `${input.askerName} רוצה לשתף איתך דרכי: ${body}`;
+  } else if (intent === "assign") {
+    missionLine = `${input.askerName} מבקש/ת שתקבל/י אחריות על: ${body}`;
+  } else if (expectsReply) {
+    missionLine = `${input.askerName} שלח אותי לברר איתך: ${body}`;
+  } else {
+    missionLine = `${input.askerName} ביקש שאעביר לך: ${body}`;
+  }
   const draftText = [
     "היי, כאן לוסי",
     `העוזרת האישית של ${input.askerName}`,
@@ -115,11 +175,32 @@ export function buildFatherInviteDraft(input: {
   return { draftText, businessUrl };
 }
 
+/** Honest asker status while invite is still pending — never «בוצע». */
+export function formatAskerPendingNotice(input: {
+  recipientLabel: string;
+  intentKind: InviteIntentKind;
+}): string {
+  const label = input.recipientLabel.trim() || "הנמען";
+  if (input.intentKind === "share") {
+    return `ממתין — השיתוף עם «${label}» עדיין לא הושלם (ממתין שהנמען יראה/יצטרף).`;
+  }
+  if (input.intentKind === "assign") {
+    return `ממתין — האחריות ל«${label}» עדיין ממתינה לאישור הנמען.`;
+  }
+  return `ממתין — ההודעה ל«${label}» עדיין ממתינה (הנמען עדיין לא כתב / התוכן עדיין לא הוצג).`;
+}
+
 export function formatColdInviteNotice(input: {
   recipientLabel: string;
   draftText: string;
+  intentKind?: InviteIntentKind;
 }): string {
+  const pending = formatAskerPendingNotice({
+    recipientLabel: input.recipientLabel,
+    intentKind: input.intentKind ?? "send",
+  });
   return [
+    pending,
     `אי אפשר לשלוח ישירות ל«${input.recipientLabel}» מוואטסאפ העסק — הנמען עדיין לא כתב לנו.`,
     "שלח את ההודעה הזו מהוואטסאפ שלך (לחץ «שלח בוואטסאפ»):",
     "",
@@ -136,6 +217,7 @@ export async function createWhatsAppInvite(input: {
   recipientLabel: string;
   askSummary: string;
   expectsReply?: boolean;
+  intentKind?: InviteIntentKind;
   /** Deferred share/assign. Omit for a legacy message invite. */
   payload?: Prisma.InputJsonValue | null;
 }): Promise<{
@@ -150,12 +232,16 @@ export async function createWhatsAppInvite(input: {
     return null;
   }
   const token = newInviteToken();
+  const intentKind =
+    input.intentKind ??
+    (input.payload != null ? undefined : input.expectsReply === false ? "send" : "send");
   const expectsReply = input.expectsReply !== false;
   const { draftText } = buildFatherInviteDraft({
     askerName: input.askerName,
     askSummary: input.askSummary,
     token,
     expectsReply,
+    ...(intentKind ? { intentKind } : {}),
   });
   const row = await prisma.whatsAppInvite.create({
     data: {
@@ -172,12 +258,16 @@ export async function createWhatsAppInvite(input: {
     },
   });
   const composeUrl = buildWhatsAppComposeUrl(phone, draftText);
+  const noticeIntent: InviteIntentKind =
+    intentKind ??
+    (expectsReply ? "send" : "send");
   return {
     invite: toInviteRow(row),
     composeUrl,
     notice: formatColdInviteNotice({
       recipientLabel: input.recipientLabel,
       draftText,
+      intentKind: noticeIntent,
     }),
   };
 }
@@ -195,6 +285,7 @@ function toInviteRow(row: {
   status: string;
   guestEmployeeId: string | null;
   payload?: unknown | null;
+  createdAt: Date;
 }): WhatsAppInviteRow {
   return {
     id: row.id,
@@ -209,7 +300,21 @@ function toInviteRow(row: {
     status: row.status,
     guestEmployeeId: row.guestEmployeeId,
     payload: row.payload ?? null,
+    createdAt: row.createdAt,
   };
+}
+
+/** Return pending invite only if still within TTL (lazy-expires otherwise). */
+async function keepIfPendingFresh(
+  row: WhatsAppInviteRow | null,
+): Promise<WhatsAppInviteRow | null> {
+  if (!row) {
+    return null;
+  }
+  if (await lazyExpireInvite(row)) {
+    return null;
+  }
+  return row.status === "pending" ? row : null;
 }
 
 export async function findPendingInviteByToken(
@@ -221,7 +326,7 @@ export async function findPendingInviteByToken(
   const row = await prisma.whatsAppInvite.findFirst({
     where: { token: normalized, status: "pending" },
   });
-  return row ? toInviteRow(row) : null;
+  return keepIfPendingFresh(row ? toInviteRow(row) : null);
 }
 
 export async function findPendingInviteByPhone(
@@ -235,7 +340,7 @@ export async function findPendingInviteByPhone(
     where: { recipientPhone: digits, status: "pending" },
     orderBy: { createdAt: "desc" },
   });
-  return row ? toInviteRow(row) : null;
+  return keepIfPendingFresh(row ? toInviteRow(row) : null);
 }
 
 /** Pending share/assign invites for this phone, oldest first. Legacy rows are omitted. */
@@ -254,9 +359,18 @@ export async function findPendingCollabInvites(
     },
     orderBy: { createdAt: "asc" },
   });
-  return rows
-    .map(toInviteRow)
-    .filter((row) => phonesMatch(row.recipientPhone, digits));
+  const out: WhatsAppInviteRow[] = [];
+  for (const raw of rows) {
+    const row = toInviteRow(raw);
+    if (!phonesMatch(row.recipientPhone, digits)) {
+      continue;
+    }
+    const fresh = await keepIfPendingFresh(row);
+    if (fresh) {
+      out.push(fresh);
+    }
+  }
+  return out;
 }
 
 /** Latest pending message invite (no share/assign payload) for this phone. */
@@ -275,8 +389,17 @@ export async function findPendingMessageInviteByPhone(
     },
     orderBy: { createdAt: "desc" },
   });
-  const match = rows.map(toInviteRow).find((row) => phonesMatch(row.recipientPhone, digits));
-  return match ?? null;
+  for (const raw of rows) {
+    const row = toInviteRow(raw);
+    if (!phonesMatch(row.recipientPhone, digits)) {
+      continue;
+    }
+    const fresh = await keepIfPendingFresh(row);
+    if (fresh) {
+      return fresh;
+    }
+  }
+  return null;
 }
 
 export async function findPendingInviteForGuest(
@@ -286,7 +409,7 @@ export async function findPendingInviteForGuest(
     where: { guestEmployeeId, status: "pending" },
     orderBy: { createdAt: "desc" },
   });
-  return row ? toInviteRow(row) : null;
+  return keepIfPendingFresh(row ? toInviteRow(row) : null);
 }
 
 /**

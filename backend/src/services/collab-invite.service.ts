@@ -22,18 +22,33 @@ import { getEmployeeUserId, listEmployeesForUser } from "./employee.service.js";
 import {
   createWhatsAppInvite,
   findPendingCollabInvites,
+  formatAskerPendingNotice,
+  lazyExpireInvite,
+  type InviteIntentKind,
   type WhatsAppInviteRow,
 } from "./whatsapp-invite.service.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Wave 1 contentRef — bound to this invite's deferred row / live source id. */
+export type CollabContentRef =
+  | { type: "list_item"; id: string }
+  | { type: "filing"; id: string };
+
+/**
+ * Normalized collab payload used by present/confirm paths.
+ * Writers emit v2; parsers accept v1 and v2.
+ */
 export type CollabInvitePayload = {
-  v: 1;
+  v: 1 | 2;
   kind: "share" | "assign";
+  intentKind: "share" | "assign";
   domain: "list" | "filing";
   rowId: string;
   action: LlmListAction | LlmFilingAction;
+  contentRef: CollabContentRef;
+  requireRecipientAck: boolean;
 };
 
 export type PresentedCollabInvite = {
@@ -41,41 +56,43 @@ export type PresentedCollabInvite = {
   askerName: string;
   askSummary: string;
   kind: "share" | "assign";
+  /** Scoped invite value for Prospect Share live present (no visibleTo). */
+  inviteValueText?: string;
 };
 
 /**
- * Stage 5b cutover: pending share/assign must be presented + opaque Accept/Decline
- * (Class V). Auto-apply is permanently off (`applyPendingCollabInvites` is a no-op).
+ * Stage 5b cutover + Wave 1 Stage 1: pending share/assign must be presented.
+ * Assign → opaque Accept/Decline. Prospect Share → present-only (no co-mutate).
+ * Auto-apply stays off (`applyPendingCollabInvites` is a no-op).
  */
 export function collabInviteAckRequired(): boolean {
   return true;
+}
+
+/** Whether this presented invite should get opaque Accept/Decline buttons. */
+export function shouldOfferCollabAcceptDecline(input: {
+  kind: "share" | "assign";
+  recipientIsProspect: boolean;
+}): boolean {
+  if (input.kind === "assign") {
+    return true;
+  }
+  // Share: Member may Accept → confirmCollabInvite; Prospect is present-only.
+  return !input.recipientIsProspect;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-export function parseCollabInvitePayload(value: unknown): CollabInvitePayload | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  if (value.v !== 1) {
-    return null;
-  }
-  if (value.kind !== "share" && value.kind !== "assign") {
-    return null;
-  }
-  if (value.domain !== "list" && value.domain !== "filing") {
-    return null;
-  }
-  if (typeof value.rowId !== "string" || !UUID_RE.test(value.rowId)) {
-    return null;
-  }
-  const action = value.action;
+function parseActionForDomain(
+  domain: "list" | "filing",
+  action: unknown,
+): LlmListAction | LlmFilingAction | null {
   if (!isRecord(action)) {
     return null;
   }
-  if (value.domain === "list") {
+  if (domain === "list") {
     if (action.action !== "add") {
       return null;
     }
@@ -96,13 +113,7 @@ export function parseCollabInvitePayload(value: unknown): CollabInvitePayload | 
     if (Array.isArray(action.targets) && action.targets.length > 0) {
       return null;
     }
-    return {
-      v: 1,
-      kind: value.kind,
-      domain: "list",
-      rowId: value.rowId,
-      action: action as unknown as LlmListAction,
-    };
+    return action as unknown as LlmListAction;
   }
   if (action.action !== "add_filing") {
     return null;
@@ -113,13 +124,162 @@ export function parseCollabInvitePayload(value: unknown): CollabInvitePayload | 
   if (Array.isArray(action.targets) && action.targets.length > 0) {
     return null;
   }
+  return action as unknown as LlmFilingAction;
+}
+
+function contentRefFor(
+  domain: "list" | "filing",
+  rowId: string,
+): CollabContentRef {
+  return domain === "list"
+    ? { type: "list_item", id: rowId }
+    : { type: "filing", id: rowId };
+}
+
+function normalizeParsed(input: {
+  v: 1 | 2;
+  kind: "share" | "assign";
+  domain: "list" | "filing";
+  rowId: string;
+  action: LlmListAction | LlmFilingAction;
+  requireRecipientAck?: boolean;
+  contentRef?: CollabContentRef;
+}): CollabInvitePayload {
   return {
-    v: 1,
-    kind: value.kind,
-    domain: "filing",
-    rowId: value.rowId,
-    action: action as unknown as LlmFilingAction,
+    v: input.v,
+    kind: input.kind,
+    intentKind: input.kind,
+    domain: input.domain,
+    rowId: input.rowId,
+    action: input.action,
+    contentRef: input.contentRef ?? contentRefFor(input.domain, input.rowId),
+    requireRecipientAck:
+      input.requireRecipientAck ?? input.kind === "assign",
   };
+}
+
+export function parseCollabInvitePayload(value: unknown): CollabInvitePayload | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  if (value.v === 1) {
+    if (value.kind !== "share" && value.kind !== "assign") {
+      return null;
+    }
+    if (value.domain !== "list" && value.domain !== "filing") {
+      return null;
+    }
+    if (typeof value.rowId !== "string" || !UUID_RE.test(value.rowId)) {
+      return null;
+    }
+    const action = parseActionForDomain(value.domain, value.action);
+    if (!action) {
+      return null;
+    }
+    return normalizeParsed({
+      v: 1,
+      kind: value.kind,
+      domain: value.domain,
+      rowId: value.rowId,
+      action,
+    });
+  }
+  if (value.v !== 2) {
+    return null;
+  }
+  const intentKind =
+    value.intentKind === "share" || value.intentKind === "assign"
+      ? value.intentKind
+      : value.kind === "share" || value.kind === "assign"
+        ? value.kind
+        : null;
+  if (!intentKind) {
+    return null;
+  }
+  if (value.domain !== "list" && value.domain !== "filing") {
+    return null;
+  }
+  if (typeof value.rowId !== "string" || !UUID_RE.test(value.rowId)) {
+    return null;
+  }
+  const action = parseActionForDomain(value.domain, value.action);
+  if (!action) {
+    return null;
+  }
+  let contentRef: CollabContentRef | undefined;
+  if (isRecord(value.contentRef)) {
+    const refType = value.contentRef.type;
+    const refId =
+      typeof value.contentRef.id === "string"
+        ? value.contentRef.id
+        : typeof value.contentRef.listItemId === "string"
+          ? value.contentRef.listItemId
+          : typeof value.contentRef.filingId === "string"
+            ? value.contentRef.filingId
+            : null;
+    if (
+      refId &&
+      UUID_RE.test(refId) &&
+      (refType === "list_item" || refType === "filing")
+    ) {
+      // contentRef must bind to this invite's rowId (S1).
+      if (refId !== value.rowId) {
+        return null;
+      }
+      contentRef =
+        refType === "list_item"
+          ? { type: "list_item", id: refId }
+          : { type: "filing", id: refId };
+    }
+  }
+  return normalizeParsed({
+    v: 2,
+    kind: intentKind,
+    domain: value.domain,
+    rowId: value.rowId,
+    action,
+    requireRecipientAck:
+      typeof value.requireRecipientAck === "boolean"
+        ? value.requireRecipientAck
+        : intentKind === "assign",
+    contentRef,
+  });
+}
+
+/** Build a v2 payload for new deferred share/assign rows. */
+export function buildCollabInvitePayloadV2(input: {
+  kind: "share" | "assign";
+  domain: "list" | "filing";
+  rowId: string;
+  action: LlmListAction | LlmFilingAction;
+}): Prisma.InputJsonValue {
+  const contentRef = contentRefFor(input.domain, input.rowId);
+  return JSON.parse(
+    JSON.stringify({
+      v: 2,
+      intentKind: input.kind,
+      kind: input.kind,
+      domain: input.domain,
+      rowId: input.rowId,
+      action: input.action,
+      contentRef,
+      requireRecipientAck: input.kind === "assign",
+    }),
+  ) as Prisma.InputJsonValue;
+}
+
+/** Scoped invite value text from a validated payload (no DB write). */
+export function inviteValueTextFromPayload(
+  payload: CollabInvitePayload,
+): string {
+  if (payload.domain === "list") {
+    const label = llmItemLabel((payload.action as LlmListAction).items[0]);
+    return label.trim() || "פריט";
+  }
+  const filing = payload.action as LlmFilingAction;
+  const name = String(filing.itemName ?? "").trim();
+  const desc = String(filing.itemDescription ?? "").trim();
+  return desc ? `${name} — ${desc}` : name || "תיעוד";
 }
 
 export function formatCollabInviteContext(invites: PresentedCollabInvite[]): string {
@@ -128,18 +288,34 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
   }
   const lines = [
     "COLLAB INVITE (pending — present only; do not claim it is saved):",
-    "Ask in warm Hebrew whether to accept this activity.",
-    "Do not emit metadata.collab_invite or metadata.decline_invite — Accept/Decline are engine buttons only.",
+    "Do not emit metadata.collab_invite or metadata.decline_invite — Accept/Decline are engine buttons only when offered.",
     "metadata.confirm true or false does not accept or decline.",
     "Leave lists, filing, reminders, directory, jobs, and messages empty on this turn unless the user asked something else.",
   ];
   for (const invite of invites) {
+    if (invite.kind === "assign") {
+      lines.push(
+        [
+          `invite_id: ${invite.inviteId}`,
+          `kind: assign`,
+          `asker_name: ${invite.askerName}`,
+          `activity: ${invite.askSummary}`,
+          "Ask in warm Hebrew whether to accept this responsibility.",
+        ].join("\n"),
+      );
+      continue;
+    }
+    // Share — InviteValuePresenter: show scoped value; do not claim co-mutate saved.
     lines.push(
       [
         `invite_id: ${invite.inviteId}`,
-        `kind: ${invite.kind}`,
+        `kind: share`,
         `asker_name: ${invite.askerName}`,
         `activity: ${invite.askSummary}`,
+        invite.inviteValueText
+          ? `INVITE_VALUE (scoped read only — not yet co-mutate):\n${invite.inviteValueText}`
+          : "INVITE_VALUE: unavailable",
+        "Present this shared value warmly. Do not claim it was saved to their lists.",
       ].join("\n"),
     );
   }
@@ -210,6 +386,9 @@ export async function loadPresentedCollabInvites(
       askerName,
       askSummary: row.askSummary.trim() || "פריט",
       kind: payload.kind,
+      ...(payload.kind === "share"
+        ? { inviteValueText: inviteValueTextFromPayload(payload) }
+        : {}),
     });
   }
   return out;
@@ -247,18 +426,15 @@ export async function createDeferredCollabInvites(input: {
   deferred: DeferredCollabTarget[];
 }): Promise<{ notice: string; inviteIds: string[] }> {
   const inviteIds: string[] = [];
-  let notice = "";
+  const noticeParts: string[] = [];
   for (const row of input.deferred) {
     const rowId = randomUUID();
-    const payload = JSON.parse(
-      JSON.stringify({
-        v: 1,
-        kind: row.kind,
-        domain: row.domain,
-        rowId,
-        action: row.action,
-      }),
-    ) as Prisma.InputJsonValue;
+    const payload = buildCollabInvitePayloadV2({
+      kind: row.kind,
+      domain: row.domain,
+      rowId,
+      action: row.action,
+    });
     if (!parseCollabInvitePayload(payload)) {
       continue;
     }
@@ -269,6 +445,7 @@ export async function createDeferredCollabInvites(input: {
     )
       .trim()
       .slice(0, 500) || "פריט";
+    const intentKind: InviteIntentKind = row.kind;
     const created = await createWhatsAppInvite({
       userId: input.userId,
       askerEmployeeId: input.asker.id,
@@ -277,18 +454,23 @@ export async function createDeferredCollabInvites(input: {
       recipientPhone: row.phone,
       recipientLabel: row.label,
       askSummary,
-      expectsReply: false,
+      expectsReply: row.kind === "assign",
+      intentKind,
       payload,
     });
     if (!created) {
       continue;
     }
     inviteIds.push(created.invite.id);
-    if (!notice) {
-      notice = created.notice;
-    }
+    noticeParts.push(
+      formatAskerPendingNotice({
+        recipientLabel: row.label,
+        intentKind,
+      }),
+    );
+    noticeParts.push(created.notice);
   }
-  return { notice, inviteIds };
+  return { notice: noticeParts.join("\n\n"), inviteIds };
 }
 
 export type ConfirmCollabResult = "consumed" | "lost" | "failed" | "rolled_back";
@@ -313,6 +495,8 @@ export async function confirmCollabInvite(input: {
   inviteId: string;
   recipient: PublicEmployee;
   sharedLists: SharedListRef[];
+  /** Wave 1: Prospect must not consume Share via confirm (present-only). */
+  recipientIsProspect?: boolean;
 }): Promise<ConfirmCollabResult> {
   if (isGuestEmployee(input.recipient) || !input.recipient.phone) {
     return "lost";
@@ -327,10 +511,24 @@ export async function confirmCollabInvite(input: {
   if (invite.payload == null) {
     return "lost";
   }
+  // Lazy TTL before apply.
+  if (
+    await lazyExpireInvite({
+      id: invite.id,
+      status: invite.status,
+      createdAt: invite.createdAt,
+    })
+  ) {
+    return "lost";
+  }
   const payload = parseCollabInvitePayload(invite.payload);
   if (!payload) {
     await markCollabInviteFailed(invite.id);
     return "failed";
+  }
+  // Prospect Share: no visibleTo / co-mutate until Member (Explicit Join → Stage 3).
+  if (payload.kind === "share" && input.recipientIsProspect === true) {
+    return "lost";
   }
   const askerRow = await prisma.employee.findUnique({
     where: { id: invite.askerEmployeeId },

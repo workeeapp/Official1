@@ -34,6 +34,8 @@ export async function createUser(
       data: {
         username,
         passwordHash,
+        // C1-A: credentialed accounts start as Members.
+        consentPending: false,
       },
     });
   } catch (error) {
@@ -50,6 +52,8 @@ export async function createWhatsAppOnlyUser(): Promise<User> {
     data: {
       username: null,
       passwordHash: null,
+      // C1-A: new WhatsApp-only accounts start as Prospects.
+      consentPending: true,
     },
   });
 }

@@ -34,7 +34,9 @@ export type AuditAction =
   | "vault_store"
   | "vault_use"
   | "payment_prepare"
-  | "payment_charge";
+  | "payment_charge"
+  | "explicit_join"
+  | "invite_asker_cancel";
 
 export type MutationHistoryRow = {
   action: AuditAction | string;

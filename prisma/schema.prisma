@@ -13,6 +13,14 @@ model User {
   username     String?    @unique @db.VarChar(32)
   /** Null for WhatsApp-only accounts; web login impossible until set. */
   passwordHash String?    @map("password_hash") @db.VarChar(255)
+  /**
+   * Wave 1 C1: true = Prospect (awaiting Explicit Join); false = Member.
+   * New WhatsApp-only accounts start true (C1-A). Existing rows stay false (C1-M2 grandfather).
+   * Credentialed createUser accounts start false.
+   */
+  consentPending Boolean @default(false) @map("consent_pending")
+  /** Set when Explicit Join flips consentPending to false. */
+  consentAcceptedAt DateTime? @map("consent_accepted_at")
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")
   teams             Team[]
@@ -24,6 +32,7 @@ model User {
   whatsappInvites         WhatsAppInvite[]
   pendingHighRiskConfirms PendingHighRiskConfirm[]
   deliveryAttempts        DeliveryAttempt[]
+  pendingProspectActions  PendingProspectAction[]
 
   @@map("Users")
 }
@@ -945,4 +954,34 @@ model DeliveryAttempt {
   @@index([userId, status])
   @@index([status, updatedAt])
   @@map("DeliveryAttempts")
+}
+
+/**
+ * Wave 1 Stage 2: ProspectWriteGate captured action awaiting Explicit Join.
+ * TTL ~30m. Consumed only by ExplicitJoinHandler (never by free-text).
+ */
+model PendingProspectAction {
+  id                 String    @id @default(uuid()) @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  speakerEmployeeId  String    @map("speaker_employee_id") @db.Uuid
+  recipientPhone     String?   @map("recipient_phone") @db.VarChar(32)
+  /**
+   * save | reminder | list | filing | directory | assign_accept | circuit_breaker
+   */
+  actionKind         String    @map("action_kind") @db.VarChar(32)
+  /** Immutable blocked ACTION snapshot (LlmMetadata and/or assign invite id). */
+  snapshot           Json
+  summaryText        String    @map("summary_text") @db.Text
+  /** Opaque join command: explicit_join_accept or explicit_join_accept:<id> */
+  joinCommand        String    @unique @map("join_command") @db.VarChar(128)
+  /** pending | consumed | expired | cancelled */
+  status             String    @default("pending") @db.VarChar(16)
+  expiresAt          DateTime  @map("expires_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([expiresAt])
+  @@map("PendingProspectActions")
 }

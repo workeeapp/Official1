@@ -12,6 +12,7 @@ import {
   GUEST_LUCY_NAME,
   emptyLlmMetadata,
   isGuestEmployee,
+  parseLlmReply,
 } from "@workee/shared";
 import { prisma } from "../src/database/prisma.js";
 import {
@@ -40,6 +41,21 @@ import {
   INVITE_TOKEN_PREFIX,
 } from "../src/services/whatsapp-invite.service.js";
 import { resolveWhatsAppSpeaker } from "../src/services/whatsapp.service.js";
+import { handleExplicitJoinAccept } from "../src/services/explicit-join.service.js";
+import { EXPLICIT_JOIN_ACCEPT_PREFIX } from "../src/services/pending-prospect-action.service.js";
+
+function explicitJoinCommandFromReply(reply: string): string | null {
+  const parsed = parseLlmReply(reply);
+  const buttons = [
+    ...(parsed.buttons ?? []),
+    ...parsed.responseBubbles.flatMap((bubble) => bubble.buttons ?? []),
+  ];
+  return (
+    buttons.find((button) =>
+      button.command.startsWith(EXPLICIT_JOIN_ACCEPT_PREFIX),
+    )?.command ?? null
+  );
+}
 
 beforeAll(() => {
   assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
@@ -257,12 +273,46 @@ describe("WhatsApp independent identity (eval-db)", () => {
         },
       });
 
-      await sendChatMessage({
+      const gated = await sendChatMessage({
         userId: speaker.userId,
         employeeId: speaker.employeeId,
         digitalEmployeeId: lucy!.id,
         message: "תוסיפי חלב לקניות ותזכירי לי",
       });
+      // Wave 1 Stage 2: ProspectWriteGate blocks durable saves until Explicit Join.
+      expect(
+        await prisma.employeeListItem.findFirst({
+          where: {
+            deletedAt: null,
+            list: { employeeId: speaker.employeeId, deletedAt: null },
+          },
+        }),
+      ).toBeNull();
+      expect(
+        await prisma.reminder.findFirst({
+          where: {
+            ownerId: speaker.employeeId,
+            status: "active",
+            itemLabel: clockName,
+          },
+        }),
+      ).toBeNull();
+      const joinCommand = explicitJoinCommandFromReply(gated.reply);
+      expect(joinCommand).toBeTruthy();
+      expect(parseLlmReply(gated.reply).response).toMatch(/בשמחה|אשרי/);
+      expect(parseLlmReply(gated.reply).response).not.toMatch(/נרשמת|registration/i);
+
+      const joined = await handleExplicitJoinAccept({
+        userId: speaker.userId,
+        employeeId: speaker.employeeId,
+        digitalEmployeeId: lucy!.id,
+        joinCommand: joinCommand!,
+        recipientPhone: phone,
+      });
+      expect(joined.ok).toBe(true);
+      expect(joined.joined).toBe(true);
+      expect(joined.spoken).toMatch(/בוצע|שמרתי/);
+
       const savedItem = await prisma.employeeListItem.findFirst({
         where: {
           deletedAt: null,
@@ -886,6 +936,28 @@ describe("WhatsApp independent identity (eval-db)", () => {
       expect(turn.liveFacts).not.toContain("metadata.register");
       expect(turn.liveFacts).not.toContain("PENDING_INVITE");
       expect(sent.reply).not.toContain("נרשמת");
+      // Prospect can chat + see invite value; personal save waits for Explicit Join.
+      expect(
+        await prisma.employeeListItem.findFirst({
+          where: {
+            deletedAt: null,
+            list: { employeeId: created.employeeId, deletedAt: null },
+          },
+        }),
+      ).toBeNull();
+      const joinCommand = explicitJoinCommandFromReply(sent.reply);
+      expect(joinCommand).toBeTruthy();
+      expect(parseLlmReply(sent.reply).response).toMatch(/בשמחה|אשרי/);
+
+      const joined = await handleExplicitJoinAccept({
+        userId: created.userId,
+        employeeId: created.employeeId,
+        digitalEmployeeId: lucy!.id,
+        joinCommand: joinCommand!,
+        recipientPhone: phone,
+      });
+      expect(joined.ok).toBe(true);
+      expect(joined.spoken).toMatch(/בוצע|שמרתי/);
 
       const saved = await prisma.employeeListItem.findMany({
         where: {
@@ -912,6 +984,10 @@ describe("WhatsApp independent identity (eval-db)", () => {
       expect(after.userId).toBe(created.userId);
       expect(after.isGuest).toBe(false);
       expect(after.isOwner).toBe(true);
+      const userAfter = await prisma.user.findUniqueOrThrow({
+        where: { id: created.userId },
+      });
+      expect(userAfter.consentPending).toBe(false);
     },
     120_000,
   );
@@ -919,6 +995,8 @@ describe("WhatsApp independent identity (eval-db)", () => {
 
 async function destroyCreatedUser(userId: string): Promise<void> {
   assertApprovedEvalDatabaseUrl(process.env.DATABASE_URL);
+  await prisma.pendingProspectAction.deleteMany({ where: { userId } }).catch(() => undefined);
+  await prisma.pendingHighRiskConfirm.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.whatsAppInvite.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.reminder.deleteMany({ where: { userId } }).catch(() => undefined);
   await prisma.chatConversation.deleteMany({ where: { userId } }).catch(() => undefined);

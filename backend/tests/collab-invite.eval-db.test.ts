@@ -251,6 +251,12 @@ describe("share/assign invitation continuity (eval-db)", () => {
   }> {
     const speaker = await resolveWhatsAppSpeaker(phone);
     extraUserIds.push(speaker.userId);
+    // Wave 1 C1-A: new WhatsApp accounts are Prospects. This pack exercises
+    // Member Share Accept / Assign ack — promote to Member (Explicit Join later).
+    await prisma.user.update({
+      where: { id: speaker.userId },
+      data: { consentPending: false },
+    });
     const employees = await listEmployeesForUser(speaker.userId);
     const employee = employees.find((row) => row.id === speaker.employeeId);
     const lucy = employees.find((row) => row.protected === true);

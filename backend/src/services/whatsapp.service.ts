@@ -71,7 +71,16 @@ import {
 import { setPendingLocation } from "./pending-location.js";
 import { enrichEmptyLocationLabels } from "./reverse-geocode.js";
 import { parseCoordinatePair } from "./resolved-location.js";
-
+import {
+  handleDevProspectTool,
+  isDevProspectToolCommand,
+} from "./prospect-dev-tools.service.js";
+import {
+  isExplicitJoinAcceptCommand,
+} from "./pending-prospect-action.service.js";
+import { handleExplicitJoinAccept } from "./explicit-join.service.js";
+import { stageCollabInviteConfirm } from "./pending-high-risk-confirm.service.js";
+import { parseCollabInvitePayload } from "./collab-invite.service.js";
 export { phonesMatch, clearWhatsAppWorkerSticky };
 
 function sleep(ms: number): Promise<void> {
@@ -847,6 +856,60 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
     const replyToText = batch.find((message) => message.replyToText)?.replyToText;
     const attachments =
       stored.length > 0 ? await buildTurnAttachments(stored) : undefined;
+
+    // Wave 1 Stage 2: gated /as-prospect + /reset-me (never reach LLM).
+    if (isDevProspectToolCommand(spoken)) {
+      const dev = await handleDevProspectTool({ phone: from, text: spoken });
+      if (dev.handled) {
+        await sendWhatsAppText(from, dev.reply, { ignoreSession: true });
+        turnAnswered = true;
+        recordWhatsAppEvent("dev_prospect_tool", spoken.trim());
+        return;
+      }
+    }
+
+    // Wave 1 Stage 2: Explicit Join — opaque button only (R1: never free-text NLU).
+    if (isExplicitJoinAcceptCommand(spoken)) {
+      const joinResult = await handleExplicitJoinAccept({
+        userId: speaker.userId,
+        employeeId: speaker.employeeId,
+        digitalEmployeeId: digital.id,
+        joinCommand: spoken.trim(),
+        recipientPhone: from,
+      });
+      let assignButtons: Array<{ label: string; command: string }> = [];
+      if (joinResult.rePresentAssignInviteId) {
+        // Never auto-accept Assign from join — re-present Accept/Decline now that Member.
+        const invite = await prisma.whatsAppInvite.findUnique({
+          where: { id: joinResult.rePresentAssignInviteId },
+        });
+        const payload = invite ? parseCollabInvitePayload(invite.payload) : null;
+        if (invite && payload?.kind === "assign" && invite.status === "pending") {
+          const offered = await stageCollabInviteConfirm({
+            userId: speaker.userId,
+            speakerEmployeeId: speaker.employeeId,
+            recipientPhone: from,
+            conversationId: `wa:${from}`,
+            inviteId: invite.id,
+            inviteKind: "assign",
+            askerName: "מישהו",
+              askSummary: invite.askSummary || "אחריות",
+          });
+          if (offered?.buttons?.length) {
+            assignButtons = offered.buttons;
+          }
+        }
+      }
+      await sendWhatsAppButtons(from, joinResult.spoken, assignButtons, {
+        ignoreSession: true,
+      });
+      turnAnswered = true;
+      recordWhatsAppEvent(
+        "explicit_join",
+        `ok=${joinResult.ok} assignRePresent=${Boolean(joinResult.rePresentAssignInviteId)} buttons=${assignButtons.length}`,
+      );
+      return;
+    }
 
     recordWhatsAppEvent(
       "chat_start",

@@ -197,8 +197,21 @@ import {
   loadPresentedCollabInvites,
   presentedInvite,
   readCollabInviteDecision,
+  shouldOfferCollabAcceptDecline,
   type PresentedCollabInvite,
 } from "./collab-invite.service.js";
+import { isUserProspect } from "./consent-stage.service.js";
+import {
+  applyProspectWriteGate,
+  formatProspectJoinOfferText,
+  freeTextLooksLikeJoinConsent,
+  prospectJoinButtonLabel,
+} from "./prospect-write-gate.js";
+import {
+  stagePendingProspectAction,
+} from "./pending-prospect-action.service.js";
+import { prospectCircuitBreakerExceeded } from "./prospect-circuit-breaker.service.js";
+import { tryCancelAskerPendingInvite } from "./asker-invite-cancel.service.js";
 import {
   applyHighRiskActionGate,
   digitalWorkerGateNames,
@@ -2659,6 +2672,8 @@ export async function sendChatMessage(input: {
         digitalEmployeeId: digital.id,
       }),
     )) ?? "";
+  const recipientIsProspect =
+    !guestSpeaker && (await isUserProspect(input.userId));
   const presentedCollab: PresentedCollabInvite[] = guestSpeaker
     ? []
     : await loadPresentedCollabInvites(employee.phone);
@@ -2804,7 +2819,11 @@ export async function sendChatMessage(input: {
         }),
         raw: {},
       };
-    } else if (authorizedCollabDecision === "accept" && authorizedCollabSummary) {
+    } else if (
+      authorizedCollabDecision === "accept" &&
+      authorizedCollabSummary &&
+      !recipientIsProspect
+    ) {
       turn = {
         reply: JSON.stringify({
           responses: [
@@ -2817,6 +2836,45 @@ export async function sendChatMessage(input: {
         }),
         raw: {},
       };
+    } else if (
+      authorizedCollabDecision === "accept" &&
+      recipientIsProspect &&
+      authorizedCollabInviteId
+    ) {
+      // Prospect Assign Accept → Explicit Join gate (never confirmCollab yet).
+      const staged = await stagePendingProspectAction({
+        userId: input.userId,
+        speakerEmployeeId: employee.id,
+        recipientPhone: employee.phone,
+        actionKind: "assign_accept",
+        snapshot: {
+          v: 1,
+          type: "assign_accept",
+          inviteId: authorizedCollabInviteId,
+        },
+        summaryText: authorizedCollabSummary ?? "אחריות",
+      });
+      turn = {
+        reply: JSON.stringify({
+          responses: [
+            {
+              text: formatProspectJoinOfferText({
+                actionKind: "assign_accept",
+              }),
+              buttons: [
+                {
+                  label: prospectJoinButtonLabel("assign_accept"),
+                  command: staged.joinCommand,
+                },
+              ],
+            },
+          ],
+          metadata: {},
+        }),
+        raw: { prospect_assign_join_gate: true },
+      };
+      // Prevent later confirmCollabInvite for this Prospect Accept.
+      authorizedCollabDecision = null;
     } else if (authorizedCollabDecision === "decline") {
       turn = {
         reply: JSON.stringify({
@@ -2845,7 +2903,64 @@ export async function sendChatMessage(input: {
         }),
         raw: {},
       };
-    } else {
+    } else if (
+      recipientIsProspect &&
+      !consultFrom &&
+      (await prospectCircuitBreakerExceeded(input.userId))
+    ) {
+      // Pre-LLM Prospect cost circuit breaker.
+      const staged = await stagePendingProspectAction({
+        userId: input.userId,
+        speakerEmployeeId: employee.id,
+        recipientPhone: employee.phone,
+        actionKind: "circuit_breaker",
+        snapshot: { v: 1, type: "circuit_breaker" },
+        summaryText: "המשך שיחה",
+      });
+      turn = {
+        reply: JSON.stringify({
+          responses: [
+            {
+              text: formatProspectJoinOfferText({
+                actionKind: "circuit_breaker",
+              }),
+              buttons: [
+                {
+                  label: prospectJoinButtonLabel("circuit_breaker"),
+                  command: staged.joinCommand,
+                },
+              ],
+            },
+          ],
+          metadata: {},
+        }),
+        raw: { prospect_circuit_breaker: true },
+      };
+    }
+
+    if (
+      !turn &&
+      !guestSpeaker &&
+      !consultFrom &&
+      !recipientIsProspect
+    ) {
+      const cancelOut = await tryCancelAskerPendingInvite({
+        userId: input.userId,
+        askerEmployeeId: employee.id,
+        message: input.message,
+      });
+      if (cancelOut.cancelled) {
+        turn = {
+          reply: JSON.stringify({
+            responses: [{ text: cancelOut.notice, buttons: [] }],
+            metadata: {},
+          }),
+          raw: { asker_invite_cancel: true },
+        };
+      }
+    }
+
+    if (!turn) {
       openaiRequest = buildOpenAiRequest({
         conversationId: conversation.openaiConversationId,
         message,
@@ -2949,6 +3064,7 @@ export async function sendChatMessage(input: {
           inviteId: accept.inviteId,
           recipient: employee,
           sharedLists: collabLists,
+          recipientIsProspect,
         });
       } else if (decline) {
         await cancelCollabInvite({
@@ -2974,6 +3090,7 @@ export async function sendChatMessage(input: {
           inviteId: authorizedCollabInviteId,
           recipient: employee,
           sharedLists: collabLists,
+          recipientIsProspect,
         });
         await finalizePendingConfirm({
           confirmId: authorizedCollabConfirmId,
@@ -3309,6 +3426,15 @@ export async function sendChatMessage(input: {
     ) {
       const staged: typeof collabInviteOffers = [];
       for (const invite of presentedCollab) {
+        if (
+          !shouldOfferCollabAcceptDecline({
+            kind: invite.kind,
+            recipientIsProspect,
+          })
+        ) {
+          // Prospect Share: InviteValuePresenter only — no Accept that co-mutates.
+          continue;
+        }
         const offer = await withoutFailingTurn("collab_invite_stage_failed", () =>
           stageCollabInviteConfirm({
             userId: input.userId,
@@ -3360,8 +3486,60 @@ export async function sendChatMessage(input: {
         deferredCollabNotice = deferred.notice;
       }
     }
+    // Wave 1 Stage 2: ProspectWriteGate — block durable personal writes; stage join.
+    let prospectJoinOffer: {
+      text: string;
+      buttons: Array<{ label: string; command: string }>;
+    } | null = null;
+    if (recipientIsProspect && !consultFrom && !authorizedHighRiskConfirmId) {
+      const gatedWrites = applyProspectWriteGate(metadataForApply);
+      if (gatedWrites.blocked && gatedWrites.snapshot && gatedWrites.actionKind) {
+        const staged = await stagePendingProspectAction({
+          userId: input.userId,
+          speakerEmployeeId: employee.id,
+          recipientPhone: employee.phone,
+          actionKind: gatedWrites.actionKind,
+          snapshot: gatedWrites.snapshot,
+          summaryText: gatedWrites.summaryText,
+        });
+        metadataForApply = {
+          ...gatedWrites.metadata,
+          lists: [],
+          listOps: [],
+          filing: [],
+          reminders: [],
+          directory: [],
+          jobs: [],
+          missions: [],
+        };
+        metadata = {
+          ...metadata,
+          lists: [],
+          listOps: [],
+          filing: [],
+          reminders: [],
+          directory: [],
+          jobs: [],
+          missions: [],
+        };
+        prospectJoinOffer = {
+          text: formatProspectJoinOfferText({
+            actionKind: gatedWrites.actionKind,
+            summaryText: gatedWrites.summaryText,
+          }),
+          buttons: [
+            {
+              label: prospectJoinButtonLabel(gatedWrites.actionKind),
+              command: staged.joinCommand,
+            },
+          ],
+        };
+        // R1: free-text "כן/תאשרי" must never join — only the opaque button.
+        void freeTextLooksLikeJoinConsent;
+      }
+    }
     // Before item-level lists so a same-turn rename/delete is visible to them.
-    const listOpResults = guestSpeaker
+    const listOpResults = guestSpeaker || prospectJoinOffer
       ? []
       : await applyListOps({
             userId: input.userId,
@@ -4371,8 +4549,20 @@ export async function sendChatMessage(input: {
         workingReply = setEngineButtons(workingReply, highRiskOffer.buttons);
       }
     }
+    // Wave 1 Stage 2: ProspectWriteGate join CTA (never claim saved).
+    if (prospectJoinOffer) {
+      workingReply = replaceSpokenForExecutionOverride(
+        workingReply,
+        prospectJoinOffer.text,
+      );
+      workingReply = setEngineButtons(workingReply, prospectJoinOffer.buttons);
+    }
     // Stage 5a: engine collab invite offer + opaque Accept/Decline buttons.
-    if (collabInviteOffers.length > 0 && !authorizedCollabDecision) {
+    if (
+      !prospectJoinOffer &&
+      collabInviteOffers.length > 0 &&
+      !authorizedCollabDecision
+    ) {
       const primary = collabInviteOffers[0]!;
       const offerText =
         collabInviteOffers.length === 1

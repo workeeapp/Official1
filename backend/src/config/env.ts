@@ -75,6 +75,13 @@ const envSchema = z.object({
    * Free tier is very limited — use for POC / light polling only.
    */
   AVIATIONSTACK_ACCESS_KEY: z.string().optional(),
+  /**
+   * Wave 1 Stage 2: comma-separated E.164/digits phones allowed to use
+   * /as-prospect and /reset-me when NODE_ENV !== production.
+   */
+  DEV_TEST_PHONES: z.string().optional(),
+  /** Prospect pre-LLM inbound message hard cap (circuit breaker). */
+  PROSPECT_MAX_INBOUND_MESSAGES: z.coerce.number().int().min(1).max(500).default(15),
 });
 
 export type Env = z.infer<typeof envSchema>;

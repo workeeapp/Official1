@@ -20,6 +20,7 @@ vi.mock("../src/database/prisma.js", () => ({
       create: inviteCreate,
       findFirst: inviteFindFirst,
       update: inviteUpdate,
+      updateMany: vi.fn(async () => ({ count: 0 })),
     },
     employee: {
       findUnique: employeeFindUnique,
@@ -96,6 +97,7 @@ describe("whatsapp invite helpers", () => {
       draftText: "טיוטה",
     });
     expect(notice).toContain("אבא");
+    expect(notice).toContain("ממתין");
     expect(notice).toContain("שלח בוואטסאפ");
     expect(notice).toContain("«טיוטה»");
   });
@@ -113,6 +115,7 @@ describe("whatsapp invite helpers", () => {
       draftText: "draft",
       status: "pending",
       guestEmployeeId: null,
+      createdAt: new Date("2026-11-18T09:00:00.000Z"),
     });
 
     const created = await createWhatsAppInvite({
@@ -144,6 +147,7 @@ describe("whatsapp invite helpers", () => {
       draftText: "draft",
       status: "pending",
       guestEmployeeId: null,
+      createdAt: new Date("2026-11-18T09:00:00.000Z"),
     });
     inviteUpdate.mockResolvedValue({});
     employeeUpdate.mockResolvedValue({});
