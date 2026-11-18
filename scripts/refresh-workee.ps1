@@ -248,9 +248,14 @@ function Ensure-ClientOrigin {
 # non-production. In production the gate is code-disabled; strip the key.
 function Get-DotEnvValue([string]$envFile, [string]$key) {
   if (-not (Test-Path $envFile)) { return $null }
-  $raw = Get-Content $envFile -Raw
-  if ($raw -match "(?m)^\s*$([regex]::Escape($key))\s*=\s*(.*)$") {
-    return $Matches[1].Trim().Trim('"').Trim("'")
+  # Line-based — never let (.*)$ across \r or merge with the next key.
+  foreach ($line in @(Get-Content $envFile)) {
+    if ($line -match ("^\s*" + [regex]::Escape($key) + "\s*=\s*(.*)$")) {
+      $val = $Matches[1].Trim().Trim('"').Trim("'")
+      # Guard: a value containing '=' is almost certainly a merged next-key line.
+      if ($val -match '=') { return "" }
+      return $val
+    }
   }
   return $null
 }
@@ -294,14 +299,10 @@ function Ensure-DevTestPhones {
     Write-Step "NODE_ENV=production - removed DEV_TEST_PHONES (dev tools disabled)"
     return
   }
-  if ([string]::IsNullOrWhiteSpace($PreservedValue)) {
-    $current = Get-DotEnvValue $envFile "DEV_TEST_PHONES"
-    if ($current) {
-      $tail = $current.Substring([Math]::Max(0, $current.Length - 4))
-      Write-Step "DEV_TEST_PHONES already set (...$tail)"
-    } else {
-      Write-Step "DEV_TEST_PHONES unset (dev /as-prospect allowlist empty)"
-    }
+  if ([string]::IsNullOrWhiteSpace($PreservedValue) -or $PreservedValue -match '=') {
+    # Empty (or corrupt merged value): force a clean empty allowlist line.
+    Set-DotEnvValue $envFile "DEV_TEST_PHONES" ""
+    Write-Step "DEV_TEST_PHONES forced empty (dev tools disabled on LIVE by default)"
     return
   }
   Set-DotEnvValue $envFile "DEV_TEST_PHONES" $PreservedValue
