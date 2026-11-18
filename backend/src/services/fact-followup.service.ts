@@ -1,9 +1,16 @@
 /**
- * Follow-up reminders & watch hooks derived from returned external facts.
+ * Helpers that map retrieved facts onto **core** Reminder Actions
+ * (Action → apply → Gates). No cache-write Action; no per-domain reminder engine.
  *
- * Persistence stays on Reminder Action → apply → Gates (no cache-write Action).
- * - One-shot relative: schedule_anchor=external_event + scheduleOffsetMinutes
- * - Recurring/state: compose_condition sports_match | flight_changed (+ watch_once)
+ * Retrieval → core rules:
+ * 1. Known event time → `schedule_anchor: external_event` (+ offset).
+ * 2. Recurring / change monitoring → an existing refreshable compose_condition
+ *    only when a real live provider can re-fetch (e.g. flight_changed, bus_eta).
+ * 3. Non-refreshable info → answer in-turn or one-shot Action; never invent a
+ *    recurring watch over empty/static data.
+ *
+ * `sports_match` / schedule helpers below are internal fixtures for that pattern,
+ * not a product sports capability.
  */
 import type { LlmComposeCondition, LlmReminderAction } from "@workee/shared";
 import type { SportsMatchFact } from "./sports-schedule.service.js";

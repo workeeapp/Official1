@@ -618,11 +618,12 @@ describe("wave1-external-lookup-config-followup-e2e (eval-db :5436)", () => {
       `before=${beforeJewish} after=${afterJewish}`,
     );
 
-    const sportsCap = CAPABILITY_REGISTRY.find((c) => c.id === "sports");
     const flightsCap = CAPABILITY_REGISTRY.find((c) => c.id === "flights");
+    const sportsCfg = getExternalLookupProviderConfig("sports");
     check(
-      "Step4 capabilities mark flights+sports externalLookup",
-      !!sportsCap?.externalLookup && !!flightsCap?.externalLookup,
+      "Step4 flights externalLookup; sports example has no liveRefresh",
+      !!flightsCap?.externalLookup && sportsCfg.liveRefresh === false,
+      `flights=${flightsCap?.externalLookup} sportsLive=${sportsCfg.liveRefresh}`,
     );
   });
 });

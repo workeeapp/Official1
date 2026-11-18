@@ -400,6 +400,178 @@ describe("evaluateComposeCondition", () => {
     ).toBe(true);
   });
 
+  it("threshold ETA baseline: outside window → null so first entry can notify", () => {
+    const bus = {
+      type: "bus_eta" as const,
+      origin: "ארנס",
+      destination: "תל אביב",
+      line: "51",
+      headsign: "",
+      minutesBefore: 10,
+    };
+    expect(
+      baselineShaForWatch({
+        condition: bus,
+        facts: { busEtaMinutes: 25, busEtaFingerprint: "51|08:40" },
+      }),
+    ).toBeNull();
+    // After create with null baseline, entering the window must still send.
+    expect(
+      evaluateComposeCondition({
+        condition: bus,
+        facts: { busEtaMinutes: 8, busEtaFingerprint: "51|08:40" },
+        lastReportSha: "",
+      }).skipSend,
+    ).toBe(false);
+
+    const sports = {
+      type: "sports_match" as const,
+      team: "Real Madrid",
+      minutesBefore: 60,
+      competition: "",
+    };
+    const fp = "sports:rm1:2026-11-20T20:00:00.000Z";
+    expect(
+      baselineShaForWatch({
+        condition: sports,
+        facts: { sportsMatchEtaMinutes: 180, sportsMatchFingerprint: fp },
+      }),
+    ).toBeNull();
+    expect(
+      evaluateComposeCondition({
+        condition: sports,
+        facts: { sportsMatchEtaMinutes: 45, sportsMatchFingerprint: fp },
+        lastReportSha: "",
+      }).skipSend,
+    ).toBe(false);
+  });
+
+  it("threshold ETA baseline: already in window → stamp to suppress create-time fire", () => {
+    const condition = {
+      type: "flight_eta" as const,
+      airport: "TLV",
+      direction: "arrivals" as const,
+      flight: "LY831",
+      airline: "",
+      city: "",
+      minutesBefore: 30,
+      hoursBefore: 0,
+    };
+    const baseline = baselineShaForWatch({
+      condition,
+      facts: {
+        flightEtaMinutes: 20,
+        flightEtaFingerprint: "ly831|a",
+      },
+    });
+    expect(baseline).toBe("ly831|a");
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: {
+          flightEtaMinutes: 18,
+          flightEtaFingerprint: "ly831|a",
+        },
+        lastReportSha: baseline,
+      }).skipSend,
+    ).toBe(true);
+  });
+
+  it("threshold ETA: first upcoming event notifies; distinct next event notifies again", () => {
+    const condition = {
+      type: "sports_match" as const,
+      team: "Example FC",
+      minutesBefore: 60,
+      competition: "",
+    };
+    const eventA = "sports:a1:2026-12-01T20:00:00.000Z";
+    const eventB = "sports:b2:2026-12-08T20:00:00.000Z";
+
+    // Create while event A is still outside the window → no baseline stamp.
+    expect(
+      baselineShaForWatch({
+        condition,
+        facts: { sportsMatchEtaMinutes: 240, sportsMatchFingerprint: eventA },
+      }),
+    ).toBeNull();
+
+    // First entry into window for A → notify.
+    const first = evaluateComposeCondition({
+      condition,
+      facts: { sportsMatchEtaMinutes: 50, sportsMatchFingerprint: eventA },
+      lastReportSha: "",
+    });
+    expect(first.skipSend).toBe(false);
+    expect(first.shaAfterSend).toBe(eventA);
+
+    // Same event A after send → dedupe.
+    expect(
+      evaluateComposeCondition({
+        condition,
+        facts: { sportsMatchEtaMinutes: 40, sportsMatchFingerprint: eventA },
+        lastReportSha: eventA,
+      }).skipSend,
+    ).toBe(true);
+
+    // Distinct subsequent event B → notify again.
+    const second = evaluateComposeCondition({
+      condition,
+      facts: { sportsMatchEtaMinutes: 55, sportsMatchFingerprint: eventB },
+      lastReportSha: eventA,
+    });
+    expect(second.skipSend).toBe(false);
+    expect(second.shaAfterSend).toBe(eventB);
+  });
+
+  it("state-delta baseline unchanged: flight_changed / weather_changed still stamp current fp", () => {
+    const flightFp = "ly831|status:delayed|gate:B2";
+    expect(
+      baselineShaForWatch({
+        condition: {
+          type: "flight_changed",
+          airport: "TLV",
+          direction: "departures",
+          flight: "LY831",
+        },
+        facts: { flightChangedFingerprint: flightFp },
+      }),
+    ).toBe(flightFp);
+
+    const weatherFp = weatherContentFingerprint("גשום");
+    expect(
+      baselineShaForWatch({
+        condition: { type: "weather_changed" },
+        facts: { weatherFingerprint: weatherFp },
+      }),
+    ).toBe(weatherFp);
+
+    // Same fp after baseline → quiet; changed fp → send.
+    expect(
+      evaluateComposeCondition({
+        condition: {
+          type: "flight_changed",
+          airport: "TLV",
+          direction: "departures",
+          flight: "LY831",
+        },
+        facts: { flightChangedFingerprint: flightFp },
+        lastReportSha: flightFp,
+      }).skipSend,
+    ).toBe(true);
+    expect(
+      evaluateComposeCondition({
+        condition: {
+          type: "flight_changed",
+          airport: "TLV",
+          direction: "departures",
+          flight: "LY831",
+        },
+        facts: { flightChangedFingerprint: "ly831|status:landed" },
+        lastReportSha: flightFp,
+      }).skipSend,
+    ).toBe(false);
+  });
+
   it("flight_eta: quiet-skip then send within hours threshold", () => {
     const condition = {
       type: "flight_eta" as const,

@@ -69,12 +69,6 @@ export const CAPABILITY_REGISTRY: readonly CapabilityDef[] = [
     externalLookup: true,
   },
   {
-    id: "sports",
-    labelHe: "לוח משחקים ותזכורות למשחק (מטמון + watch sports_match)",
-    audience: "member",
-    externalLookup: true,
-  },
-  {
     id: "guest_shared_view",
     labelHe: "צפייה ברשימות ששותפו איתך",
     audience: "guest",

@@ -1,10 +1,14 @@
 /**
- * Sports schedules via ExternalDataCache (short/DAILY TTL).
- * Provider HTTP is injected (`fetchScheduleImpl`) so E2E can stay offline;
- * production can wire a real feed or hosted web search later.
+ * Example schedule lookup via ExternalDataCache (not a product sports vertical).
  *
- * Watches (`sports_match` compose_condition) and follow-up reminders read
- * through this path — never a cache-write Action.
+ * Generic pattern for “internet fact → reminder / recurring watch”:
+ * - One-shot relative to a known event time → `schedule_anchor: external_event`
+ *   (no live refresh required).
+ * - Recurring / state watches need a **refreshable** source (`liveRefresh` or an
+ *   injected fetcher). Without that, schedule rows stay empty and watches quiet-skip.
+ *
+ * `sports_match` is one threshold-condition example. Inject `fetchScheduleImpl`
+ * for tests or a future feed; default production path returns empty.
  */
 import type { LlmWebLookupCacheScope } from "@workee/shared";
 import { withExternalCache } from "./external-cache.service.js";

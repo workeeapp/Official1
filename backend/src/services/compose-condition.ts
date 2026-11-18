@@ -449,6 +449,17 @@ export function conditionFromReminderJson(
 /**
  * Baseline sha to stamp on watch create (current state, no WhatsApp).
  * Fingerprint watches: current fp. Edge watches: current holding token.
+ *
+ * Threshold / ETA watches (`bus_eta`, `flight_eta`, `sports_match`, and any
+ * future “notify when within N minutes of event X” condition) use a **stable
+ * event identity** as fingerprint. Stamping that identity while still outside
+ * the window would permanently suppress the first notify (`fp === last`).
+ * For those types, baseline only when evaluate(empty last) already yields
+ * `shaAfterSend` (already inside the window → suppress create-time fire).
+ * Outside the window → null so the first entry into the window can notify.
+ *
+ * State-delta watches (`flight_changed`, `weather_changed`, …) still stamp the
+ * current fingerprint so “current state” is not treated as new on first poll.
  */
 export function baselineShaForWatch(input: {
   condition: LlmComposeCondition;
@@ -474,20 +485,17 @@ export function baselineShaForWatch(input: {
     const fp = String(input.facts.smartschoolFingerprint ?? "").trim();
     return fp || null;
   }
-  if (input.condition.type === "bus_eta") {
-    const fp = String(input.facts.busEtaFingerprint ?? "").trim();
-    return fp || null;
-  }
-  if (input.condition.type === "flight_eta") {
-    const fp = String(input.facts.flightEtaFingerprint ?? "").trim();
-    return fp || null;
+  // Threshold/ETA family — see docstring above.
+  if (
+    input.condition.type === "bus_eta" ||
+    input.condition.type === "flight_eta" ||
+    input.condition.type === "sports_match"
+  ) {
+    const sha = String(gate.shaAfterSend ?? "").trim();
+    return sha ? sha.slice(0, 64) : null;
   }
   if (input.condition.type === "flight_changed") {
     const fp = String(input.facts.flightChangedFingerprint ?? "").trim();
-    return fp || null;
-  }
-  if (input.condition.type === "sports_match") {
-    const fp = String(input.facts.sportsMatchFingerprint ?? "").trim();
     return fp || null;
   }
   if (input.condition.type === "expr") {

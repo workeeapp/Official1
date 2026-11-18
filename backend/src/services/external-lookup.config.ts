@@ -6,6 +6,12 @@
  *
  * Jewish / @hebcal/core is intentionally absent: local-only, 0 HTTP, 0 quota,
  * 0 ExternalDataCache writes.
+ *
+ * Retrieval → core (reminders/watches stay on Action → apply → Gates):
+ * - Known event time → schedule_anchor external_event
+ * - Recurring monitoring → existing refreshable compose_condition only when
+ *   liveRefresh (or an injected fetcher) can re-fetch
+ * - Non-refreshable → answer / one-shot Action; never a fake recurring watch
  */
 import type { LlmWebLookupCacheScope } from "@workee/shared";
 import {
@@ -26,6 +32,13 @@ export type ExternalLookupProviderConfig = {
   id: ExternalLookupProviderId;
   /** When false, callers should fail closed / skip provider HTTP. */
   enabled: boolean;
+  /**
+   * True when a real outbound refresh path is wired (HTTP / hosted search).
+   * False = cache/watch plumbing only; fetches stay empty until a provider is
+   * injected (e.g. sports schedule example). Recurring watches need
+   * `liveRefresh: true` (or an injected fetcher) to observe state changes.
+   */
+  liveRefresh: boolean;
   /** Default ExternalDataCache ttlTier. */
   ttlTier: ExternalCacheTtlTier;
   /** Optional absolute TTL override (seconds). */
@@ -65,6 +78,7 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
     web_search: {
       id: "web_search",
       enabled: true,
+      liveRefresh: true,
       ttlTier: "DAILY",
       defaultCacheScope: "global",
       burnsQuota: true,
@@ -74,6 +88,7 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
     places: {
       id: "places",
       enabled: true,
+      liveRefresh: true,
       ttlTier: "STATIC",
       defaultCacheScope: "global",
       burnsQuota: true,
@@ -83,6 +98,7 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
     weather: {
       id: "weather",
       enabled: true,
+      liveRefresh: true,
       ttlTier: "REALTIME",
       ttlSeconds: 15 * 60,
       defaultCacheScope: "global",
@@ -93,6 +109,7 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
     market: {
       id: "market",
       enabled: true,
+      liveRefresh: true,
       ttlTier: "REALTIME",
       ttlSeconds: 5 * 60,
       defaultCacheScope: "global",
@@ -103,6 +120,7 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
     fx: {
       id: "fx",
       enabled: true,
+      liveRefresh: true,
       ttlTier: "REALTIME",
       ttlSeconds: 5 * 60,
       defaultCacheScope: "global",
@@ -113,6 +131,7 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
     flights: {
       id: "flights",
       enabled: true,
+      liveRefresh: true,
       /** Short board TTL for נתב״ג — HIT → 0 AviationStack calls. */
       ttlTier: "REALTIME",
       ttlSeconds: 90,
@@ -121,9 +140,11 @@ export const EXTERNAL_LOOKUP_CONFIG_DEFAULTS: ExternalLookupConfig = {
       provider: "flights",
       scope: "board",
     },
+    /** Example schedule domain — cache/watch wiring only until a feed is injected. */
     sports: {
       id: "sports",
       enabled: true,
+      liveRefresh: false,
       ttlTier: "DAILY",
       ttlSeconds: 30 * 60,
       defaultCacheScope: "global",
