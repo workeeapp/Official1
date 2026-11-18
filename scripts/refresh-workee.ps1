@@ -257,18 +257,20 @@ function Get-DotEnvValue([string]$envFile, [string]$key) {
 
 function Set-DotEnvValue([string]$envFile, [string]$key, [string]$value) {
   if (-not (Test-Path $envFile)) { return }
-  $raw = Get-Content $envFile -Raw
-  if ($raw -match "(?m)^\s*$([regex]::Escape($key))\s*=") {
-    $updated = [regex]::Replace(
-      $raw,
-      "(?m)^\s*$([regex]::Escape($key))\s*=\s*.*$",
-      "$key=$value"
-    )
-    Set-Content -Path $envFile -Value $updated -NoNewline
-  } else {
-    if (-not $raw.EndsWith("`n")) { $raw += "`r`n" }
-    Set-Content -Path $envFile -Value ($raw + "$key=$value`r`n") -NoNewline
+  # Line-based rewrite — never let an empty value swallow the next key.
+  $lines = @(Get-Content $envFile)
+  $found = $false
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match ("^\s*" + [regex]::Escape($key) + "\s*=")) {
+      $lines[$i] = "$key=$value"
+      $found = $true
+      break
+    }
   }
+  if (-not $found) {
+    $lines += "$key=$value"
+  }
+  Set-Content -Path $envFile -Value $lines
 }
 
 function Remove-DotEnvKey([string]$envFile, [string]$key) {
