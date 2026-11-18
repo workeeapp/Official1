@@ -64,12 +64,9 @@ function Write-Step([string]$message) {
   Write-Host ("[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $message)
 }
 
+# Automatic pre-refresh pg_dump of LIVE workee DB into Official1-backups
+# (keep last 14 workee-LIVE-pre-refresh-*.dump). Never touches eval :5436.
 function Backup-WorkeeLiveDatabaseBeforeRefresh {
-  <#
-    Automatic pre-refresh pg_dump of LIVE workee DB.
-    Writes timestamped dumps under Official1-backups and retains the last 14
-    workee-LIVE-pre-refresh-*.dump files. Never touches eval :5436.
-  #>
   $backupRoot = "C:\Users\dorta\Desktop\Official1-backups"
   New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
   $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -77,11 +74,11 @@ function Backup-WorkeeLiveDatabaseBeforeRefresh {
 
   $container = docker ps --format "{{.Names}}" 2>$null | Where-Object { $_ -eq "workee-postgres" } | Select-Object -First 1
   if (-not $container) {
-    Write-Warning "workee-postgres container not running — skip pre-refresh pg_dump"
+    Write-Warning "workee-postgres container not running - skip pre-refresh pg_dump"
     return
   }
 
-  Write-Step "Pre-refresh pg_dump of LIVE workee → $outFile"
+  Write-Step "Pre-refresh pg_dump of LIVE workee -> $outFile"
   docker exec -e PGPASSWORD=workee workee-postgres pg_dump -U workee -d workee -Fc -f /tmp/workee-LIVE-pre-refresh.dump
   if ($LASTEXITCODE -ne 0) {
     throw "pre-refresh pg_dump failed (exit $LASTEXITCODE)"
@@ -92,8 +89,8 @@ function Backup-WorkeeLiveDatabaseBeforeRefresh {
   }
   Write-Step ("Pre-refresh dump OK ({0:N1} MB)" -f ((Get-Item $outFile).Length / 1MB))
 
-  $kept = Get-ChildItem -Path $backupRoot -Filter "workee-LIVE-pre-refresh-*.dump" -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending
+  $kept = @(Get-ChildItem -Path $backupRoot -Filter "workee-LIVE-pre-refresh-*.dump" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)
   if ($kept.Count -gt 14) {
     $kept | Select-Object -Skip 14 | ForEach-Object {
       Write-Step "Pruning old dump $($_.Name)"
