@@ -9,6 +9,7 @@ import {
   captureRequestedFromMetadata,
   collectShowTurnStripDrops,
   computeDomainCompleteness,
+  requestedOpsFromDirectory,
   requestedOpsFromLists,
   requestedOpsFromReminders,
 } from "../src/services/apply-result.js";
@@ -803,6 +804,41 @@ describe("requestedOpsFromReminders", () => {
     ]);
     expect(requestedOpsFromReminders([reminderAdd("shopping")])).toEqual([
       { domain: "reminders", op: "add", id: undefined },
+    ]);
+  });
+});
+
+describe("requestedOpsFromDirectory", () => {
+  it("tolerates missing/null name (N1 fixture shape)", () => {
+    expect(
+      requestedOpsFromDirectory([
+        { action: "add", contactId: "" } as never,
+        { action: "remove", contactId: "c1", name: null as never, phone: "", targets: [] },
+        { action: "add", contactId: "", name: "  מיכל  ", phone: "050", targets: [] },
+      ]),
+    ).toEqual([
+      { domain: "directory", op: "add", id: undefined, label: undefined },
+      { domain: "directory", op: "remove", id: "c1", label: undefined },
+      { domain: "directory", op: "add", id: undefined, label: "מיכל" },
+    ]);
+  });
+
+  it("buildApplyResult survives directory rows without name", () => {
+    const result = buildApplyResult({
+      requested: {
+        lists: [],
+        filing: [],
+        reminders: [],
+        directory: [{ action: "add", contactId: "" } as never],
+        listOps: [],
+      },
+      directoryResult: {
+        saved: [{ id: "p-1", name: "דני" }],
+        removed: [],
+      },
+    });
+    expect(result.domains.directory?.applied).toEqual([
+      { domain: "directory", op: "add", id: "p-1", label: "דני" },
     ]);
   });
 });

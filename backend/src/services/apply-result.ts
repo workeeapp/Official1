@@ -366,7 +366,8 @@ export function requestedOpsFromDirectory(
     domain: "directory" as const,
     op: row.action,
     id: row.contactId || undefined,
-    label: row.name.trim() || undefined,
+    // LLM / fixture rows may omit name; never throw on missing/null.
+    label: String(row.name ?? "").trim() || undefined,
   }));
 }
 
