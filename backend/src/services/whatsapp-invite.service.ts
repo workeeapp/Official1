@@ -526,8 +526,33 @@ export async function findPendingInviteForGuest(
 }
 
 /**
+ * Registered Member = own Lucy account past Explicit Join, not an אורח shell.
+ * Prospect / guest shells still receive invite opening context.
+ */
+export async function isRegisteredMemberSpeaker(input: {
+  userId: string;
+  employeeId: string;
+}): Promise<boolean> {
+  const [user, employee] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: input.userId },
+      select: { consentPending: true },
+    }),
+    prisma.employee.findUnique({
+      where: { id: input.employeeId },
+      select: { isGuest: true },
+    }),
+  ]);
+  return user?.consentPending === false && employee?.isGuest === false;
+}
+
+/**
  * Remember which employee opened this invite, and return its context.
  * Never changes that employee's account, guest flag, or team.
+ *
+ * Registered Members do not get Prospect invite-opening context. Message
+ * invites (no share/assign payload) are consumed idempotently so they cannot
+ * stick to every later inbound. Collab invites stay pending for Accept/Decline.
  */
 export async function bindInboundToInvite(input: {
   fromPhone: string;
@@ -538,7 +563,8 @@ export async function bindInboundToInvite(input: {
   userId: string;
   employeeId: string;
   invite: WhatsAppInviteRow;
-  context: PendingInviteContext;
+  /** Null for registered Members — no Prospect opening / "בלי הרשמה" block. */
+  context: PendingInviteContext | null;
 } | null> {
   const token = parseInviteToken(input.inboundText);
   let invite = token ? await findPendingInviteByToken(token) : null;
@@ -561,6 +587,26 @@ export async function bindInboundToInvite(input: {
     data: { guestEmployeeId: employeeId },
   });
   invite = { ...invite, guestEmployeeId: employeeId };
+
+  const registeredMember = await isRegisteredMemberSpeaker({
+    userId,
+    employeeId,
+  });
+  if (registeredMember) {
+    // Message invites must not remain sticky on a Member phone.
+    if (invite.payload == null) {
+      const consumed = await consumeWhatsAppInvite(invite.id);
+      if (consumed) {
+        invite = consumed;
+      }
+    }
+    return {
+      userId,
+      employeeId,
+      invite,
+      context: null,
+    };
+  }
 
   const asker = await prisma.employee.findUnique({
     where: { id: invite.askerEmployeeId },
@@ -597,7 +643,10 @@ export function formatPendingInviteContext(ctx: PendingInviteContext): string {
   ].join("\n");
 }
 
-/** Opening subject for someone who already has their own Lucy. Not a gate. */
+/**
+ * Prospect first-exposure opening (own Lucy, consent still pending).
+ * Must not be injected for registered Members — see bindInboundToInvite.
+ */
 export function formatInviteOpeningContext(ctx: PendingInviteContext): string {
   return [
     "INVITE CONTEXT (first exposure — warm welcome):",
@@ -611,16 +660,50 @@ export function formatInviteOpeningContext(ctx: PendingInviteContext): string {
   ].join("\n");
 }
 
+/** Idempotent consume — keeps the row for history; no-op when already consumed. */
 export async function consumeWhatsAppInvite(
   inviteId: string,
 ): Promise<WhatsAppInviteRow | null> {
   try {
-    const row = await prisma.whatsAppInvite.update({
-      where: { id: inviteId },
+    await prisma.whatsAppInvite.updateMany({
+      where: { id: inviteId, status: "pending" },
       data: { status: "consumed", consumedAt: new Date() },
     });
-    return toInviteRow(row);
+    const row = await prisma.whatsAppInvite.findUnique({
+      where: { id: inviteId },
+    });
+    return row ? toInviteRow(row) : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * After /restore-me returns a phone to a registered Member: consume sticky
+ * message invites for that phone so they cannot re-attach. Share/Assign
+ * (payload set) stay pending for Accept/Decline.
+ */
+export async function consumeStickyMessageInvitesForPhone(
+  phone: string,
+): Promise<number> {
+  const digits = toWhatsAppAddress(phone) || normalizePhoneDigits(phone);
+  if (!digits) {
+    return 0;
+  }
+  const rows = await prisma.whatsAppInvite.findMany({
+    where: {
+      status: "pending",
+      recipientPhone: digits,
+      payload: { equals: Prisma.DbNull },
+    },
+    select: { id: true },
+  });
+  let consumed = 0;
+  for (const row of rows) {
+    const out = await consumeWhatsAppInvite(row.id);
+    if (out?.status === "consumed") {
+      consumed += 1;
+    }
+  }
+  return consumed;
 }

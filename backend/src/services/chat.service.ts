@@ -2722,6 +2722,9 @@ export async function sendChatMessage(input: {
     )) ?? "";
   const recipientIsProspect =
     !guestSpeaker && (await isUserProspect(input.userId));
+  // Invite Opening Context is Prospect first-exposure only — never for Members.
+  const pendingInviteForTurn =
+    recipientIsProspect && input.pendingInvite ? input.pendingInvite : null;
   const presentedCollab: PresentedCollabInvite[] = guestSpeaker
     ? []
     : await loadPresentedCollabInvites(employee.phone);
@@ -2745,7 +2748,7 @@ export async function sendChatMessage(input: {
     pendingAttachments,
     pendingLocation: guestSpeaker ? null : getPendingLocation(input.employeeId),
     lastLiveLocation: lastLiveLocationCtx,
-    pendingInvite: input.pendingInvite ?? null,
+    pendingInvite: pendingInviteForTurn,
     collabInvites,
     tipsContext,
     rulesInInstructions: shouldAttachLucyRuntimeEngine(
@@ -2761,7 +2764,7 @@ export async function sendChatMessage(input: {
     speaker,
     speakerIsOwner: employee.isOwner === true,
     guestSpeaker,
-    pendingInvite: input.pendingInvite ?? null,
+    pendingInvite: pendingInviteForTurn,
     consultFrom,
   });
   // Live facts go to the model for THIS turn only (llm-client sends them ahead

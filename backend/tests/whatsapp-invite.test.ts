@@ -3,15 +3,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   inviteCreate,
   inviteFindFirst,
+  inviteFindUnique,
   inviteUpdate,
+  inviteUpdateMany,
   employeeFindUnique,
   employeeUpdate,
+  userFindUnique,
 } = vi.hoisted(() => ({
   inviteCreate: vi.fn(),
   inviteFindFirst: vi.fn(),
+  inviteFindUnique: vi.fn(),
   inviteUpdate: vi.fn(),
+  inviteUpdateMany: vi.fn(async () => ({ count: 0 })),
   employeeFindUnique: vi.fn(),
   employeeUpdate: vi.fn(),
+  userFindUnique: vi.fn(),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -19,12 +25,16 @@ vi.mock("../src/database/prisma.js", () => ({
     whatsAppInvite: {
       create: inviteCreate,
       findFirst: inviteFindFirst,
+      findUnique: inviteFindUnique,
       update: inviteUpdate,
-      updateMany: vi.fn(async () => ({ count: 0 })),
+      updateMany: inviteUpdateMany,
     },
     employee: {
       findUnique: employeeFindUnique,
       update: employeeUpdate,
+    },
+    user: {
+      findUnique: userFindUnique,
     },
   },
 }));
@@ -61,9 +71,13 @@ describe("whatsapp invite helpers", () => {
     envState.displayPhone = "972501111111";
     inviteCreate.mockReset();
     inviteFindFirst.mockReset();
+    inviteFindUnique.mockReset();
     inviteUpdate.mockReset();
+    inviteUpdateMany.mockReset();
+    inviteUpdateMany.mockResolvedValue({ count: 0 });
     employeeFindUnique.mockReset();
     employeeUpdate.mockReset();
+    userFindUnique.mockReset();
   });
 
   it("parses WRK-INV tokens from inbound text", () => {
@@ -170,11 +184,15 @@ describe("whatsapp invite helpers", () => {
       draftText: "draft",
       status: "pending",
       guestEmployeeId: null,
+      payload: null,
       createdAt: new Date("2026-11-18T09:00:00.000Z"),
     });
-    employeeFindUnique.mockResolvedValue({
-      name: "עמית",
-      nickname: null,
+    userFindUnique.mockResolvedValue({ consentPending: true });
+    employeeFindUnique.mockImplementation(async (args: { where: { id: string } }) => {
+      if (args.where.id === "prospect-emp") {
+        return { isGuest: false };
+      }
+      return { name: "עמית", nickname: null };
     });
     inviteUpdate.mockResolvedValue({});
 
@@ -186,7 +204,87 @@ describe("whatsapp invite helpers", () => {
     });
     expect(bound?.userId).toBe("prospect-user");
     expect(bound?.employeeId).toBe("prospect-emp");
-    expect(bound?.context.askSummary).toContain("מתי");
+    expect(bound?.context?.askSummary).toContain("מתי");
+    expect(inviteUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("createWhatsAppInvite still creates a pending row for any recipient phone", async () => {
+    // Creation is intentional for AskerNotice/wa.me even when the recipient is
+    // already a Member — inbound bind/consume + restore-me prevent sticky open.
+    inviteCreate.mockResolvedValue({
+      id: "inv-create-1",
+      token: `${INVITE_TOKEN_PREFIX}CREATE001`,
+      userId: "asker-user",
+      askerEmployeeId: "asker-emp",
+      digitalEmployeeId: "dig-1",
+      recipientPhone: "972544365812",
+      recipientLabel: "טל",
+      askSummary: "לעדכן אותי",
+      draftText: "draft",
+      status: "pending",
+      guestEmployeeId: null,
+      payload: null,
+      createdAt: new Date("2026-11-18T09:00:00.000Z"),
+    });
+    const created = await createWhatsAppInvite({
+      userId: "asker-user",
+      askerEmployeeId: "asker-emp",
+      digitalEmployeeId: "dig-1",
+      askerName: "מיכל",
+      recipientPhone: "972544365812",
+      recipientLabel: "טל",
+      askSummary: "לעדכן אותי",
+    });
+    expect(created?.invite.status).toBe("pending");
+    expect(created?.invite.recipientPhone).toBe("972544365812");
+    expect(inviteCreate).toHaveBeenCalled();
+  });
+
+  it("consumes message invites for registered Members without opening context", async () => {
+    const pendingRow = {
+      id: "inv-member-1",
+      token: `${INVITE_TOKEN_PREFIX}MEMTOKEN01`,
+      userId: "asker-user",
+      askerEmployeeId: "asker-emp",
+      digitalEmployeeId: "dig-1",
+      recipientPhone: "972544365812",
+      recipientLabel: "טל",
+      askSummary: "לעדכן אותי",
+      draftText: "draft",
+      status: "pending",
+      guestEmployeeId: null,
+      payload: null,
+      createdAt: new Date("2026-11-18T09:00:00.000Z"),
+    };
+    inviteFindFirst.mockResolvedValue(pendingRow);
+    userFindUnique.mockResolvedValue({ consentPending: false });
+    employeeFindUnique.mockResolvedValue({ isGuest: false });
+    inviteUpdate.mockResolvedValue({});
+    inviteUpdateMany.mockResolvedValue({ count: 1 });
+    inviteFindUnique.mockResolvedValue({
+      ...pendingRow,
+      guestEmployeeId: "member-emp",
+      status: "consumed",
+      consumedAt: new Date("2026-11-19T09:00:00.000Z"),
+    });
+
+    const bound = await bindInboundToInvite({
+      fromPhone: "972544365812",
+      inboundText: "היי",
+      currentUserId: "member-user",
+      currentEmployeeId: "member-emp",
+    });
+    expect(bound?.userId).toBe("member-user");
+    expect(bound?.employeeId).toBe("member-emp");
+    expect(bound?.context).toBeNull();
+    expect(bound?.invite.status).toBe("consumed");
+    expect(inviteUpdateMany).toHaveBeenCalledWith({
+      where: { id: "inv-member-1", status: "pending" },
+      data: {
+        status: "consumed",
+        consumedAt: expect.any(Date),
+      },
+    });
   });
 
   it("invite opening context is a warm first-exposure welcome", () => {

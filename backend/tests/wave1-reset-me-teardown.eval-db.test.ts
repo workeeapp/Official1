@@ -19,7 +19,9 @@ import {
   handleDevProspectTool,
   PHONE_BACKUP_SUFFIX,
 } from "../src/services/prospect-dev-tools.service.js";
+import { INVITE_TOKEN_PREFIX } from "../src/services/whatsapp-invite.service.js";
 import { phonesMatch } from "../src/utils/phone.js";
+import { Prisma } from "@prisma/client";
 
 const PHONE = "972500000091";
 
@@ -166,6 +168,40 @@ describe("Wave 1 /restore-me phone-park (eval-db)", () => {
       update: { lastInboundAt: new Date() },
     });
 
+    // Sticky message invite + collab share on this phone (left from cold asker path).
+    const messageInvite = await prisma.whatsAppInvite.create({
+      data: {
+        token: `${INVITE_TOKEN_PREFIX}RESTMSG01`,
+        userId: member.userId,
+        askerEmployeeId: member.employeeId,
+        digitalEmployeeId: member.digitalEmployeeId!,
+        recipientPhone: PHONE,
+        recipientLabel: "טל",
+        askSummary: "לעדכן אותי",
+        draftText: "draft-message",
+        status: "pending",
+        guestEmployeeId: temp.employeeId,
+      },
+    });
+    const shareInvite = await prisma.whatsAppInvite.create({
+      data: {
+        token: `${INVITE_TOKEN_PREFIX}RESTSHR01`,
+        userId: member.userId,
+        askerEmployeeId: member.employeeId,
+        digitalEmployeeId: member.digitalEmployeeId!,
+        recipientPhone: PHONE,
+        recipientLabel: "טל",
+        askSummary: "קניות משותפות",
+        draftText: "draft-share",
+        status: "pending",
+        payload: {
+          kind: "share",
+          listType: "shopping",
+          itemKeys: ["חלב"],
+        } as Prisma.InputJsonValue,
+      },
+    });
+
     const restore = await handleDevProspectTool({
       phone: PHONE,
       text: "/restore-me",
@@ -179,6 +215,17 @@ describe("Wave 1 /restore-me phone-park (eval-db)", () => {
       where: { id: member.employeeId },
     });
     expect(restored.phone).toBe(PHONE);
+
+    // Message invite consumed on Member restore; Share stays pending.
+    const messageAfter = await prisma.whatsAppInvite.findUniqueOrThrow({
+      where: { id: messageInvite.id },
+    });
+    expect(messageAfter.status).toBe("consumed");
+    expect(messageAfter.consumedAt).toBeTruthy();
+    const shareAfter = await prisma.whatsAppInvite.findUniqueOrThrow({
+      where: { id: shareInvite.id },
+    });
+    expect(shareAfter.status).toBe("pending");
 
     // Real member durable data intact.
     expect(await prisma.reminder.count({ where: { userId: member.userId } })).toBeGreaterThan(0);

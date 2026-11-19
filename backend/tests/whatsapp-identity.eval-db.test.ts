@@ -524,8 +524,9 @@ describe("WhatsApp independent identity (eval-db)", () => {
       });
       expect(byToken?.userId).toBe(danny.userId);
       expect(byToken?.employeeId).toBe(danny.employeeId);
-      expect(byToken?.context.askSummary).toBe("רשימת הקניות המשותפת");
-      expect(byToken?.context.askerName).toBe("טל");
+      // Member: bind keeps account, but no Prospect opening context.
+      expect(byToken?.context).toBeNull();
+      expect(byToken?.invite.askSummary).toBe("רשימת הקניות המשותפת");
 
       const byPhone = await bindInboundToInvite({
         fromPhone: phone,
@@ -533,8 +534,8 @@ describe("WhatsApp independent identity (eval-db)", () => {
         currentUserId: danny.userId,
         currentEmployeeId: danny.employeeId,
       });
-      expect(byPhone?.userId).toBe(danny.userId);
-      expect(byPhone?.employeeId).toBe(danny.employeeId);
+      // Already consumed — must not stick on later inbounds.
+      expect(byPhone).toBeNull();
 
       const resolved = await resolveWhatsAppSpeaker(phone);
       expect(resolved).toEqual({
@@ -581,7 +582,9 @@ describe("WhatsApp independent identity (eval-db)", () => {
       });
       expect(inviteAfter.userId).toBe(asker.userId);
       expect(inviteAfter.guestEmployeeId).toBe(danny.employeeId);
-      expect(inviteAfter.status).toBe("pending");
+      // Registered Member: message invite is consumed so it cannot stick.
+      expect(inviteAfter.status).toBe("consumed");
+      expect(inviteAfter.consumedAt).toBeTruthy();
     },
     120_000,
   );
@@ -865,8 +868,8 @@ describe("WhatsApp independent identity (eval-db)", () => {
         currentEmployeeId: created.employeeId,
       });
       expect(bound?.userId).toBe(created.userId);
-      expect(bound?.context.askerName).toBe("טל");
-      expect(bound?.context.askSummary).toBe(summary);
+      expect(bound?.context?.askerName).toBe("טל");
+      expect(bound?.context?.askSummary).toBe(summary);
 
       const guestLucy = await prisma.employee.findFirst({
         where: {
@@ -990,6 +993,207 @@ describe("WhatsApp independent identity (eval-db)", () => {
       expect(userAfter.consentPending).toBe(false);
     },
     120_000,
+  );
+
+  it(
+    "Member pending invite: no opening onboarding; Prospect keeps invite path; reminder stays owned",
+    async () => {
+      const asker = await createHarnessAccount("מיכל", { digitalWorker: true });
+      const member = await createHarnessAccount("טל", { digitalWorker: true });
+      harnesses.push(asker, member);
+
+      const memberPhone = await unusedPhone();
+      await prisma.employee.update({
+        where: { id: member.employeeId },
+        data: { phone: memberPhone },
+      });
+      await prisma.user.update({
+        where: { id: member.userId },
+        data: { consentPending: false },
+      });
+
+      const memberInvite = await prisma.whatsAppInvite.create({
+        data: {
+          token: `${INVITE_TOKEN_PREFIX}MEMNOOB01`,
+          userId: asker.userId,
+          askerEmployeeId: asker.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId!,
+          recipientPhone: memberPhone,
+          recipientLabel: "טל",
+          askSummary: "לעדכן אותי",
+          draftText: "draft",
+          status: "pending",
+        },
+      });
+
+      const memberBound = await bindInboundToInvite({
+        fromPhone: memberPhone,
+        inboundText: "תבדקי איתי עוד שעה אם שילמתי ארנונה",
+        currentUserId: member.userId,
+        currentEmployeeId: member.employeeId,
+      });
+      expect(memberBound?.context).toBeNull();
+      expect(memberBound?.invite.status).toBe("consumed");
+
+      const memberInviteAfter = await prisma.whatsAppInvite.findUniqueOrThrow({
+        where: { id: memberInvite.id },
+      });
+      expect(memberInviteAfter.status).toBe("consumed");
+      expect(memberInviteAfter.guestEmployeeId).toBe(member.employeeId);
+
+      const rebound = await bindInboundToInvite({
+        fromPhone: memberPhone,
+        inboundText: "עוד משהו",
+        currentUserId: member.userId,
+        currentEmployeeId: member.employeeId,
+      });
+      expect(rebound).toBeNull();
+
+      const memberLucy = (await listEmployeesForUser(member.userId)).find(
+        (row) => row.protected === true,
+      );
+      expect(memberLucy).toBeTruthy();
+
+      const seenMember: Array<{ liveFacts: string; instructions: string }> = [];
+      vi.spyOn(whatsappSend, "sendWhatsAppText").mockResolvedValue("sent" as never);
+      vi.spyOn(whatsappSend, "sendWhatsAppButtons").mockResolvedValue(
+        "sent" as never,
+      );
+      vi.spyOn(reminderFire, "fireDueReminders").mockResolvedValue(0 as never);
+      vi.spyOn(reminderFire, "scheduleSoon").mockImplementation(() => undefined);
+      setLlmClientForTests({
+        async createConversation() {
+          return `conv-member-${randomUUID()}`;
+        },
+        async createResponse(input) {
+          seenMember.push({
+            liveFacts: input.liveFacts ?? "",
+            instructions: input.instructions,
+          });
+          return {
+            reply: JSON.stringify({
+              responses: [{ text: "סגור, אבדוק איתך בעוד שעה." }],
+              metadata: {
+                reminders: [
+                  {
+                    action: "add",
+                    item: "שילמת ארנונה?",
+                    date: "2031-11-20",
+                    time: "10:30",
+                    ping: ["טל"],
+                    text: "שילמת ארנונה?",
+                  },
+                ],
+              },
+            }),
+            raw: {},
+          };
+        },
+      });
+
+      // Even if a stale context were passed, Member must not get Invite Opening.
+      const memberTurn = await sendChatMessage({
+        userId: member.userId,
+        employeeId: member.employeeId,
+        digitalEmployeeId: memberLucy!.id,
+        message: "תבדקי איתי עוד שעה אם שילמתי ארנונה",
+        pendingInvite: {
+          inviteId: memberInvite.id,
+          token: memberInvite.token,
+          askerName: "מיכל",
+          askSummary: "לעדכן אותי",
+          recipientLabel: "טל",
+        },
+      });
+      expect(seenMember).toHaveLength(1);
+      // Opening block must be absent (catalog tip text may still mention הרשמה).
+      expect(seenMember[0]!.liveFacts).not.toContain("INVITE CONTEXT");
+      expect(seenMember[0]!.liveFacts).not.toContain("zero signup friction");
+      expect(seenMember[0]!.liveFacts).not.toContain("PENDING_INVITE");
+      expect(seenMember[0]!.instructions).not.toContain("GUEST MODE");
+      expect(memberTurn.reply).not.toMatch(/בלי הרשמה|בלי להירשם/);
+
+      const reminder = await prisma.reminder.findFirst({
+        where: {
+          userId: member.userId,
+          ownerId: member.employeeId,
+          itemLabel: "שילמת ארנונה?",
+          status: "active",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(reminder).toBeTruthy();
+      expect(reminder!.userId).toBe(member.userId);
+      expect(reminder!.ownerId).toBe(member.employeeId);
+      expect(reminder!.actorId).toBe(member.employeeId);
+
+      // Prospect path unchanged: opening context + invite stays pending.
+      const prospectPhone = await unusedPhone();
+      const prospect = await resolveWhatsAppSpeaker(prospectPhone);
+      extraUserIds.push(prospect.userId);
+      const prospectUser = await prisma.user.findUniqueOrThrow({
+        where: { id: prospect.userId },
+      });
+      expect(prospectUser.consentPending).toBe(true);
+
+      const prospectInvite = await prisma.whatsAppInvite.create({
+        data: {
+          token: `${INVITE_TOKEN_PREFIX}PROSKEEP1`,
+          userId: asker.userId,
+          askerEmployeeId: asker.employeeId,
+          digitalEmployeeId: asker.digitalEmployeeId!,
+          recipientPhone: prospectPhone,
+          recipientLabel: "אורח",
+          askSummary: "לעדכן אותי",
+          draftText: "draft",
+          status: "pending",
+        },
+      });
+      const prospectBound = await bindInboundToInvite({
+        fromPhone: prospectPhone,
+        inboundText: "היי",
+        currentUserId: prospect.userId,
+        currentEmployeeId: prospect.employeeId,
+      });
+      expect(prospectBound?.context).toBeTruthy();
+      expect(prospectBound?.context?.askSummary).toBe("לעדכן אותי");
+      expect(prospectBound?.context?.askerName).toBe("מיכל");
+      const prospectInviteAfter = await prisma.whatsAppInvite.findUniqueOrThrow({
+        where: { id: prospectInvite.id },
+      });
+      expect(prospectInviteAfter.status).toBe("pending");
+
+      const prospectLucy = (await listEmployeesForUser(prospect.userId)).find(
+        (row) => row.protected === true,
+      );
+      const seenProspect: string[] = [];
+      setLlmClientForTests({
+        async createConversation() {
+          return `conv-prospect-${randomUUID()}`;
+        },
+        async createResponse(input) {
+          seenProspect.push(input.liveFacts ?? "");
+          return {
+            reply: JSON.stringify({
+              responses: [{ text: "היי, מיכל הזמינה אותך." }],
+              metadata: {},
+            }),
+            raw: {},
+          };
+        },
+      });
+      await sendChatMessage({
+        userId: prospect.userId,
+        employeeId: prospect.employeeId,
+        digitalEmployeeId: prospectLucy!.id,
+        message: "היי",
+        pendingInvite: prospectBound!.context!,
+      });
+      expect(seenProspect[0]).toContain("INVITE CONTEXT");
+      expect(seenProspect[0]).toContain("מיכל");
+      expect(seenProspect[0]).toContain("לעדכן אותי");
+    },
+    180_000,
   );
 });
 

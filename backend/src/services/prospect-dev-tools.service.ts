@@ -12,6 +12,7 @@ import { getEnv, isProduction } from "../config/env.js";
 import { normalizePhoneDigits, phonesMatch, toWhatsAppAddress } from "../utils/phone.js";
 import { clearWhatsAppWorkerSticky } from "./whatsapp-worker-sticky.js";
 import { clearWhatsAppInboundWindow } from "./whatsapp-window.js";
+import { consumeStickyMessageInvitesForPhone } from "./whatsapp-invite.service.js";
 
 export const DEV_AS_PROSPECT_CMD = "/as-prospect";
 /** Preferred restore command (safe phone un-park). */
@@ -209,6 +210,15 @@ async function runRestoreMe(phone: string, cmdLabel: string): Promise<string> {
     clearWhatsAppWorkerSticky(phone);
     clearWhatsAppWorkerSticky(digits);
     clearWhatsAppWorkerSticky(bak);
+    // Registered Member restore: drop sticky message invites on this phone.
+    // Collab Share/Assign stay pending. Prospect shells are not restored here.
+    const restoredUser = await prisma.user.findUnique({
+      where: { id: backupEmp.userId },
+      select: { consentPending: true },
+    });
+    if (restoredUser?.consentPending === false) {
+      await consumeStickyMessageInvitesForPhone(digits).catch(() => undefined);
+    }
     const coldNote = await clearColdWindowForDevPhone(phone);
     return `${label}: שוחזר המספר ${digits} למשתמש המקורי (ללא מחיקת נתונים). ${coldNote}`;
   } catch (err) {
