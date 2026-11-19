@@ -258,6 +258,10 @@ vi.mock("../src/database/prisma.js", () => ({
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
     },
+    auditEvent: {
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockImplementation(async ({ data }: { data: unknown }) => data),
+    },
     contactBook: {
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -763,6 +767,52 @@ describe("chat API", () => {
       assistants: [saved[1].id],
     });
     expect(saved[0].id).not.toBe(saved[1].id);
+  });
+
+  it("shows a Member preview without saving a list, filing, or reminder", async () => {
+    const cookie = await login();
+    mockOwnedEmployee();
+    itemCreate.mockClear();
+    filingCreate.mockClear();
+    const { prisma } = await import("../src/database/prisma.js");
+    const auditCreate = prisma.auditEvent.create as ReturnType<typeof vi.fn>;
+    auditCreate.mockClear();
+
+    const preview = "אם תרצה, התזכורת למחר ב־9 יכולה להיראות כך: להתקשר לרופא.";
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: ["אין לי מה להוסיף על מה שסיפרת."],
+        metadata: {
+          lists: [],
+          filing: [],
+          reminders: [],
+          messages: [],
+          opportunity: { capability: "reminders", preview },
+        },
+      }),
+      raw: { output_text: "preview" },
+    });
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "סתם מספר", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("אין לי מה להוסיף");
+    expect(response.body.reply).toContain(preview);
+    expect(itemCreate).not.toHaveBeenCalled();
+    expect(filingCreate).not.toHaveBeenCalled();
+    expect(auditCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "opportunity_offer",
+          summary: "reminders",
+        }),
+      }),
+    );
+    const instructions = createResponse.mock.calls[0][0].instructions as string;
+    expect(instructions).toContain("OPPORTUNITY (Members only)");
   });
 
   it("saves each spoken response as its own assistant message in order", async () => {

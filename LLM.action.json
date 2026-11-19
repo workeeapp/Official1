@@ -1866,6 +1866,32 @@
                   }
                 }
               },
+              "opportunity": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "Member quiet-turn offer. Omit unless there is a clear benefit right now. preview is one natural sentence (not a catalog tip) and is shown only when the tip slot is free. capability is lists|reminders|filing|share. No mutations on a preview turn. accept is the offer_id from RECENT_OFFERS only when the speaker accepts that specific preview.",
+                "properties": {
+                  "capability": {
+                    "type": "string",
+                    "enum": [
+                      "lists",
+                      "reminders",
+                      "filing",
+                      "share"
+                    ]
+                  },
+                  "preview": {
+                    "type": "string",
+                    "maxLength": 400
+                  },
+                  "accept": {
+                    "type": "string",
+                    "maxLength": 36
+                  }
+                }
+              },
               "tips": {
                 "type": [
                   "array",

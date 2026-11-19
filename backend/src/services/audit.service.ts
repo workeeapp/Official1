@@ -36,7 +36,10 @@ export type AuditAction =
   | "payment_prepare"
   | "payment_charge"
   | "explicit_join"
-  | "invite_asker_cancel";
+  | "invite_asker_cancel"
+  | "opportunity_offer"
+  | "opportunity_suppress"
+  | "opportunity_accept";
 
 export type MutationHistoryRow = {
   action: AuditAction | string;

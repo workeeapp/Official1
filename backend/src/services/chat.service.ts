@@ -254,6 +254,11 @@ import {
   resolveAndRecordTipsForTurn,
 } from "./tips.service.js";
 import {
+  capabilitiesFromTurn,
+  formatRecentOffersForSpeaker,
+  settleMemberOpportunity,
+} from "./opportunity.service.js";
+import {
   collectCelebrationRemoves,
   runDeleteCelebration,
 } from "./delete-celebration.js";
@@ -1177,6 +1182,9 @@ export function buildLucyInstructions(input: {
         guestSpeaker
           ? ""
           : "SPEAKER_CONTACTS is the speaker's personal phone book. Names there resolve without asking for a number. A registered Workee member in that book (any team) can be a share/assign/message/reminder target the same as Known employees; guests remain view-only.",
+        guestSpeaker
+          ? ""
+          : "OPPORTUNITY (Members only): silence is the default. A quiet turn is not a request to suggest something. Offer only when this turn's live facts or the current conversation show a clear benefit for this speaker. A row that merely lacks a field is not a benefit. When you do: one natural continuation in metadata.opportunity.preview (conditional Hebrew, a concrete preview of a result you can already produce). Set capability to lists, reminders, filing, or share. Leave response as the answer only — do not repeat the preview there, do not use metadata.tips for it, and do not emit a save. If RECENT_OFFERS already lists that capability, stay silent. Prospects do not emit opportunity. When the speaker accepts that specific preview, emit the normal action for that capability and metadata.opportunity.accept set to that offer_id. A new request they started on their own has no accept id.",
         guestSpeaker
           ? ""
           : "RECENT_OUTBOUND is the latest reminder/scheduled message YOU already sent to this speaker (includes reminder_id of that clock series). If they ask about מה ששלחת / הסיכום / ההודעה האחרונה / מה שכתבת about that digest, use that text and talk to THIS speaker. Do not claim you sent nothing when it is listed. Do not resend unless they ask. FORBIDDEN: invent דני (or any other person) as who to ask/send — example names are not real; only message someone the speaker named this turn. Snooze / תזכירי לי בעוד / עוד פעם / בעוד X / «נדנדי לי…» about that block → Option B ONLY: YOUR «לשלוח נדנוד…» task + ONE new one-shot reminders.add (in≈10 minutes / REMINDER_SNOOZE) ping=speaker; reminders.add item/text = RECENT_OUTBOUND.item / original chore ONLY (FORBIDDEN «לשלוח נדנוד» inside the clock title) — FORBIDDEN mutating the source series fireAt/recurrence; FORBIDDEN speaker-wrapper lists.add for the chore. Bare נדנדי לי שוב right after that outbound = same Option B for that item. Do not revive a done clock — add a new one-shot. Missing delay → ASK כמה. CRITICAL EXCLUSION: «סמן כבוצע» / «סמן כבוצע: <title>» after that outbound is Done (occurrence_done / interval ack / lists.remove) — FORBIDDEN routing Mark-done into snooze / לשלוח נדנוד / reminders.add one-shot / REMINDER_SNOOZE. STOP SERIES right after that outbound: bare «אל תזכירי לי» / «אל תזכירי לי יותר» / «תפסיקי» / «תפסיקי להזכיר לי את זה» / «בטלי» / «את זה» (no other chore named) → reminders.remove with RECENT_OUTBOUND.reminder_id copied exactly (see STOP SERIES / RIGHT AFTER PING) — FORBIDDEN inventing an id or guessing by title; FORBIDDEN blanket ASK when reminder_id is present.",
@@ -2364,6 +2372,8 @@ export interface TurnContextParts {
   /** Pending share/assign invitations for this phone. Empty for guests. */
   collabInvites?: string;
   tipsContext: string;
+  /** Open Member previews still inside the cooldown. Empty when none. */
+  recentOffers?: string;
   /**
    * Stage 2: the fixed SESSION_CLOCK / SAVED_DATA reading rules ride in the
    * system instructions (FACTS RULES), so the facts blocks carry data only.
@@ -2414,6 +2424,7 @@ export function composeTurnContext(parts: TurnContextParts): string {
       : "",
     parts.collabInvites ?? "",
     parts.tipsContext,
+    guest ? "" : (parts.recentOffers ?? ""),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -2720,6 +2731,15 @@ export async function sendChatMessage(input: {
         digitalEmployeeId: digital.id,
       }),
     )) ?? "";
+  const recentOffers =
+    guestSpeaker || consultFrom
+      ? ""
+      : ((await withoutFailingTurn("recent_offers_failed", () =>
+          formatRecentOffersForSpeaker({
+            userId: input.userId,
+            speakerId: employee.id,
+          }),
+        )) ?? "");
   const recipientIsProspect =
     !guestSpeaker && (await isUserProspect(input.userId));
   // Invite Opening Context is Prospect first-exposure only — never for Members.
@@ -2751,6 +2771,7 @@ export async function sendChatMessage(input: {
     pendingInvite: pendingInviteForTurn,
     collabInvites,
     tipsContext,
+    recentOffers,
     rulesInInstructions: shouldAttachLucyRuntimeEngine(
       digital,
       employees,
@@ -6340,6 +6361,33 @@ export async function sendChatMessage(input: {
             : {}),
         }),
       )) ?? { texts: [], tipIds: [] };
+    const opportunityAside =
+      (await withoutFailingTurn("opportunity_failed", () =>
+        settleMemberOpportunity({
+          userId: input.userId,
+          speakerId: employee.id,
+          digitalEmployeeId: digital.id,
+          member: !guestSpeaker && !consultFrom && !recipientIsProspect,
+          slotTaken:
+            tipTurn.texts.length > 0 ||
+            Boolean(highRiskOffer) ||
+            metadata.confirm === true,
+          opportunity: metadata.opportunity ?? null,
+          applied: capabilitiesFromTurn({
+            tipOps,
+            listApplied: listMutations.some(
+              (row) =>
+                (row.action === "add" ||
+                  row.action === "update" ||
+                  row.action === "remove") &&
+                row.fromReminderCascade !== true,
+            ),
+            listActions: metadata.lists ?? [],
+            filingApplied: tipOps.some((op) => op.topic === "filing"),
+            remindersApplied: tipOps.some((op) => op.topic === "reminders"),
+          }),
+        }),
+      )) ?? { preview: null, offerId: null };
     const notice = [
       guestMutationNotice,
       registerNotice,
@@ -6359,12 +6407,17 @@ export async function sendChatMessage(input: {
     let reply = replaceSpoken
       ? composeAssistantReply({
           llmReply: workingReply,
-          notice: [...consultAnswers, notice, ...tipTurn.texts]
+          notice: [
+            ...consultAnswers,
+            notice,
+            ...tipTurn.texts,
+            opportunityAside.preview ?? "",
+          ]
             .filter(Boolean)
             .join("\n\n"),
           replaceResponse: true,
         })
-      : [...consultAnswers, notice, ...tipTurn.texts]
+      : [...consultAnswers, notice, ...tipTurn.texts, opportunityAside.preview ?? ""]
           .filter(Boolean)
           .reduce(
             (current, extra) => appendEngineNotice(current, extra),

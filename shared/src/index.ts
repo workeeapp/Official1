@@ -165,6 +165,8 @@ export {
   redactRegisterSecrets,
   redactMetadataSecrets,
   parseTipKeys,
+  parseOpportunity,
+  OPPORTUNITY_CAPABILITIES,
 } from "./llm-message";
 export type {
   LlmRegisterAction,
@@ -196,6 +198,8 @@ export type {
   LlmLiveSelectAction,
   LlmLiveSelectDomain,
   LiveSelectParseStatus,
+  LlmOpportunity,
+  OpportunityCapability,
 } from "./llm-message";
 export {
   parseWeatherAction,
