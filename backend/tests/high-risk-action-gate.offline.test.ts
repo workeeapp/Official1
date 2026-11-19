@@ -322,7 +322,7 @@ describe("applyHighRiskActionGate", () => {
     expect(self.metadata.reminders).toHaveLength(1);
   });
 
-  it("strips job answer with report (P-Out)", () => {
+  it("allows Check-with job answer with report (no Class V)", () => {
     const result = applyHighRiskActionGate(
       meta({
         jobs: [
@@ -348,8 +348,9 @@ describe("applyHighRiskActionGate", () => {
         ],
       },
     );
-    expect(result.metadata.jobs).toEqual([]);
-    expect(result.stripped.some((s) => s.kind === "job_outbound")).toBe(true);
+    expect(result.didStrip).toBe(false);
+    expect(result.metadata.jobs).toHaveLength(1);
+    expect(result.stripped).toEqual([]);
   });
 
   it("allows self-job answer with empty reportText (overdue סגירה) — no Class V", () => {
@@ -414,7 +415,7 @@ describe("applyHighRiskActionGate", () => {
     expect(result.metadata.jobs).toHaveLength(1);
   });
 
-  it("still strips third-party answer with empty reportText (defaultReport to asker)", () => {
+  it("allows third-party answer with empty reportText (defaultReport still auto)", () => {
     const result = applyHighRiskActionGate(
       meta({
         jobs: [
@@ -440,8 +441,8 @@ describe("applyHighRiskActionGate", () => {
         ],
       },
     );
-    expect(result.didStrip).toBe(true);
-    expect(result.stripped.some((s) => s.kind === "job_outbound")).toBe(true);
+    expect(result.didStrip).toBe(false);
+    expect(result.metadata.jobs).toHaveLength(1);
   });
 
   it("keeps decline/counter/close/clear_clock Class V (unchanged)", () => {
@@ -483,7 +484,7 @@ describe("applyHighRiskActionGate", () => {
     }
   });
 
-  it("matches the answered jobId among multiple openJobs (not a random self-job)", () => {
+  it("passes the named answer jobId through among multiple openJobs", () => {
     const result = applyHighRiskActionGate(
       meta({
         jobs: [
@@ -519,11 +520,11 @@ describe("applyHighRiskActionGate", () => {
         ],
       },
     );
-    expect(result.didStrip).toBe(true);
-    expect(result.strippedSnapshot.jobs?.[0]?.jobId).toBe("third-party");
+    expect(result.didStrip).toBe(false);
+    expect(result.metadata.jobs?.[0]?.jobId).toBe("third-party");
   });
 
-  it("always Class-V strips third-party answer even under signal + תשלחי", () => {
+  it("allows Check-with third-party answer without Class V (auto report)", () => {
     const result = applyHighRiskActionGate(
       meta({
         jobs: [
@@ -540,8 +541,41 @@ describe("applyHighRiskActionGate", () => {
       {
         speaker,
         pOutMode: "signal",
-        speakerText: "תשלחי למיכל",
+        speakerText: "פסטה",
         knownTargetNames: ["מיכל"],
+        openJobs: [
+          {
+            id: "third-party",
+            askerId: "michal-id",
+            subjectId: speaker.id,
+            askerName: "מיכל",
+          },
+        ],
+      },
+    );
+    expect(result.didStrip).toBe(false);
+    expect(result.metadata.jobs).toHaveLength(1);
+    expect(result.metadata.jobs?.[0]?.action).toBe("answer");
+  });
+
+  it("still Class-V strips jobs.decline without outbound signal", () => {
+    const result = applyHighRiskActionGate(
+      meta({
+        jobs: [
+          {
+            action: "decline",
+            jobId: "third-party",
+            answerText: "לא יכול",
+            reportText: "טל לא יכול",
+            time: "",
+            in: null,
+          },
+        ],
+      }),
+      {
+        speaker,
+        pOutMode: "signal",
+        speakerText: "לא יכול",
         openJobs: [
           {
             id: "third-party",
@@ -554,7 +588,6 @@ describe("applyHighRiskActionGate", () => {
     );
     expect(result.didStrip).toBe(true);
     expect(result.stripped.some((s) => s.kind === "job_outbound")).toBe(true);
-    expect(result.metadata.jobs ?? []).toHaveLength(0);
   });
 });
 

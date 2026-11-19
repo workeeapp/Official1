@@ -1,5 +1,6 @@
 /**
- * Job lifecycle: Local Answer vs External Report (answered_pending_report).
+ * Check-with answer: auto report + close (no PendingConfirm).
+ * DeliveryAttempt job_report keyed by jobId for idempotency.
  *
  * Run: npm run test:eval-db -- tests/job-answer-report-lifecycle.eval-db.test.ts
  */
@@ -13,15 +14,16 @@ import {
   type HarnessAccount,
 } from "../src/eval/run-multi-turn.js";
 import { setLlmClientForTests } from "../src/services/llm-client.js";
-import {
-  formatOpenJobsContext,
-  listOpenJobsForViewer,
-} from "../src/services/jobs.service.js";
 import { JOB_META_KEY, jobMetaFrom } from "../src/services/job-meta.js";
 import {
   sendChatMessage,
   setJobReportWhatsAppSendForTests,
 } from "../src/services/chat.service.js";
+import {
+  buildDeliveryLedgerKey,
+  claimDeliverySend,
+  completeDeliveryAttempt,
+} from "../src/services/delivery-attempt.service.js";
 
 const SPEAKER = "טל";
 const PARTNER = "מיכל";
@@ -131,7 +133,7 @@ async function seedThirdPartyJob(input: {
   return prisma.employeeListItem.create({
     data: {
       listId: tasksList.id,
-      itemKey: `dinner-${randomUUID().slice(0, 8)}`,
+      itemKey: `cw-${randomUUID().slice(0, 8)}`,
       data: {
         "שם משימה": `לבדוק עם ${SPEAKER}: ${input.ask}`,
         [JOB_META_KEY]: {
@@ -152,11 +154,7 @@ async function seedThirdPartyJob(input: {
   });
 }
 
-function readJobMeta(data: unknown) {
-  return jobMetaFrom(data);
-}
-
-describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () => {
+describe("Check-with answer auto-report (sendChatMessage)", () => {
   let account: HarnessAccount | null = null;
 
   afterEach(async () => {
@@ -169,18 +167,18 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
   });
 
   it(
-    "answer + confirm → local then sent + closed",
+    "yes / free-text answer → auto report, job closed, no PendingConfirm",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
       const michal = await ensurePartnerPhone(
         account,
         PARTNER,
-        "972501110001",
+        "972501220001",
       );
       await prisma.employee.update({
         where: { id: account.employeeId },
-        data: { phone: "972501110002" },
+        data: { phone: "972501220002" },
       });
       const job = await seedThirdPartyJob({
         account,
@@ -192,7 +190,7 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
 
       setLlmClientForTests(
         stubReply({
-          responses: [{ text: "רשמתי.", buttons: [] }],
+          responses: [{ text: "מסרתי למיכל.", buttons: [] }],
           metadata: {
             jobs: [
               {
@@ -205,239 +203,54 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
           },
         }),
       );
-      const offer = await sendChatMessage({
+      const result = await sendChatMessage({
         userId: account.userId,
         employeeId: account.employeeId,
         digitalEmployeeId: lucyId,
         message: "פסטה",
       });
-      expect(offer.reply).toMatch(/אישור מפורש/);
-      const afterAnswer = await prisma.employeeListItem.findFirstOrThrow({
+      expect(result.reply).not.toMatch(/אישור מפורש/);
+      expect(result.reply).toMatch(/מסרתי/);
+
+      const closed = await prisma.employeeListItem.findFirstOrThrow({
         where: { id: job.id },
       });
-      expect(afterAnswer.deletedAt).toBeNull();
-      const metaPending = readJobMeta(afterAnswer.data)!;
-      expect(metaPending.state).toBe("answered_pending_report");
-      expect(metaPending.reportStatus).toBe("pending");
-      expect(metaPending.answerText).toBe("פסטה");
-      expect(metaPending.pendingReportText).toMatch(/פסטה/);
-
-      const pending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
-      expect(metaPending.reportConfirmId).toBe(pending.id);
-
-      setLlmClientForTests(null);
-      const confirmed = await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: pending.confirmCommand,
-      });
-      expect(confirmed.reply).toMatch(/בוצע לפי האישור/);
-
-      const afterConfirm = await prisma.employeeListItem.findFirstOrThrow({
-        where: { id: job.id },
-      });
-      expect(afterConfirm.deletedAt).not.toBeNull();
-      const metaSent = readJobMeta(afterConfirm.data)!;
-      expect(metaSent.answerText).toBe("פסטה");
-      expect(metaSent.reportStatus).toBe("sent");
-      expect(metaSent.reportHistory?.some((row) => row.status === "sent")).toBe(
-        true,
-      );
+      expect(closed.deletedAt).not.toBeNull();
+      expect(
+        await prisma.pendingHighRiskConfirm.findFirst({
+          where: {
+            userId: account.userId,
+            status: { in: ["offered", "pending_offer"] },
+          },
+        }),
+      ).toBeNull();
 
       const attempts = await prisma.deliveryAttempt.findMany({
         where: { userId: account.userId, purpose: "job_report" },
       });
       expect(attempts.some((row) => row.status === "accepted")).toBe(true);
+      expect(
+        attempts.some((row) =>
+          row.ledgerKey.includes(`job:${job.id}:`),
+        ),
+      ).toBe(true);
     },
     90_000,
   );
 
   it(
-    "answer + cancel → answer kept, report declined, not raisable",
+    "double answer → no second job_report send",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
       const michal = await ensurePartnerPhone(
         account,
         PARTNER,
-        "972501110011",
+        "972501220011",
       );
       await prisma.employee.update({
         where: { id: account.employeeId },
-        data: { phone: "972501110012" },
-      });
-      const job = await seedThirdPartyJob({
-        account,
-        lucyId,
-        askerId: michal.id,
-        askerName: PARTNER,
-        ask: "מתי חוזרים?",
-      });
-
-      setLlmClientForTests(
-        stubReply({
-          responses: [{ text: "רשמתי.", buttons: [] }],
-          metadata: {
-            jobs: [
-              {
-                action: "answer",
-                job_id: job.id,
-                answer_text: "בשמונה",
-                report_text: "טל מוסר: בשמונה.",
-              },
-            ],
-          },
-        }),
-      );
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: "בשמונה",
-      });
-      const pending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
-
-      setLlmClientForTests(null);
-      const cancelled = await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: pending.cancelCommand,
-      });
-      expect(cancelled.reply).toMatch(/ביטלתי את הדיווח/);
-      expect(cancelled.reply).toMatch(/התשובה נשמרה/);
-
-      const row = await prisma.employeeListItem.findFirstOrThrow({
-        where: { id: job.id, deletedAt: null },
-      });
-      const meta = readJobMeta(row.data)!;
-      expect(meta.state).toBe("answered_pending_report");
-      expect(meta.reportStatus).toBe("declined");
-      expect(meta.answerText).toBe("בשמונה");
-      expect(meta.reportConfirmId).toBeUndefined();
-
-      const open = await listOpenJobsForViewer({
-        digitalEmployeeId: lucyId,
-        viewerId: account.employeeId,
-      });
-      const ctx = formatOpenJobsContext(open, account.employeeId);
-      expect(ctx).toMatch(/answered_pending_report|report_status/);
-      expect(ctx).toMatch(/"raisable":false/);
-      expect(ctx).not.toMatch(
-        new RegExp(`"job_id":"${job.id}"[\\s\\S]*?"raisable":true`),
-      );
-    },
-    90_000,
-  );
-
-  it(
-    "reopen conversation after cancel → still not raisable",
-    async () => {
-      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
-      const lucyId = await ensureLucy(account);
-      const michal = await ensurePartnerPhone(
-        account,
-        PARTNER,
-        "972501110021",
-      );
-      await prisma.employee.update({
-        where: { id: account.employeeId },
-        data: { phone: "972501110022" },
-      });
-      const job = await seedThirdPartyJob({
-        account,
-        lucyId,
-        askerId: michal.id,
-        askerName: PARTNER,
-        ask: "יש קינוח?",
-      });
-
-      setLlmClientForTests(
-        stubReply({
-          responses: [{ text: "רשמתי.", buttons: [] }],
-          metadata: {
-            jobs: [
-              {
-                action: "answer",
-                job_id: job.id,
-                answer_text: "כן, גלידה",
-                report_text: "טל מוסר: כן, גלידה.",
-              },
-            ],
-          },
-        }),
-      );
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: "כן גלידה",
-      });
-      const pending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: pending.cancelCommand,
-      });
-
-      // Simulate reopen: wipe conversation needsContext / new conversation.
-      await prisma.chatConversation.deleteMany({
-        where: { userId: account.userId },
-      });
-
-      setLlmClientForTests(
-        stubReply({
-          responses: [{ text: "שלום, מה נשמע?", buttons: [] }],
-          metadata: {},
-        }),
-      );
-      const reopen = await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: "היי",
-      });
-      expect(reopen.reply).not.toMatch(/קינוח|גלידה|מיכל מחכה/);
-
-      const open = await listOpenJobsForViewer({
-        digitalEmployeeId: lucyId,
-        viewerId: account.employeeId,
-      });
-      const row = open.find((j) => j.id === job.id);
-      expect(row?.meta.state).toBe("answered_pending_report");
-      expect(row?.meta.reportStatus).toBe("declined");
-      const ctx = formatOpenJobsContext(open, account.employeeId);
-      expect(ctx).toContain(job.id);
-      expect(ctx).toMatch(/"raisable":false/);
-    },
-    90_000,
-  );
-
-  it(
-    "double confirm → no second report / still sent once",
-    async () => {
-      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
-      const lucyId = await ensureLucy(account);
-      const michal = await ensurePartnerPhone(
-        account,
-        PARTNER,
-        "972501110031",
-      );
-      await prisma.employee.update({
-        where: { id: account.employeeId },
-        data: { phone: "972501110032" },
+        data: { phone: "972501220012" },
       });
       const job = await seedThirdPartyJob({
         account,
@@ -447,56 +260,43 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         ask: "באים?",
       });
 
-      setLlmClientForTests(
-        stubReply({
-          responses: [{ text: "רשמתי.", buttons: [] }],
-          metadata: {
-            jobs: [
-              {
-                action: "answer",
-                job_id: job.id,
-                answer_text: "כן",
-                report_text: "טל מוסר שכן.",
-              },
-            ],
-          },
-        }),
-      );
+      const answerStub = stubReply({
+        responses: [{ text: "מסרתי.", buttons: [] }],
+        metadata: {
+          jobs: [
+            {
+              action: "answer",
+              job_id: job.id,
+              answer_text: "כן",
+              report_text: "טל מוסר שכן.",
+            },
+          ],
+        },
+      });
+      setLlmClientForTests(answerStub);
       await sendChatMessage({
         userId: account.userId,
         employeeId: account.employeeId,
         digitalEmployeeId: lucyId,
         message: "כן",
       });
-      const pending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
-
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: pending.confirmCommand,
-      });
-      const firstAttempts = await prisma.deliveryAttempt.count({
+      const first = await prisma.deliveryAttempt.count({
         where: {
           userId: account.userId,
           purpose: "job_report",
           status: "accepted",
         },
       });
-      expect(firstAttempts).toBe(1);
+      expect(first).toBe(1);
 
-      const second = await sendChatMessage({
+      // Second turn still emits answer on same job id (already closed).
+      setLlmClientForTests(answerStub);
+      await sendChatMessage({
         userId: account.userId,
         employeeId: account.employeeId,
         digitalEmployeeId: lucyId,
-        message: pending.confirmCommand,
+        message: "כן שוב",
       });
-      expect(second.reply).toMatch(/כבר לא בתוקף|פג או שטופל/);
-
       const after = await prisma.deliveryAttempt.count({
         where: {
           userId: account.userId,
@@ -505,27 +305,23 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         },
       });
       expect(after).toBe(1);
-      const row = await prisma.employeeListItem.findFirstOrThrow({
-        where: { id: job.id },
-      });
-      expect(readJobMeta(row.data)?.reportStatus).toBe("sent");
     },
     90_000,
   );
 
   it(
-    "WhatsApp certain failure → reportStatus=failed; recovery resends once",
+    "WhatsApp certain failure → ledger failed; retry may send once",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
       const michal = await ensurePartnerPhone(
         account,
         PARTNER,
-        "972501110041",
+        "972501220021",
       );
       await prisma.employee.update({
         where: { id: account.employeeId },
-        data: { phone: "972501110042" },
+        data: { phone: "972501220022" },
       });
       const job = await seedThirdPartyJob({
         account,
@@ -535,9 +331,13 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         ask: "הכל מוכן?",
       });
 
+      setJobReportWhatsAppSendForTests(async () => ({
+        skips: [{ label: PARTNER, reason: "failed" }],
+        sentLabels: [],
+      }));
       setLlmClientForTests(
         stubReply({
-          responses: [{ text: "רשמתי.", buttons: [] }],
+          responses: [{ text: "מסרתי.", buttons: [] }],
           metadata: {
             jobs: [
               {
@@ -556,30 +356,15 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         digitalEmployeeId: lucyId,
         message: "מוכן",
       });
-      const pending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
 
-      setJobReportWhatsAppSendForTests(async () => ({
-        skips: [{ label: PARTNER, reason: "failed" }],
-        sentLabels: [],
-      }));
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: pending.confirmCommand,
-      });
-
-      const failedRow = await prisma.employeeListItem.findFirstOrThrow({
-        where: { id: job.id, deletedAt: null },
-      });
-      const failedMeta = readJobMeta(failedRow.data)!;
-      expect(failedMeta.state).toBe("answered_pending_report");
-      expect(failedMeta.reportStatus).toBe("failed");
-      expect(failedMeta.answerText).toBe("מוכן");
+      // Job still closes atomically; ledger records certain failure.
+      expect(
+        (
+          await prisma.employeeListItem.findFirstOrThrow({
+            where: { id: job.id },
+          })
+        ).deletedAt,
+      ).not.toBeNull();
       expect(
         await prisma.deliveryAttempt.count({
           where: {
@@ -590,46 +375,24 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         }),
       ).toBe(1);
 
-      // Recovery: new answer staging + confirm with successful send.
+      // Safe recovery: failed allows a later send with same job ledger key.
       setJobReportWhatsAppSendForTests(null);
-      setLlmClientForTests(
-        stubReply({
-          responses: [{ text: "רשמתי שוב.", buttons: [] }],
-          metadata: {
-            jobs: [
-              {
-                action: "answer",
-                job_id: job.id,
-                answer_text: "מוכן",
-                report_text: "טל מוסר שהכל מוכן.",
-              },
-            ],
-          },
-        }),
+      const { claimDeliverySend, completeDeliveryAttempt } = await import(
+        "../src/services/delivery-attempt.service.js"
       );
-      await sendChatMessage({
+      const claim = await claimDeliverySend({
         userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: "תשלחי למיכל",
+        destination: "972501220021",
+        purpose: "job_report",
+        sourceKey: `job:${job.id}`,
       });
-      const retryPending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: retryPending.confirmCommand,
-      });
-
-      const recovered = await prisma.employeeListItem.findFirstOrThrow({
-        where: { id: job.id },
-      });
-      expect(recovered.deletedAt).not.toBeNull();
-      expect(readJobMeta(recovered.data)?.reportStatus).toBe("sent");
+      expect(claim.maySend).toBe(true);
+      if (claim.attemptId) {
+        await completeDeliveryAttempt({
+          attemptId: claim.attemptId,
+          status: "accepted",
+        });
+      }
       expect(
         await prisma.deliveryAttempt.count({
           where: {
@@ -640,22 +403,22 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         }),
       ).toBe(1);
     },
-    120_000,
+    90_000,
   );
 
   it(
-    "unknown delivery → must not auto-resend; answer kept",
+    "unknown delivery → must not auto-resend",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
       const michal = await ensurePartnerPhone(
         account,
         PARTNER,
-        "972501110051",
+        "972501220031",
       );
       await prisma.employee.update({
         where: { id: account.employeeId },
-        data: { phone: "972501110052" },
+        data: { phone: "972501220032" },
       });
       const job = await seedThirdPartyJob({
         account,
@@ -665,9 +428,25 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         ask: "יש לחם?",
       });
 
+      const ledgerKey = buildDeliveryLedgerKey({
+        sourceKey: `job:${job.id}`,
+        destination: "972501220031",
+        purpose: "job_report",
+      });
+      await prisma.deliveryAttempt.create({
+        data: {
+          userId: account.userId,
+          ledgerKey,
+          stepKey: "job_report:972501220031",
+          destination: "972501220031",
+          purpose: "job_report",
+          status: "unknown",
+        },
+      });
+
       setLlmClientForTests(
         stubReply({
-          responses: [{ text: "רשמתי.", buttons: [] }],
+          responses: [{ text: "מסרתי.", buttons: [] }],
           metadata: {
             jobs: [
               {
@@ -686,37 +465,7 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
         digitalEmployeeId: lucyId,
         message: "כן",
       });
-      const pending = await prisma.pendingHighRiskConfirm.findFirstOrThrow({
-        where: { userId: account.userId, status: "offered" },
-        orderBy: { createdAt: "desc" },
-      });
 
-      // First confirm: mark attempt unknown mid-flight by pre-seeding ledger.
-      await prisma.deliveryAttempt.create({
-        data: {
-          userId: account.userId,
-          ledgerKey: `job:${job.id}:job_report:972501110051`,
-          stepKey: "job_report:972501110051",
-          destination: "972501110051",
-          purpose: "job_report",
-          status: "unknown",
-        },
-      });
-
-      setLlmClientForTests(null);
-      await sendChatMessage({
-        userId: account.userId,
-        employeeId: account.employeeId,
-        digitalEmployeeId: lucyId,
-        message: pending.confirmCommand,
-      });
-
-      const row = await prisma.employeeListItem.findFirstOrThrow({
-        where: { id: job.id, deletedAt: null },
-      });
-      const meta = readJobMeta(row.data)!;
-      expect(meta.answerText).toBe("כן");
-      expect(meta.reportStatus).toBe("unknown");
       expect(
         await prisma.deliveryAttempt.count({
           where: {
@@ -726,18 +475,27 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
           },
         }),
       ).toBe(0);
+      expect(
+        await prisma.deliveryAttempt.count({
+          where: {
+            userId: account.userId,
+            purpose: "job_report",
+            status: "unknown",
+          },
+        }),
+      ).toBe(1);
     },
     90_000,
   );
 
   it(
-    "regression: self-job closes without confirm; progress stays ungated",
+    "regression: self-job closes; progress ungated; share still Class V",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
       await prisma.employee.update({
         where: { id: account.employeeId },
-        data: { phone: "972501110062" },
+        data: { phone: "972501220042" },
       });
       const tasksList =
         (await prisma.employeeList.findFirst({
@@ -782,7 +540,7 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
       const michal = await ensurePartnerPhone(
         account,
         PARTNER,
-        "972501110061",
+        "972501220041",
       );
       const otherJob = await seedThirdPartyJob({
         account,
@@ -847,9 +605,320 @@ describe("Job Local Answer / External Report lifecycle (sendChatMessage)", () =>
       const progressed = await prisma.employeeListItem.findFirstOrThrow({
         where: { id: otherJob.id, deletedAt: null },
       });
-      expect(readJobMeta(progressed.data)?.state).toBe("progress");
-      expect(readJobMeta(progressed.data)?.progress).toBe("עדיין בודק");
+      expect(jobMetaFrom(progressed.data)?.state).toBe("progress");
+      expect(jobMetaFrom(progressed.data)?.progress).toBe("עדיין בודק");
+
+      const shopping =
+        (await prisma.employeeList.findFirst({
+          where: {
+            employeeId: account.employeeId,
+            listType: "shopping",
+            name: "",
+            deletedAt: null,
+          },
+        })) ??
+        (await prisma.employeeList.create({
+          data: {
+            employeeId: account.employeeId,
+            listType: "shopping",
+            name: "",
+            scope: "personal",
+            visibleTo: [account.employeeId],
+          },
+        }));
+      const item = await prisma.employeeListItem.create({
+        data: {
+          listId: shopping.id,
+          itemKey: `חלב-${randomUUID().slice(0, 6)}`,
+          data: { "שם פריט": "חלב" },
+          scope: "personal",
+          addedById: account.employeeId,
+          visibleTo: [account.employeeId],
+        },
+      });
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "שיתפתי.", buttons: [] }],
+          metadata: {
+            lists: [
+              {
+                action: "update",
+                list_type: "shopping",
+                list_name: "",
+                items: [{ item_id: item.id }],
+                targets: [SPEAKER, PARTNER],
+              },
+            ],
+          },
+        }),
+      );
+      // No share-intent verb → Class V still strips.
+      await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "מה יש בקניות?",
+      });
+      const pending = await prisma.pendingHighRiskConfirm.findFirst({
+        where: { userId: account.userId, status: "offered" },
+        orderBy: { createdAt: "desc" },
+      });
+      expect(pending).toBeTruthy();
+      expect(pending!.actionKind).toMatch(/share|assign/);
+      const after = await prisma.employeeListItem.findFirstOrThrow({
+        where: { id: item.id, deletedAt: null },
+      });
+      expect(after.scope).toBe("personal");
+    },
+    120_000,
+  );
+
+  it(
+    "explicit lists.remove closes Check-with job without Class V answer path",
+    async () => {
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const lucyId = await ensureLucy(account);
+      const michal = await ensurePartnerPhone(
+        account,
+        PARTNER,
+        "972501220051",
+      );
+      await prisma.employee.update({
+        where: { id: account.employeeId },
+        data: { phone: "972501220052" },
+      });
+      const job = await seedThirdPartyJob({
+        account,
+        lucyId,
+        askerId: michal.id,
+        askerName: PARTNER,
+        ask: "בטל את זה",
+      });
+
+      setLlmClientForTests(
+        stubReply({
+          responses: [{ text: "ביטלתי.", buttons: [] }],
+          metadata: {
+            lists: [
+              {
+                action: "remove",
+                list_type: "tasks",
+                list_name: "",
+                items: [{ item_id: job.id }],
+                targets: [],
+              },
+            ],
+          },
+        }),
+      );
+      const result = await sendChatMessage({
+        userId: account.userId,
+        employeeId: account.employeeId,
+        digitalEmployeeId: lucyId,
+        message: "תבטלי את המשימה",
+      });
+      expect(result.reply).not.toMatch(/אישור מפורש/);
+      expect(
+        (
+          await prisma.employeeListItem.findFirst({ where: { id: job.id } })
+        )?.deletedAt,
+      ).not.toBeNull();
+      expect(
+        await prisma.deliveryAttempt.count({
+          where: { userId: account.userId, purpose: "job_report" },
+        }),
+      ).toBe(0);
     },
     90_000,
+  );
+
+  it(
+    "race: parallel jobs.answer on same jobId → one job_report send only",
+    async () => {
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const lucyId = await ensureLucy(account);
+      const michal = await ensurePartnerPhone(
+        account,
+        PARTNER,
+        "972501220061",
+      );
+      await prisma.employee.update({
+        where: { id: account.employeeId },
+        data: { phone: "972501220062" },
+      });
+      const job = await seedThirdPartyJob({
+        account,
+        lucyId,
+        askerId: michal.id,
+        askerName: PARTNER,
+        ask: "מירוץ?",
+      });
+
+      let graphSends = 0;
+      setJobReportWhatsAppSendForTests(async () => {
+        graphSends += 1;
+        await new Promise((r) => setTimeout(r, 80));
+        return { skips: [], sentLabels: [PARTNER] };
+      });
+
+      const payload = {
+        responses: [{ text: "מסרתי.", buttons: [] }],
+        metadata: {
+          jobs: [
+            {
+              action: "answer",
+              job_id: job.id,
+              answer_text: "כן",
+              report_text: "טל מוסר שכן.",
+            },
+          ],
+        },
+      };
+      setLlmClientForTests(stubReply(payload));
+
+      const [a, b] = await Promise.all([
+        sendChatMessage({
+          userId: account.userId,
+          employeeId: account.employeeId,
+          digitalEmployeeId: lucyId,
+          message: "כן-A",
+        }),
+        sendChatMessage({
+          userId: account.userId,
+          employeeId: account.employeeId,
+          digitalEmployeeId: lucyId,
+          message: "כן-B",
+        }),
+      ]);
+      expect(a.reply).toBeTruthy();
+      expect(b.reply).toBeTruthy();
+
+      expect(graphSends).toBe(1);
+
+      const attempts = await prisma.deliveryAttempt.findMany({
+        where: { userId: account.userId, purpose: "job_report" },
+      });
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]?.status).toBe("accepted");
+      expect(attempts[0]?.ledgerKey).toContain(`job:${job.id}:`);
+
+      expect(
+        (
+          await prisma.employeeListItem.findFirstOrThrow({
+            where: { id: job.id },
+          })
+        ).deletedAt,
+      ).not.toBeNull();
+    },
+    90_000,
+  );
+
+  it(
+    "race: parallel claimDeliverySend — accepted/unknown block; failed recovers once",
+    async () => {
+      account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
+      const jobId = `race-job-${randomUUID().slice(0, 8)}`;
+      const destination = "972501220071";
+      const sourceKey = `job:${jobId}`;
+
+      const firstWave = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          claimDeliverySend({
+            userId: account!.userId,
+            destination,
+            purpose: "job_report",
+            sourceKey,
+          }),
+        ),
+      );
+      const winners = firstWave.filter((row) => row.maySend);
+      expect(winners).toHaveLength(1);
+      expect(
+        await prisma.deliveryAttempt.count({
+          where: { userId: account.userId, purpose: "job_report" },
+        }),
+      ).toBe(1);
+
+      await completeDeliveryAttempt({
+        attemptId: winners[0]!.attemptId!,
+        status: "accepted",
+      });
+      const afterAccepted = await Promise.all(
+        Array.from({ length: 6 }, () =>
+          claimDeliverySend({
+            userId: account!.userId,
+            destination,
+            purpose: "job_report",
+            sourceKey,
+          }),
+        ),
+      );
+      expect(afterAccepted.every((row) => !row.maySend)).toBe(true);
+      expect(
+        afterAccepted.every((row) => row.skipReason === "already_accepted"),
+      ).toBe(true);
+
+      await prisma.deliveryAttempt.updateMany({
+        where: { userId: account.userId, purpose: "job_report" },
+        data: { status: "unknown" },
+      });
+      const afterUnknown = await Promise.all(
+        Array.from({ length: 6 }, () =>
+          claimDeliverySend({
+            userId: account!.userId,
+            destination,
+            purpose: "job_report",
+            sourceKey,
+          }),
+        ),
+      );
+      expect(afterUnknown.every((row) => !row.maySend)).toBe(true);
+      expect(
+        afterUnknown.every((row) => row.skipReason === "in_flight_or_unknown"),
+      ).toBe(true);
+
+      await prisma.deliveryAttempt.updateMany({
+        where: { userId: account.userId, purpose: "job_report" },
+        data: { status: "failed" },
+      });
+      const recoverWave = await Promise.all(
+        Array.from({ length: 8 }, () =>
+          claimDeliverySend({
+            userId: account!.userId,
+            destination,
+            purpose: "job_report",
+            sourceKey,
+          }),
+        ),
+      );
+      const recoverWinners = recoverWave.filter((row) => row.maySend);
+      expect(recoverWinners).toHaveLength(1);
+      expect(
+        await prisma.deliveryAttempt.count({
+          where: {
+            userId: account.userId,
+            purpose: "job_report",
+            status: "sending",
+          },
+        }),
+      ).toBe(1);
+
+      await completeDeliveryAttempt({
+        attemptId: recoverWinners[0]!.attemptId!,
+        status: "accepted",
+      });
+      const finalBlock = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          claimDeliverySend({
+            userId: account!.userId,
+            destination,
+            purpose: "job_report",
+            sourceKey,
+          }),
+        ),
+      );
+      expect(finalBlock.every((row) => !row.maySend)).toBe(true);
+    },
+    60_000,
   );
 });

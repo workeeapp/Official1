@@ -690,25 +690,14 @@ export function applyHighRiskActionGate(
   const jobsIn = metadata.jobs ?? [];
   const jobs: LlmJobAction[] = [];
   for (const row of jobsIn) {
-    // Self-job answer (e.g. overdue «סגירה») closes locally — no Class V.
-    if (row.action === "answer" && !jobActionHasExternalEffect(row, ctx)) {
+    // Check-with / self answer is fulfillment of an open expects_reply job —
+    // never Class V. Asker report is delivered automatically with the answer.
+    if (row.action === "answer") {
       jobs.push(row);
       continue;
     }
-    // Third-party answer → always Class V for External Report (Local Answer is
-    // applied separately before staging). Never signal-bypass: cancel must not
-    // undo a silent asker send, and recovery after fail/cancel must re-offer.
-    if (row.action === "answer" && jobActionHasExternalEffect(row, ctx)) {
-      stripped.push({
-        policy: "P-Out",
-        kind: "job_outbound",
-        detail: `jobs.${row.action}`,
-      });
-      snap.jobs = [...(snap.jobs ?? []), row];
-      continue;
-    }
     if (JOB_OUTBOUND_ACTIONS.has(row.action) || row.reportText.trim()) {
-      // Explicit decline/counter/… in speaker channel → allow under signal.
+      // decline / counter / close / clear_clock (+ unexpected reportText).
       if (
         resolveHighRiskPOutMode(ctx.pOutMode) === "signal" &&
         hasOutboundIntentSignal(ctx.speakerText, ctx.isButtonCommand)

@@ -130,17 +130,13 @@ import {
   createScheduledJobsFromRelays,
   ensureOverdueTasksJob,
   ensureStaleUndatedTasksJob,
-  finalizeJobReportDelivery,
   formatOpenJobsContext,
   formatOpenJobsWaitingDump,
-  linkJobReportConfirm,
   listOpenJobsForViewer,
-  markJobReportsDeclinedForConfirm,
   markOverdueJobsOffered,
   markStaleUndatedJobsOffered,
   meetingListsForAnswers,
   sweepJobNudgesForRemovedItems,
-  type JobReportDeliveryStatus,
 } from "./jobs.service.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import {
@@ -2858,15 +2854,7 @@ export async function sendChatMessage(input: {
       conversationId: conversation.id,
     });
     if (ingest?.kind === "cancel") {
-      if (ingest.actionKind === "job_outbound") {
-        await markJobReportsDeclinedForConfirm(ingest.confirmId).catch(
-          () => undefined,
-        );
-        pendingConfirmCancelReply =
-          "ביטלתי את הדיווח — התשובה נשמרה אצלי. לא שלחתי עדכון לשואל.";
-      } else {
-        pendingConfirmCancelReply = formatHighRiskConfirmCancelReply();
-      }
+      pendingConfirmCancelReply = formatHighRiskConfirmCancelReply();
     } else if (ingest?.kind === "confirm") {
       // Execute-time integrity: dump/intent guards stay skipped for authorized
       // snapshots, but hash/TTL/status must still pass before side effects.
@@ -3479,11 +3467,6 @@ export async function sendChatMessage(input: {
     let highRiskMissesForResult: ResultIntentMiss[] = [];
     let highRiskOffer: Awaited<ReturnType<typeof stageHighRiskConfirm>> = null;
     let highRiskDidStrip = false;
-    let jobReportFinalizeStatus:
-      | "consumed"
-      | "consumed_partial"
-      | "failed_partial"
-      | null = null;
     /** Stage 5a: opaque Accept/Decline offers for presented pending invites. */
     let collabInviteOffers: NonNullable<
       Awaited<ReturnType<typeof stageCollabInviteConfirm>>
@@ -3525,41 +3508,6 @@ export async function sendChatMessage(input: {
             .slice(0, 8)
             .join(",")}`,
         );
-        // Safe order: Local Answer BEFORE staging External Report confirm.
-        // Never leave a staged confirm without a durable local answer, and
-        // never rely on cancel to undo a missing local write.
-        const strippedAnswers = (gated.strippedSnapshot.jobs ?? []).filter(
-          (row) => row.action === "answer" && row.jobId.trim(),
-        );
-        if (strippedAnswers.length > 0) {
-          const localApply = await withoutFailingTurn(
-            "job_local_answer_failed",
-            () =>
-              applyJobActions({
-                userId: input.userId,
-                digitalEmployeeId: digital.id,
-                speaker: { id: employee.id, name: speakerName(employee) },
-                actions: strippedAnswers,
-                jobs: openJobs,
-                commitExternalReports: false,
-              }),
-          );
-          if (localApply) {
-            for (const pending of localApply.pendingExternalReports) {
-              const open = openJobs.find((job) => job.id === pending.jobId);
-              if (open) {
-                open.meta = {
-                  ...open.meta,
-                  state: "answered_pending_report",
-                  answerText: pending.answerText,
-                  pendingReportText: pending.reportText,
-                  reportStatus: "pending",
-                  answeredAt: open.meta.answeredAt || new Date().toISOString(),
-                };
-              }
-            }
-          }
-        }
         if (employee.phone) {
           highRiskOffer =
             (await withoutFailingTurn("high_risk_stage_failed", () =>
@@ -3580,14 +3528,6 @@ export async function sendChatMessage(input: {
                 })),
               }),
             )) ?? null;
-          if (highRiskOffer && strippedAnswers.length > 0) {
-            await withoutFailingTurn("job_report_confirm_link_failed", () =>
-              linkJobReportConfirm({
-                jobIds: strippedAnswers.map((row) => row.jobId),
-                confirmId: highRiskOffer!.id,
-              }),
-            );
-          }
         }
       }
     }
@@ -4215,7 +4155,6 @@ export async function sendChatMessage(input: {
             speaker: { id: employee.id, name: speakerName(employee) },
             actions: metadata.jobs ?? [],
             jobs: openJobs,
-            commitExternalReports: Boolean(authorizedHighRiskConfirmId),
           }),
         );
     const missionApply = guestSpeaker
@@ -4655,34 +4594,17 @@ export async function sendChatMessage(input: {
         }),
       );
     }
-    if (authorizedHighRiskConfirmId && jobReports.some((row) => row.jobId)) {
-      const delivered = await deliverJobReportsWithDeliveryLedger({
+    const ledgerJobReports = jobReports.filter((row) => row.jobId);
+    const plainJobReports = jobReports.filter((row) => !row.jobId);
+    if (ledgerJobReports.length > 0) {
+      await deliverJobReportsWithDeliveryLedger({
         userId: input.userId,
-        confirmId: authorizedHighRiskConfirmId,
         actorId: employee.id,
-        relays: jobReports.filter((row) => row.jobId),
+        relays: ledgerJobReports,
       });
-      for (const outcome of delivered.outcomes) {
-        await finalizeJobReportDelivery({
-          jobId: outcome.jobId,
-          status: outcome.status,
-        });
-      }
-      const statuses = delivered.outcomes.map((row) => row.status);
-      if (statuses.length === 0) {
-        jobReportFinalizeStatus = "consumed";
-      } else if (statuses.every((status) => status === "accepted")) {
-        jobReportFinalizeStatus = "consumed";
-      } else if (statuses.every((status) => status === "failed")) {
-        jobReportFinalizeStatus = "failed_partial";
-      } else if (statuses.some((status) => status === "accepted")) {
-        jobReportFinalizeStatus = "consumed_partial";
-      } else {
-        // unknown / mixed non-accepted — do not auto-resend
-        jobReportFinalizeStatus = "failed_partial";
-      }
-    } else {
-      await deliverWhatsAppRelays(jobReports, employee.id);
+    }
+    if (plainJobReports.length > 0) {
+      await deliverWhatsAppRelays(plainJobReports, employee.id);
     }
     const involvedNotices = planInvolvedChangeNotices({
       actor: employee,
@@ -6571,7 +6493,7 @@ export async function sendChatMessage(input: {
       await withoutFailingTurn("high_risk_finalize_failed", () =>
         finalizePendingConfirm({
           confirmId: authorizedHighRiskConfirmId!,
-          status: jobReportFinalizeStatus ?? "consumed",
+          status: "consumed",
         }),
       );
     }
@@ -6642,8 +6564,8 @@ export async function sendChatMessage(input: {
 }
 
 /**
- * Job asker-report ledger: keyed by job id (not confirm id) so a retry after
- * certain failure cannot double-send, and unknown/accepted never auto-resend.
+ * Job asker-report ledger: keyed by job id so accepted|unknown never
+ * auto-resend, and certain `failed` may retry safely.
  */
 let jobReportWhatsAppSendForTests:
   | typeof deliverWhatsAppRelays
@@ -6655,9 +6577,10 @@ export function setJobReportWhatsAppSendForTests(
   jobReportWhatsAppSendForTests = fn;
 }
 
+type JobReportDeliveryStatus = "accepted" | "failed" | "unknown";
+
 async function deliverJobReportsWithDeliveryLedger(input: {
   userId: string;
-  confirmId: string;
   actorId: string;
   relays: Array<{
     target: PublicEmployee;

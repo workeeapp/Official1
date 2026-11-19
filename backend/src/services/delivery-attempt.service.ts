@@ -89,11 +89,32 @@ export async function claimDeliverySend(input: {
       };
     }
     if (existing.status === "failed" || existing.status === "queued") {
-      await prisma.deliveryAttempt.update({
-        where: { id: existing.id },
+      // CAS: only one parallel recovery from failed|queued may send.
+      const claimed = await prisma.deliveryAttempt.updateMany({
+        where: {
+          id: existing.id,
+          status: { in: ["failed", "queued"] },
+        },
         data: { status: "sending", lastError: null },
       });
-      return { maySend: true, attemptId: existing.id };
+      if (claimed.count === 1) {
+        return { maySend: true, attemptId: existing.id };
+      }
+      const again = await prisma.deliveryAttempt.findUnique({
+        where: { id: existing.id },
+      });
+      if (!again) {
+        return { maySend: false, attemptId: null };
+      }
+      const decision = decideDeliverySend(again.status as DeliveryAttemptStatus);
+      if (decision.action === "skip") {
+        return {
+          maySend: false,
+          attemptId: again.id,
+          skipReason: decision.reason,
+        };
+      }
+      return { maySend: false, attemptId: again.id };
     }
   }
 

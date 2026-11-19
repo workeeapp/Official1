@@ -531,7 +531,7 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
   );
 
   it(
-    "third-party jobs.answer with reportText still requires High Risk confirm",
+    "third-party jobs.answer auto-reports and closes without High Risk confirm",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
@@ -541,6 +541,10 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
       await prisma.employee.update({
         where: { id: account.employeeId },
         data: { phone: "972501000098" },
+      });
+      await prisma.employee.update({
+        where: { id: amit.id },
+        data: { phone: "972501000198" },
       });
 
       const tasksList =
@@ -608,46 +612,36 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
         message: "הכל טוב",
       });
 
-      expect(result.reply).toMatch(/אישור מפורש/);
-      expect(result.reply).toMatch(/דיווח אל עמית|דיווח לאדם אחר/);
-      expect(result.reply).toMatch(/טל מוסר שהכול טוב/);
-      expect(result.reply).not.toMatch(/עדכנתי/);
+      expect(result.reply).not.toMatch(/אישור מפורש/);
+      expect(result.reply).toMatch(/עדכנתי/);
       const pending = await prisma.pendingHighRiskConfirm.findFirst({
         where: {
           userId: account.userId,
           speakerEmployeeId: account.employeeId,
-          status: "offered",
+          status: { in: ["offered", "pending_offer"] },
         },
-        orderBy: { createdAt: "desc" },
       });
-      expect(pending).toBeTruthy();
-      expect(pending!.summaryText).not.toMatch(/\b(answer|decline|counter)\b/);
-      expect(pending!.summaryText).toMatch(/דיווח אל עמית/);
-      expect(pending!.summaryText).toMatch(/טל מוסר שהכול טוב/);
-      expect(pending!.actionKind).toBe("job_outbound");
+      expect(pending).toBeNull();
 
-      const stillOpen = await prisma.employeeListItem.findFirst({
-        where: { id: job.id, deletedAt: null },
+      const closed = await prisma.employeeListItem.findFirst({
+        where: { id: job.id },
       });
-      expect(stillOpen).toBeTruthy();
-      const localMeta = (stillOpen?.data as Record<string, unknown>)?.[
-        JOB_META_KEY
-      ] as Record<string, unknown>;
-      expect(localMeta?.state).toBe("answered_pending_report");
-      expect(localMeta?.reportStatus).toBe("pending");
-      expect(localMeta?.answerText).toBe("הכל טוב");
-      expect(localMeta?.reportConfirmId).toBe(pending!.id);
+      expect(closed?.deletedAt).not.toBeNull();
 
       const deliveries = await prisma.deliveryAttempt.count({
-        where: { userId: account.userId, confirmId: pending!.id },
+        where: {
+          userId: account.userId,
+          purpose: "job_report",
+          status: "accepted",
+        },
       });
-      expect(deliveries).toBe(0);
+      expect(deliveries).toBeGreaterThanOrEqual(1);
     },
     60_000,
   );
 
   it(
-    "multi openJobs: answers the named jobId — self closes, third-party stays gated",
+    "multi openJobs: answers the named jobId — self closes, third-party auto-closes",
     async () => {
       account = await createHarnessAccount(SPEAKER, { partners: [PARTNER] });
       const lucyId = await ensureLucy(account);
@@ -766,7 +760,7 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
         }),
       ).toBeNull();
 
-      // 2) Answer the third-party job by id — must gate, must not close it yet.
+      // 2) Answer the third-party job by id — auto report + close, no Class V.
       setLlmClientForTests(
         stubReply({
           responses: [{ text: "מסרתי.", buttons: [] }],
@@ -788,30 +782,20 @@ describe("HighRiskActionGate strip-only (sendChatMessage, eval-db)", () => {
         digitalEmployeeId: lucyId,
         message: "הכל טוב",
       });
-      expect(otherResult.reply).toMatch(/אישור מפורש/);
-      expect(otherResult.reply).toMatch(/דיווח אל עמית/);
-      expect(otherResult.reply).toMatch(/טל מוסר שהכול טוב/);
+      expect(otherResult.reply).not.toMatch(/אישור מפורש/);
+      expect(otherResult.reply).toMatch(/מסרתי/);
       const otherRow = await prisma.employeeListItem.findFirst({
-        where: { id: otherJob.id, deletedAt: null },
+        where: { id: otherJob.id },
       });
-      expect(otherRow).toBeTruthy();
-      const otherMeta = (otherRow?.data as Record<string, unknown>)?.[
-        JOB_META_KEY
-      ] as Record<string, unknown>;
-      expect(otherMeta?.state).toBe("answered_pending_report");
-      expect(otherMeta?.reportStatus).toBe("pending");
-      expect(otherMeta?.answerText).toBe("הכל טוב");
-      const pending = await prisma.pendingHighRiskConfirm.findFirst({
-        where: {
-          userId: account.userId,
-          status: "offered",
-        },
-        orderBy: { createdAt: "desc" },
-      });
-      expect(pending?.summaryText).toMatch(/דיווח אל עמית/);
-      expect(JSON.stringify(pending?.snapshot)).toContain(otherJob.id);
-      expect(JSON.stringify(pending?.snapshot)).not.toContain(selfJob.id);
-      expect(otherMeta?.reportConfirmId).toBe(pending?.id);
+      expect(otherRow?.deletedAt).not.toBeNull();
+      expect(
+        await prisma.pendingHighRiskConfirm.findFirst({
+          where: {
+            userId: account.userId,
+            status: { in: ["offered", "pending_offer"] },
+          },
+        }),
+      ).toBeNull();
     },
     90_000,
   );
