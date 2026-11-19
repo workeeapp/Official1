@@ -254,8 +254,9 @@ import {
   resolveAndRecordTipsForTurn,
 } from "./tips.service.js";
 import {
-  capabilitiesFromTurn,
   formatRecentOffersForSpeaker,
+  persistedRowsFromApply,
+  presentOpportunityReply,
   settleMemberOpportunity,
 } from "./opportunity.service.js";
 import {
@@ -6373,21 +6374,30 @@ export async function sendChatMessage(input: {
             Boolean(highRiskOffer) ||
             metadata.confirm === true,
           opportunity: metadata.opportunity ?? null,
-          applied: capabilitiesFromTurn({
-            tipOps,
-            listApplied: listMutations.some(
-              (row) =>
-                (row.action === "add" ||
-                  row.action === "update" ||
-                  row.action === "remove") &&
-                row.fromReminderCascade !== true,
-            ),
-            listActions: metadata.lists ?? [],
-            filingApplied: tipOps.some((op) => op.topic === "filing"),
-            remindersApplied: tipOps.some((op) => op.topic === "reminders"),
+          applied: persistedRowsFromApply({
+            lists: listMutations,
+            filings: filingMutations,
+            reminders: [
+              ...reminderResult.saved.map((row) => ({
+                id: row.id,
+                title: row.itemLabel || row.item || "",
+                created: true,
+              })),
+              ...(reminderResult.changes ?? [])
+                .filter((row) => row.id)
+                .map((row) => ({
+                  id: row.id!,
+                  title: row.label || "",
+                  created: false,
+                })),
+            ],
           }),
         }),
-      )) ?? { preview: null, offerId: null };
+      )) ?? { showPreview: null, hidePreview: null, offerId: null };
+    const spokenReply = presentOpportunityReply(workingReply, {
+      hide: opportunityAside.hidePreview,
+      show: null,
+    });
     const notice = [
       guestMutationNotice,
       registerNotice,
@@ -6407,22 +6417,23 @@ export async function sendChatMessage(input: {
     let reply = replaceSpoken
       ? composeAssistantReply({
           llmReply: workingReply,
-          notice: [
-            ...consultAnswers,
-            notice,
-            ...tipTurn.texts,
-            opportunityAside.preview ?? "",
-          ]
+          notice: [...consultAnswers, notice, ...tipTurn.texts]
             .filter(Boolean)
             .join("\n\n"),
           replaceResponse: true,
         })
-      : [...consultAnswers, notice, ...tipTurn.texts, opportunityAside.preview ?? ""]
+      : [...consultAnswers, notice, ...tipTurn.texts]
           .filter(Boolean)
           .reduce(
             (current, extra) => appendEngineNotice(current, extra),
-            workingReply,
+            spokenReply,
           );
+    if (opportunityAside.showPreview) {
+      reply = presentOpportunityReply(reply, {
+        hide: null,
+        show: opportunityAside.showPreview,
+      });
+    }
     if (inviteComposeUrl) {
       reply = setEngineWhatsappComposeUrl(reply, inviteComposeUrl);
     }

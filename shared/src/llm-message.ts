@@ -752,6 +752,11 @@ export interface LlmOpportunity {
   capability?: OpportunityCapability;
   /** Model-written preview. Not catalog copy. Omitted on accept. */
   preview?: string;
+  /**
+   * Intended target: an existing item id, or the title of a row not saved yet.
+   * Acceptance still requires the apply result to confirm this target.
+   */
+  subject?: string;
   /** Id of the offer the speaker is accepting. */
   accept?: string;
 }
@@ -783,12 +788,16 @@ export function parseOpportunity(
   const previewRaw =
     typeof record.preview === "string" ? record.preview.trim() : "";
   const preview = previewRaw ? previewRaw.slice(0, 400) : undefined;
+  const subjectRaw =
+    typeof record.subject === "string" ? record.subject.trim() : "";
+  const subject = subjectRaw ? subjectRaw.slice(0, 200) : undefined;
   if (!capability && !accept) {
     return null;
   }
   return {
     ...(capability ? { capability } : {}),
     ...(preview ? { preview } : {}),
+    ...(subject ? { subject } : {}),
     ...(accept ? { accept } : {}),
   };
 }

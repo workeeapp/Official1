@@ -1886,6 +1886,11 @@
                     "type": "string",
                     "maxLength": 400
                   },
+                  "subject": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Existing item id, or the exact title of a row that does not exist yet. The apply result must confirm it."
+                  },
                   "accept": {
                     "type": "string",
                     "maxLength": 36
