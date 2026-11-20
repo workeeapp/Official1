@@ -1,8 +1,10 @@
 /**
  * UWM Phase 4 — precise arming + dual schedule helpers.
  * Reuses fireAtFromExternalEvent; does not add a new scheduler.
+ * eventAt / eventAtIso must be absolute UTC (see isAbsoluteUtcTimestamp).
  */
 import { fireAtFromExternalEvent } from "./fact-followup.service.js";
+import { isAbsoluteUtcTimestamp } from "./uwm-event-at.js";
 import type {
   UwmMonitorItemState,
   UwmMonitorState,
@@ -30,6 +32,7 @@ export function computePreciseFireAt(
   eventAtIso: string,
   minutesBefore: number,
 ): Date | null {
+  if (!isAbsoluteUtcTimestamp(eventAtIso)) return null;
   return fireAtFromExternalEvent(eventAtIso, -Math.abs(minutesBefore));
 }
 
@@ -39,6 +42,7 @@ export function isWithinPreciseCatchUp(input: {
   eventAtIso: string;
   graceMs?: number;
 }): boolean {
+  if (!isAbsoluteUtcTimestamp(input.eventAtIso)) return false;
   const eventMs = Date.parse(input.eventAtIso);
   if (!Number.isFinite(eventMs)) return false;
   const grace = input.graceMs ?? UWM_PRECISE_GRACE_MS;
@@ -54,6 +58,7 @@ export function isPastPreciseGrace(input: {
   eventAtIso: string;
   graceMs?: number;
 }): boolean {
+  if (!isAbsoluteUtcTimestamp(input.eventAtIso)) return false;
   const eventMs = Date.parse(input.eventAtIso);
   if (!Number.isFinite(eventMs)) return false;
   const grace = input.graceMs ?? UWM_PRECISE_GRACE_MS;
@@ -79,7 +84,8 @@ export function computeNextPrecise(input: {
 
     for (const [itemId, st] of Object.entries(input.items)) {
       if (st.status === "cancelled" || st.status === "expired") continue;
-      if (!st.eventAt) continue;
+      // Reject date-only / timezone-less local — only absolute UTC eventAt arms.
+      if (!isAbsoluteUtcTimestamp(st.eventAt)) continue;
       if (st.notified[phase] || st.notified[missed]) continue;
       if (
         st.evidenceGrade === "unverified" ||
@@ -87,10 +93,10 @@ export function computeNextPrecise(input: {
       ) {
         continue;
       }
-      const fireAt = computePreciseFireAt(st.eventAt, mins);
+      const fireAt = computePreciseFireAt(st.eventAt!, mins);
       if (!fireAt) continue;
       // Already past grace → leave for missed marker elsewhere
-      if (isPastPreciseGrace({ now: input.now, eventAtIso: st.eventAt })) {
+      if (isPastPreciseGrace({ now: input.now, eventAtIso: st.eventAt! })) {
         continue;
       }
       const ms = fireAt.getTime();
@@ -101,7 +107,7 @@ export function computeNextPrecise(input: {
           objectiveId: obj.id,
           minutesBefore: mins,
           fireAtIso: fireAt.toISOString(),
-          eventAtIso: st.eventAt,
+          eventAtIso: new Date(Date.parse(st.eventAt!)).toISOString(),
         };
       }
     }

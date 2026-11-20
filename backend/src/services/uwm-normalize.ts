@@ -10,6 +10,12 @@ import type {
   UwmFactProvenance,
   UwmMonitorItemState,
 } from "./uwm-types.js";
+import {
+  extractEventAtFromRetrievalText,
+  isDateOnly,
+  normalizeAbsoluteUtcIso,
+  normalizePublishedAt,
+} from "./uwm-event-at.js";
 
 /** Same-core events farther apart than this are distinct items. */
 export const UWM_ALIAS_MAX_DELTA_MS = 36 * 60 * 60_000;
@@ -214,6 +220,12 @@ export function extractRawCandidates(input: {
     // No citable URL → leave unverified path empty (fail-closed for notify).
     return [];
   }
+  // Shared across URL rows: one retrieval blob → at most one eventAt (fail-closed).
+  const extracted = extractEventAtFromRetrievalText({
+    text: input.text,
+    sources: input.sources,
+  });
+
   return uniqueUrls.map((url, i) => {
     const title =
       lines.find(
@@ -223,14 +235,46 @@ export function extractRawCandidates(input: {
           l.length <= 160 &&
           !/UWM_FIXTURE/i.test(l),
       ) ?? `Result ${i + 1}`;
-    return {
+    const base: RawMonitorCandidate = {
       title,
       url,
       sourceUrls: [url],
       summary: lines.slice(0, 3).join(" ").slice(0, 280),
       retrievalOk: true,
     };
+    if (!extracted) return base;
+    return {
+      ...base,
+      eventAt: extracted.eventAtIso,
+      attributes: {
+        eventAtLocal: extracted.localWall,
+        eventAtTimeZone: extracted.timeZone,
+        eventAtTimeZoneSource: extracted.timeZoneSource,
+        eventAtSnippet: extracted.snippet,
+        eventAtExtractedFrom: "web_search_prose",
+      },
+    };
   });
+}
+
+/**
+ * Sanitize candidate eventAt to UTC absolute only.
+ * Date-only may be preserved on attributes.eventDate (not eventAt).
+ */
+export function sanitizeCandidateEventAt(c: RawMonitorCandidate): {
+  eventAt: string | null;
+  attributes: Record<string, string | number | boolean | null>;
+} {
+  const attrs: Record<string, string | number | boolean | null> = {
+    ...(c.attributes ?? {}),
+  };
+  const raw = c.eventAt ?? null;
+  if (isDateOnly(raw)) {
+    attrs.eventDate = String(raw).trim();
+    return { eventAt: null, attributes: attrs };
+  }
+  const utc = normalizeAbsoluteUtcIso(raw);
+  return { eventAt: utc, attributes: attrs };
 }
 
 function officialHint(url?: string): boolean {
@@ -308,13 +352,16 @@ export function normalizeCandidates(input: {
       ),
     ];
     const retrievedAt = input.fetchedAt;
-    const publishedAt = c.publishedAt ?? null;
+    const publishedAt = normalizePublishedAt(c.publishedAt ?? null);
+    const sanitized = sanitizeCandidateEventAt(c);
+    const eventAt = sanitized.eventAt;
+    const attrs = sanitized.attributes;
     const contentFp = shaContent([
       title,
       c.summary,
-      c.eventAt,
+      eventAt,
       c.locationText,
-      JSON.stringify(c.attributes ?? {}),
+      JSON.stringify(attrs),
       (c as { bodyFp?: string }).bodyFp,
     ]);
     const provenance: UwmFactProvenance[] = sourceUrls.map((u, i) => ({
@@ -361,7 +408,7 @@ export function normalizeCandidates(input: {
         : resolveStableItemId(
             {
               title,
-              eventAt: c.eventAt,
+              eventAt,
               url,
               locationText: c.locationText,
             },
@@ -374,9 +421,9 @@ export function normalizeCandidates(input: {
       summary: c.summary?.trim() || undefined,
       url,
       sourceUrls,
-      eventAt: c.eventAt ?? null,
+      eventAt,
       locationText: c.locationText ?? null,
-      attributes: c.attributes ?? {},
+      attributes: attrs,
       contentFp,
       confidence: 0,
       retrievedAt,

@@ -269,7 +269,7 @@ describe("UWM Phase 4 precise schedule (C1–C4)", () => {
       ),
     });
     expect(moved.monitorState.items[itemId]?.eventAt).toBe(
-      "2026-06-01T19:00:00Z",
+      "2026-06-01T19:00:00.000Z",
     );
     expect(moved.nextPrecise?.fireAtIso).toBe(
       new Date("2026-06-01T18:00:00Z").toISOString(),
@@ -552,7 +552,7 @@ describe("UWM Phase 4 precise schedule (C1–C4)", () => {
       ),
     });
     expect(Object.keys(r.monitorState.items).length).toBe(2);
-    expect(r.nextPrecise?.eventAtIso).toBe("2026-06-01T20:00:00Z");
+    expect(r.nextPrecise?.eventAtIso).toBe("2026-06-01T20:00:00.000Z");
     expect(r.nextPrecise?.fireAtIso).toBe(
       new Date("2026-06-01T19:00:00Z").toISOString(),
     );
@@ -594,7 +594,9 @@ describe("UWM Phase 4 precise schedule (C1–C4)", () => {
       ),
     });
     expect(afterFirst.notify.shouldNotify).toBe(true);
-    expect(afterFirst.nextPrecise?.eventAtIso).toBe("2026-06-02T18:00:00Z");
+    expect(afterFirst.nextPrecise?.eventAtIso).toBe(
+      "2026-06-02T18:00:00.000Z",
+    );
   });
 
   it("computeNextPrecise skips unverified / cancelled", () => {

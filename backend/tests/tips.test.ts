@@ -16,6 +16,7 @@ const {
   employeeFindFirst,
   sendWhatsAppText,
   composeCatalogTip,
+  resolveSpeakerCapabilityFamiliarity,
 } = vi.hoisted(() => ({
   tipFindMany: vi.fn(),
   tipFindUnique: vi.fn(),
@@ -32,6 +33,7 @@ const {
   employeeFindFirst: vi.fn(),
   sendWhatsAppText: vi.fn(),
   composeCatalogTip: vi.fn(),
+  resolveSpeakerCapabilityFamiliarity: vi.fn(async () => new Map()),
 }));
 
 vi.mock("../src/database/prisma.js", () => ({
@@ -68,6 +70,15 @@ vi.mock("../src/services/tip-compose.js", async (importOriginal) => {
   return {
     ...actual,
     composeCatalogTip,
+  };
+});
+
+vi.mock("../src/services/capability-evidence.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/capability-evidence.js")>();
+  return {
+    ...actual,
+    resolveSpeakerCapabilityFamiliarity,
   };
 });
 
@@ -166,6 +177,8 @@ describe("tips service", () => {
     employeeFindMany.mockReset();
     employeeFindFirst.mockReset();
     composeCatalogTip.mockReset();
+    resolveSpeakerCapabilityFamiliarity.mockReset();
+    resolveSpeakerCapabilityFamiliarity.mockResolvedValue(new Map());
     employeeFindMany.mockResolvedValue([]);
     tipFindUnique.mockResolvedValue(null);
     tipDeleteMany.mockResolvedValue({ count: 0 });
@@ -1296,6 +1309,131 @@ describe("sendTipForUser", () => {
       "תמחקי את חלב",
       { ignoreSession: true },
     );
+  });
+
+  it("PIE-1: requireNextStep blocks prospect ads and allows question tips", async () => {
+    tipFindMany.mockResolvedValue([
+      tipRow({
+        id: "ad",
+        key: "prospect_onboard_shopping",
+        triggerKind: "general",
+        triggerArea: null,
+        triggerOp: null,
+        topic: null,
+        listType: null,
+        text: "דרך אגב, אפשר לכתוב תוסיפי חלב לקניות",
+        order: 41,
+      }),
+      tipRow({
+        id: "ask",
+        key: "custom_offer_share",
+        triggerKind: "general",
+        triggerArea: null,
+        triggerOp: null,
+        topic: null,
+        listType: null,
+        text: "רוצה שאשתף את הרשימה עם עמית?",
+        order: 50,
+        minIntervalMinutes: 0,
+      }),
+    ]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+
+    const available = await formatAvailableTipsContext({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      requireNextStep: true,
+    });
+    expect(available).not.toContain("prospect_onboard_shopping");
+    expect(available).toContain("custom_offer_share");
+
+    const blocked = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["prospect_onboard_shopping"],
+      requireNextStep: true,
+      prospectOnboarding: { enabled: true, inboundTurnCount: 1 },
+    });
+    expect(blocked.texts).toEqual([]);
+
+    const allowed = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["custom_offer_share"],
+      requireNextStep: true,
+    });
+    expect(allowed.texts[0]).toContain("רוצה שאשתף");
+  });
+
+  it("P1: suppresses soft-try tip when capability already tried", async () => {
+    resolveSpeakerCapabilityFamiliarity.mockResolvedValue(
+      new Map([
+        [
+          "shopping_list",
+          {
+            capabilityId: "shopping_list",
+            shown: false,
+            tried: true,
+            using: false,
+            matchCount: 1,
+            matchesInWindow: 1,
+          },
+        ],
+      ]),
+    );
+    tipFindMany.mockResolvedValue([
+      tipRow({
+        id: "p1-shop",
+        key: "prospect_onboard_shopping",
+        triggerKind: "general",
+        triggerArea: null,
+        triggerOp: null,
+        topic: null,
+        listType: null,
+        text: "תוסיפי חלב לקניות",
+        order: 41,
+      }),
+      tipRow({
+        id: "p1-weather",
+        key: "general_weather",
+        triggerKind: "general",
+        triggerArea: null,
+        triggerOp: null,
+        topic: null,
+        listType: null,
+        text: "מזג אוויר ☀️",
+        order: 800,
+        minIntervalMinutes: GENERAL_TIP_MIN_INTERVAL_MINUTES,
+      }),
+    ]);
+    tipProgressFindMany.mockResolvedValue([]);
+    tipProgressFindUnique.mockResolvedValue(null);
+    tipProgressCreate.mockResolvedValue({});
+
+    const available = await formatAvailableTipsContext({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+    });
+    expect(available).not.toContain("prospect_onboard_shopping");
+    expect(available).toContain("general_weather");
+
+    const turn = await resolveAndRecordTipsForTurn({
+      userId: USER,
+      speaker,
+      digitalEmployeeId: LUCY,
+      appliedOps: [],
+      modelTipKeys: ["prospect_onboard_shopping"],
+      prospectOnboarding: { enabled: true, inboundTurnCount: 1 },
+    });
+    expect(turn.texts).toEqual([]);
   });
 });
 

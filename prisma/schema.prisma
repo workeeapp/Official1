@@ -33,6 +33,8 @@ model User {
   pendingHighRiskConfirms PendingHighRiskConfirm[]
   deliveryAttempts        DeliveryAttempt[]
   pendingProspectActions  PendingProspectAction[]
+  interactionOpportunities InteractionOpportunity[]
+  initiativePreferences    InitiativePreference[]
 
   @@map("Users")
 }
@@ -124,6 +126,12 @@ model Employee {
   /** How Lucy addresses this human in Hebrew: male | female | null (ask once). */
   addressGender String?  @map("address_gender") @db.VarChar(16)
   /**
+   * IANA home time zone for wall-clock interpretation at reminder create
+   * (e.g. Asia/Jerusalem). Default only — never inferred from momentary location.
+   * Changing this does not rewrite existing Reminder.fireAt / scheduleTimeZone.
+   */
+  timeZone String @default("Asia/Jerusalem") @map("time_zone") @db.VarChar(64)
+  /**
    * Registered member → host-account employee kept on shared lists (same id that
    * was the WhatsApp guest). Null when not linked.
    */
@@ -148,6 +156,10 @@ model Employee {
   tipsTargeted             Tip[]              @relation("TipDigital")
   tipProgressAsSpeaker     TipProgress[]      @relation("TipProgressSpeaker")
   tipProgressAsDigital     TipProgress[]      @relation("TipProgressDigital")
+  interactionOpportunitiesAsSpeaker InteractionOpportunity[] @relation("InteractionOpportunitySpeaker")
+  interactionOpportunitiesAsDigital InteractionOpportunity[] @relation("InteractionOpportunityDigital")
+  initiativePreferencesAsSpeaker InitiativePreference[] @relation("InitiativePreferenceSpeaker")
+  initiativePreferencesAsDigital InitiativePreference[] @relation("InitiativePreferenceDigital")
   missionsOrchestrated     Mission[]          @relation("MissionOrchestrator")
   missionsExecuted         Mission[]          @relation("MissionExecutor")
   missionsAsSpeaker        Mission[]          @relation("MissionSpeaker")
@@ -223,6 +235,77 @@ model TipProgress {
   @@unique([tipId, employeeId, digitalEmployeeId])
   @@index([employeeId, digitalEmployeeId])
   @@map("TipProgress")
+}
+
+/**
+ * PIE-2 Interaction State — one row per offer event (append-on-offer).
+ * TipProgress remains shown-count only; accept/decline/ignore/expire live here.
+ * At most one status=offered row per (employee, digital, opportunityKey) —
+ * enforced by partial unique index in migration + idempotent service write.
+ */
+model InteractionOpportunity {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  employeeId          String    @map("employee_id") @db.Uuid
+  digitalEmployeeId   String    @map("digital_employee_id") @db.Uuid
+  opportunityKey      String    @map("opportunity_key") @db.VarChar(160)
+  /** act_followup | capability_opportunity | open_item_raise | consent_cta */
+  kind                String    @db.VarChar(32)
+  capabilityId        String?   @map("capability_id") @db.VarChar(64)
+  /** offered | accepted | declined | ignored | expired */
+  status              String    @db.VarChar(16)
+  offeredAt           DateTime  @map("offered_at")
+  resolvedAt          DateTime? @map("resolved_at")
+  /** Reserved for PIE-3 Value attribution — unused in PIE-2. */
+  valueAt             DateTime? @map("value_at")
+  conversationId      String?   @map("conversation_id") @db.Uuid
+  turnRef             Int?      @map("turn_ref")
+  /**
+   * null = no timed suppress (unless suppressIndefinite).
+   * Future date = suppress until then.
+   */
+  suppressUntil       DateTime? @map("suppress_until")
+  /**
+   * Explicit «אל תציעי X» — suppress until user explicitly lifts.
+   * SoT for indefinite suppress; do NOT treat suppressUntil=null as "no suppress"
+   * when this flag is true.
+   */
+  suppressIndefinite  Boolean   @default(false) @map("suppress_indefinite")
+  entityRef           String?   @map("entity_ref") @db.VarChar(160)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employee            Employee  @relation("InteractionOpportunitySpeaker", fields: [employeeId], references: [id], onDelete: Cascade)
+  digitalEmployee     Employee  @relation("InteractionOpportunityDigital", fields: [digitalEmployeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, digitalEmployeeId, opportunityKey, status])
+  @@index([employeeId, digitalEmployeeId, status, suppressUntil])
+  @@index([status, offeredAt])
+  @@map("InteractionOpportunities")
+}
+
+/**
+ * PIE-2 durable initiative preference (explicit utterance only; no inferred).
+ * proactive is stored but behaves like balanced until a later stage.
+ */
+model InitiativePreference {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @map("user_id") @db.Uuid
+  employeeId        String   @map("employee_id") @db.Uuid
+  digitalEmployeeId String   @map("digital_employee_id") @db.Uuid
+  /** quiet | balanced | proactive — default balanced */
+  mode              String   @default("balanced") @db.VarChar(16)
+  /** explicit_utterance | default */
+  source            String   @default("default") @db.VarChar(32)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employee          Employee @relation("InitiativePreferenceSpeaker", fields: [employeeId], references: [id], onDelete: Cascade)
+  digitalEmployee   Employee @relation("InitiativePreferenceDigital", fields: [digitalEmployeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, digitalEmployeeId])
+  @@index([userId])
+  @@map("InitiativePreferences")
 }
 
 model ChatConversation {
@@ -444,6 +527,16 @@ model Reminder {
   repeat    String   @default("once") @db.VarChar(32)
   /** Structured repeat rule from the model (freq/interval/weekdays/month_day/month/time/until/count). Wins over `repeat`. */
   recurrence Json?
+  /**
+   * IANA zone in which this clock's wall time was interpreted (source of truth for
+   * calendar recurrence). NULL = legacy Jerusalem path. Never backfilled.
+   */
+  scheduleTimeZone String? @map("schedule_time_zone") @db.VarChar(64)
+  /**
+   * Metadata only: asker | recipient | explicit | duration — how scheduleTimeZone
+   * was chosen at create. Not used by settle/nextOccurrence.
+   */
+  wallClockIntent String? @map("wall_clock_intent") @db.VarChar(16)
   /** Occurrences fired so far — enforces recurrence.count. */
   occurrencesFired Int @default(0) @map("occurrences_fired")
   pingIds     Json     @default("[]") @map("ping_ids")

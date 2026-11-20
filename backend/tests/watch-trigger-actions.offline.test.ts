@@ -47,6 +47,8 @@ vi.mock("../src/services/whatsapp-log.js", () => ({
 
 import {
   executeWatchTriggerActions,
+  isWatchTriggerGateBlockedError,
+  markWatchTriggerActionsGateBlocked,
   markWatchTriggerNotified,
   normalizeWatchTriggerPackage,
   parseWatchTriggerExecLedger,
@@ -170,6 +172,44 @@ describe("watch-trigger-actions package", () => {
       expect(ok.package.actions).toHaveLength(1);
       expect(ok.package.actions[0]!.list.listId).toBe("list-1");
       expect(ok.package.actions[0]!.mode).toBe("static");
+    }
+  });
+
+  it("accepts שם משימה as item identity for deferred tasks.add", async () => {
+    employeeListFindFirst.mockResolvedValue({ id: "tasks-1", titleField: "" });
+    const ok = await normalizeWatchTriggerPackage({
+      raw: {
+        lists: [
+          {
+            action: "add",
+            listType: "tasks",
+            listName: "",
+            items: [
+              {
+                "שם משימה":
+                  "לבדוק אם צריך לעדכן את ההזמנה בעקבות שינוי במדיניות הכבודה",
+              },
+            ],
+            targets: [],
+            mode: "static",
+          },
+        ],
+      },
+      actorEmployeeId: "owner-1",
+      ownerEmployeeId: "owner-1",
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.package.actions[0]!.kind).toBe("lists.add");
+      expect(ok.package.actions[0]!.list.listType).toBe("tasks");
+      expect(ok.package.actions[0]!.list.listId).toBe("tasks-1");
+      expect(
+        String(
+          (ok.package.actions[0]!.list.items[0] as Record<string, unknown>)[
+            "שם משימה"
+          ],
+        ),
+      ).toContain("לבדוק");
     }
   });
 
@@ -431,6 +471,92 @@ describe("watch-trigger-actions package", () => {
       ran.ledger.events["market:below"]!.actions["lists.add:aaaa"]!.resultHint,
     ).toBe("skipped_duplicate_title");
     expect(applyEmployeeRecords).not.toHaveBeenCalled();
+  });
+
+  it("gate block marks failed; Recovery skips; same-fp execute retries after Gate would pass", async () => {
+    const pkg = basePackage();
+    const blocked = await markWatchTriggerActionsGateBlocked({
+      reminderId: "rem-1",
+      ledger: { version: 1, events: {} },
+      package: pkg,
+      fingerprint: "fp-unverified",
+      reason: "unverified",
+    });
+    const state = blocked.events["fp-unverified"]!.actions["lists.add:aaaa"]!;
+    expect(state.status).toBe("failed");
+    expect(isWatchTriggerGateBlockedError(state.lastError)).toBe(true);
+    expect(
+      watchTriggerNeedsActionRecovery(blocked, pkg, "fp-unverified"),
+    ).toBe(false);
+
+    // Notify after gate block must not reopen Actions as pending.
+    const afterNotify = await markWatchTriggerNotified({
+      reminderId: "rem-1",
+      ledger: blocked,
+      package: pkg,
+      fingerprint: "fp-unverified",
+      notified: true,
+    });
+    expect(
+      afterNotify.events["fp-unverified"]!.actions["lists.add:aaaa"]!.status,
+    ).toBe("failed");
+    expect(afterNotify.events["fp-unverified"]!.notified).toBe(true);
+
+    // Fresh Gate ok on the same fingerprint may retry via execute (not Recovery).
+    applyEmployeeRecords.mockClear();
+    applyEmployeeRecords.mockResolvedValue(okApply("חלב"));
+    const retried = await executeWatchTriggerActions({
+      reminderId: "rem-1",
+      userId: "user-1",
+      package: pkg,
+      ledger: afterNotify,
+      fingerprint: "fp-unverified",
+      facts: {},
+    });
+    expect(retried.actionResults[0]!.status).toBe("done");
+    expect(applyEmployeeRecords).toHaveBeenCalledTimes(1);
+    expect(
+      watchTriggerNeedsActionRecovery(retried.ledger, pkg, "fp-unverified"),
+    ).toBe(false);
+  });
+
+  it("gate-blocked fingerprint is not recovered when a later fingerprint Applies", async () => {
+    const pkg = basePackage();
+    const blocked = await markWatchTriggerActionsGateBlocked({
+      reminderId: "rem-1",
+      ledger: { version: 1, events: {} },
+      package: pkg,
+      fingerprint: "fp-old-unverified",
+      reason: "unverified",
+    });
+    expect(
+      watchTriggerNeedsActionRecovery(blocked, pkg, "fp-old-unverified"),
+    ).toBe(false);
+
+    applyEmployeeRecords.mockResolvedValue(okApply("חלב"));
+    const newer = await executeWatchTriggerActions({
+      reminderId: "rem-1",
+      userId: "user-1",
+      package: pkg,
+      ledger: blocked,
+      fingerprint: "fp-new-observed",
+      facts: {},
+    });
+    expect(newer.actionResults[0]!.status).toBe("done");
+    expect(
+      newer.ledger.events["fp-old-unverified"]!.actions["lists.add:aaaa"]!
+        .status,
+    ).toBe("failed");
+    expect(
+      isWatchTriggerGateBlockedError(
+        newer.ledger.events["fp-old-unverified"]!.actions["lists.add:aaaa"]!
+          .lastError,
+      ),
+    ).toBe(true);
+    // Cross-fp Recovery must still refuse the gate-blocked entry.
+    expect(
+      watchTriggerNeedsActionRecovery(newer.ledger, pkg, "fp-old-unverified"),
+    ).toBe(false);
   });
 
   it("parseWatchTriggerPackage round-trips", () => {

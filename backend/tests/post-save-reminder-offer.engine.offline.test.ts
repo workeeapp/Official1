@@ -9,6 +9,7 @@ import {
   metadataRequestsReminderThisTurn,
   POST_SAVE_REMINDER_OFFER_TEXT,
   shouldInjectPostSaveReminderOffer,
+  stripSoftYesNoOfferBubbles,
 } from "../src/services/post-save-reminder-offer.js";
 
 function timedAddMetadata() {
@@ -119,5 +120,22 @@ describe("post-save reminder offer engine safety-net", () => {
         bubbles: [{ text: "ok" }],
       }),
     ).toBe(false);
+  });
+
+  it("strips soft yes/no offer bubbles without dropping Act text bubbles", () => {
+    const bubbles: LlmSpokenBubble[] = [
+      { text: "שמרתי." },
+      {
+        text: POST_SAVE_REMINDER_OFFER_TEXT,
+        buttons: [
+          { label: "כן", command: "כן" },
+          { label: "לא", command: "לא" },
+        ],
+      },
+    ];
+    expect(bubblesHaveSoftYesNoOffer(bubbles)).toBe(true);
+    const stripped = stripSoftYesNoOfferBubbles(bubbles);
+    expect(bubblesHaveSoftYesNoOffer(stripped)).toBe(false);
+    expect(stripped.some((b) => (b.text ?? "").includes("שמרתי"))).toBe(true);
   });
 });

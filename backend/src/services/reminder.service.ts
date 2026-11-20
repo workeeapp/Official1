@@ -61,6 +61,11 @@ import {
 } from "./compose-condition.js";
 import { fetchQuote } from "./market.js";
 import { scheduleSoon } from "./reminder-fire.js";
+import {
+  bootstrapWebMonitorCreateTurn,
+  conditionHasTimeBeforeEvent,
+  type UwmBootstrapArmStatus,
+} from "./uwm-create-bootstrap.js";
 import { seedWatchBaseline } from "./watch-baseline.js";
 import {
   normalizeWatchTriggerPackage,
@@ -2960,6 +2965,8 @@ export async function applyReminders(input: {
    * so foreign ping clocks may fire.
    */
   highRiskAuthorized?: boolean;
+  /** Optional clock for create-turn UWM bootstrap (tests / deterministic arm). */
+  now?: Date;
 }): Promise<{
   removed: string[];
   missed: string[];
@@ -2981,6 +2988,14 @@ export async function applyReminders(input: {
      * not array-order zip).
      */
     requestedItemId?: string;
+    /** UWM create-turn bootstrap (time_before_event watches only). */
+    uwmBootstrap?: {
+      armStatus: UwmBootstrapArmStatus;
+      eventAtIso: string | null;
+      preciseFireAtIso: string | null;
+      fireAtIso: string | null;
+      itemTitle: string | null;
+    };
   }>;
   skipped: Array<{
     item: string;
@@ -3021,6 +3036,14 @@ export async function applyReminders(input: {
     sameTimeOthers?: string[];
     composeAtFire?: boolean;
     hasComposeCondition?: boolean;
+    requestedItemId?: string;
+    uwmBootstrap?: {
+      armStatus: UwmBootstrapArmStatus;
+      eventAtIso: string | null;
+      preciseFireAtIso: string | null;
+      fireAtIso: string | null;
+      itemTitle: string | null;
+    };
   }> = [];
   const skipped: Array<{
     item: string;
@@ -3817,7 +3840,65 @@ export async function applyReminders(input: {
         summary: `${existing ? "update" : "add"} reminder: ${label}`,
         detail: { fireAt: fireAt.toISOString(), pingIds },
       });
-      const fireLabel = formatJerusalemDateTime(fireAt);
+
+      // Create-turn UWM bootstrap: only after Watch row is committed.
+      // time_before_event → one suppressNotify poll; arms nextPrecise / dualFireAt.
+      let effectiveFireAt = fireAt;
+      let uwmBootstrap:
+        | {
+            armStatus: UwmBootstrapArmStatus;
+            eventAtIso: string | null;
+            preciseFireAtIso: string | null;
+            fireAtIso: string | null;
+            itemTitle: string | null;
+          }
+        | undefined;
+      const parsedForBootstrap =
+        resolvedCondition !== Prisma.DbNull
+          ? conditionFromReminderJson(resolvedCondition)
+          : null;
+      // Bootstrap only on fresh create (not every update) to avoid re-search storms.
+      if (
+        !existing &&
+        conditionHasTimeBeforeEvent(
+          parsedForBootstrap?.type === "web_monitor"
+            ? parsedForBootstrap
+            : null,
+        )
+      ) {
+        try {
+          const boot = await bootstrapWebMonitorCreateTurn({
+            reminderId: row.id,
+            userId: input.userId,
+            composeCondition: resolvedCondition,
+            watchOnce: nextWatchOnce,
+            ...(input.now ? { now: input.now } : {}),
+          });
+          uwmBootstrap = {
+            armStatus: boot.armStatus,
+            eventAtIso: boot.eventAtIso,
+            preciseFireAtIso: boot.preciseFireAtIso,
+            fireAtIso: boot.fireAtIso,
+            itemTitle: boot.itemTitle,
+          };
+          if (boot.fireAtIso) {
+            const parsedFire = Date.parse(boot.fireAtIso);
+            if (Number.isFinite(parsedFire)) {
+              effectiveFireAt = new Date(parsedFire);
+            }
+          }
+        } catch {
+          uwmBootstrap = {
+            armStatus: "poll_failed",
+            eventAtIso: null,
+            preciseFireAtIso: null,
+            fireAtIso: fireAt.toISOString(),
+            itemTitle: null,
+          };
+        }
+      }
+
+      const fireLabel = formatJerusalemDateTime(effectiveFireAt);
       const sameTimeOthers = uniqueLabels(
         owned
           .filter(
@@ -3844,6 +3925,7 @@ export async function applyReminders(input: {
         ...(requestedItemId && LINK_UUID_RE.test(requestedItemId)
           ? { requestedItemId }
           : {}),
+        ...(uwmBootstrap ? { uwmBootstrap } : {}),
       });
       if (existing) {
         changes.push({
@@ -3863,7 +3945,7 @@ export async function applyReminders(input: {
           ],
         });
       }
-      scheduleSoon(fireAt);
+      scheduleSoon(effectiveFireAt);
     } catch {
       skipped.push({ item: reminder.item.trim(), reason: "db" });
     }
@@ -3993,6 +4075,13 @@ export function formatReminderApplyNotice(result: {
     ping?: string;
     sameTimeOthers?: string[];
     composeAtFire?: boolean;
+    uwmBootstrap?: {
+      armStatus: UwmBootstrapArmStatus;
+      eventAtIso: string | null;
+      preciseFireAtIso: string | null;
+      fireAtIso: string | null;
+      itemTitle: string | null;
+    };
   }>;
   skipped?: Array<{
     item: string;
@@ -4001,8 +4090,44 @@ export function formatReminderApplyNotice(result: {
   }>;
 }): string {
   const parts: string[] = [];
-  // Success save/remove: no engine ack — the model's response already confirms
-  // (אזכיר לך… / ביטלתי…). Keep skip / missed corrections only.
+  // UWM create-turn: engine ack from bootstrap DB truth only.
+  for (const row of result.saved ?? []) {
+    const boot = row.uwmBootstrap;
+    if (!boot) continue;
+    const label = row.item.trim() || "המעקב";
+    if (
+      boot.armStatus === "armed" &&
+      boot.eventAtIso &&
+      boot.preciseFireAtIso
+    ) {
+      const eventLabel = formatJerusalemDateTime(new Date(boot.eventAtIso));
+      const remindLabel = formatJerusalemDateTime(
+        new Date(boot.preciseFireAtIso),
+      );
+      parts.push(
+        `שמרתי מעקב ל«${label}». האירוע ב־${eventLabel}; אזכיר ב־${remindLabel}.`,
+      );
+    } else if (boot.armStatus === "catch_up" && boot.eventAtIso) {
+      const eventLabel = formatJerusalemDateTime(new Date(boot.eventAtIso));
+      parts.push(
+        `שמרתי מעקב ל«${label}». מועד האירוע (${eventLabel}) כבר בחלון התזכורת — אבדוק מיד בסיבוב הבא. לא נשמרה תזכורת עתידית חדשה.`,
+      );
+    } else if (boot.armStatus === "too_late" && boot.eventAtIso) {
+      const eventLabel = formatJerusalemDateTime(new Date(boot.eventAtIso));
+      parts.push(
+        `שמרתי מעקב ל«${label}». מועד האירוע (${eventLabel}) כבר עבר ביחס לחלון התזכורת — לא קבעתי תזכורת מתוארכת.`,
+      );
+    } else if (boot.armStatus === "poll_failed") {
+      parts.push(
+        `שמרתי מעקב ל«${label}». לא הצלחתי לאמת מועד עכשיו — אמשיך לבדוק במחזור הבא, בלי תזכורת מתוארכת.`,
+      );
+    } else {
+      parts.push(
+        `שמרתי מעקב ל«${label}». עדיין אין מועד מאומת — לא קבעתי תזכורת מתוארכת; אעדכן כשאמצא.`,
+      );
+    }
+  }
+  // Other successes: model's response confirms. Keep skip / missed corrections.
   if (result.skipped && result.skipped.length > 0) {
     parts.push(
       result.skipped

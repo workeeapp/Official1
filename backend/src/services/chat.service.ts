@@ -106,7 +106,44 @@ import {
   showButtonsForNotify,
   type SharedListRef,
 } from "./employee-targets.service.js";
-import { applyPostSaveReminderOfferSafetyNet } from "./post-save-reminder-offer.js";
+import {
+  bubblesHaveSoftYesNoOffer,
+  shouldInjectPostSaveReminderOffer,
+  stripSoftYesNoOfferBubbles,
+} from "./post-save-reminder-offer.js";
+import {
+  applyPieReminderOfferIfChosen,
+  bubblesHaveConsentCta,
+  bubblesHaveRaise,
+  decidePieArbitration,
+  isExplicitBalancedUtterance,
+  isExplicitProactiveUtterance,
+  isExplicitQuietUtterance,
+  markSessionQuiet,
+  notePieInitiativeEmitted,
+} from "./pie-arbitration.js";
+import {
+  formatProspectGoalsBrief,
+  shouldInjectProspectGoalsBrief,
+} from "./prospect-goals-brief.js";
+import {
+  applyExplicitScopedSuppress,
+  consentOpportunityKey,
+  expireOpportunityById,
+  findOpenReminderOffer,
+  isExplicitScopedSuppressUtterance,
+  isLiftScopedSuppressUtterance,
+  liftExplicitScopedSuppress,
+  loadPieStateForTurn,
+  raiseOpportunityKey,
+  recordOpportunityOffered,
+  reminderOfferOpportunityKey,
+  resolveOpportunityAccepted,
+  resolveOpportunityDeclined,
+  setInitiativePreference,
+  softOfferFallbackKey,
+  tipOpportunityKey,
+} from "./pie-interaction-state.js";
 import { messageSignalsExplicitOneOffMove } from "./one-off-task-occurrence.js";
 import {
   applyStopSeriesAfterPingSafetyNet,
@@ -251,6 +288,7 @@ import { deliverO11WhatsApp } from "./o11-whatsapp-delivery.js";
 import {
   collectAppliedTipOps,
   formatAvailableTipsContext,
+  recordTipShown,
   resolveAndRecordTipsForTurn,
 } from "./tips.service.js";
 import {
@@ -1356,7 +1394,7 @@ function workerTargetingInstructions(
     "WATCH ONCE vs RECURRING (two recipes): (1) ONE-SHOT «תעדכני אותי כששער הדולר מעל 3» → watch_once:true (or omit); poll cadence every 5 min if no spoken time; when condition holds server sends once then deletes YOUR worker task. (2) RECURRING «תעדכני כל פעם ששער הדולר מעל 3» → watch_once:false (REQUIRED) + interval recurrence (default 5 min); each poll while true → send then sleep until next interval. (3) RECURRING SCHEDULED «תעדכני אותי כל בוקר ב־8 אם שער הדולר מעל 3» → watch_once:false + recurrence {freq:\"daily\",time:\"08:00\"} + compose_condition; same level send-then-sleep. weather_changed + watch_once for «כשמזג האוויר משתנה». mashov_new recurring: compose_aspects [grades,behavior,homework,absences,messages] when they asked broadly. smartschool_new recurring: compose_aspects [homework,behavior,messages] when broad. market_change_compare e.g. {type:\"market_change_compare\",left:\"דולר\",right:\"יורו\",op:\"gt\",metric:\"daily_change_pct\",left_day_offset:0,right_day_offset:-1}.",
     "MARKET PRICE WATCH INTENT: (A) Target arrival — «תתריעי כשהמחיר 20» / «כש־SOLT מגיע ל־20» / alert when price is/reaches X → compose_condition {type:\"market_price\",op:\"eq\",value:X}. Server FORCES watch_once:true (edge, one-shot) and rewrites eq→lte/gte from the live quote (down vs up). FORBIDDEN emitting already-true gte when the live sample is above the target; FORBIDDEN inventing prices in the ack. (B) Explicit condition — «כל עוד מעל 20» / «כשעולה מעל» / «כשיורד מתחת» → emit the exact op (gte/gt/lte/lt); watch_once:false only when they asked recurring while the condition remains true. Recurrence cadence is separate from op direction.",
     "WATCH DEFERRED ACTIONS (P0): when they explicitly ask to DO a list mutate AFTER the Watch condition («כשהמחיר יורד מתחת ל־100 תוסיפי לקניות» / «וכש… עדכני את הפריט ברשימה») → nest under THAT Watch reminder only: on_trigger_actions:{lists:[{action:\"add\"|\"update\",list_type,list_id? from ESD when known,list_name,items,targets:[],mode:\"static\"}]}. P0 allowlist ONLY owner-self lists.add|lists.update (targets:[] always). Notify-only («רק תעדכני אותי» / «תגידי לי כש…» with no list mutate) → OMIT on_trigger_actions. FORBIDDEN also emitting that deferred work as a top-level lists.add/update on the same turn (would run now). FORBIDDEN inventing deferred Actions they did not ask for. FORBIDDEN share/assign/messages/reminders/missions/directory inside on_trigger_actions.",,
-    "WEB MONITOR (open-domain, generic): ongoing «תעדכני אותי כש… / לפני כל… / כשיש… / אם יתפרסם… / אם ישתנה…» when NO matching live typed feed (market/weather/bus_eta/flight_*/mashov/smartschool) → ONE reminders row with compose:true, watch_once:false, recurrence {freq:\"interval\",interval:3,unit:\"hours\"} (or longer), compose_condition:{type:\"web_monitor\",intent,canonical_query,constraints?,objectives:[{id,kind,minutes_before?,change_aspects?,match_predicate?}],preferred_sources?,evidence_min?}. kinds: discover_new | detect_change | time_before_event (minutes_before required). MULTIPLE objectives allowed in ONE Watch (e.g. discover_new + time_before_event, or discover_new + detect_change) — FORBIDDEN one Watch per future item. canonical_query = self-contained search query. Notify-only → OMIT on_trigger_actions. FORBIDDEN inventing sports_match/concert/tv domain types; FORBIDDEN same-turn web_lookup alone when they asked ongoing monitoring; FORBIDDEN missions.create for plain monitor. Typed live watches still preferred when the request clearly matches them.",
+    "WEB MONITOR (open-domain, generic): ongoing «תעדכני אותי כש… / לפני כל… / כשיש… / אם יתפרסם… / אם ישתנה…» when NO matching live typed feed (market/weather/bus_eta/flight_*/mashov/smartschool) → ONE reminders row with compose:true, watch_once:false, recurrence {freq:\"interval\",interval:3,unit:\"hours\"} (or longer), compose_condition:{type:\"web_monitor\",intent,canonical_query,constraints?,objectives:[{id,kind,minutes_before?,change_aspects?,match_predicate?}],preferred_sources?,evidence_min?}. kinds: discover_new | detect_change | time_before_event (minutes_before required). MULTIPLE objectives allowed in ONE Watch (e.g. discover_new + time_before_event, or discover_new + detect_change) — FORBIDDEN one Watch per future item. canonical_query = self-contained search query. Notify-only → OMIT on_trigger_actions. FORBIDDEN inventing sports_match/concert/tv domain types; FORBIDDEN same-turn web_lookup alone when they asked ongoing monitoring; FORBIDDEN missions.create for plain monitor. Typed live watches still preferred when the request clearly matches them. CREATE-TURN TIMED REMINDER «בדקי מתי האירוע הבא של X ותזכירי לי N לפני» → SAME single web_monitor with discover_new + time_before_event (minutes_before:N); FORBIDDEN schedule_anchor external_event duplicate; FORBIDDEN inventing event ISO/times in spoken; spoken = short ack only («שמרתי מעקב…») — server bootstrap poll + engine notice append the real event/reminder times from DB (or honest «אין מועד מאומת»).",
     "WATCH EXPR (arithmetic on catalog fields): «טמפרטורה בפתח תקווה כפול 2 = 50» → compose_condition {type:\"expr\",compare:\"eq\",left:{op:\"mul\",args:[{field:\"weather.temp_now\",place:\"פתח תקווה\"},{const:2}]},right:{const:50}}; compose_source weather. «יורו + דולר קטן מכ־10» → expr compare approx/lt with market.price fields (symbols יורו/דולר). Ops: add|sub|mul|div|pct. Compare: lt|lte|gt|gte|eq|approx (כ־ → approx). Fields: weather.temp_now|temp_max|temp_min|is_rain; market.price|change_pct|change_abs. «כשהטמפרטורה משתנה» on a number → field_changed {field:\"weather.temp_now\",place:…}. FORBIDDEN putting the math only in the brief.",
     "PLACES (live local): תמצאי לי חשמלאי בפתח תקווה / מסעדות באזור השרון / מה המסעדות באזור שלי / איפה יש חניון ליד הקניון → metadata.places { query, place, near?, geo_mode?: soft_place|area_restrict, aspects, intent:\"business\"|omit }. Soft city (פתח תקווה / בתי קפה בפתח תקווה) → geo_mode omit|soft_place + place + near empty (NOT every city becomes hard). Near a unique saved label from THIS turn's EMPLOYEE_SAVED_DATA / SPEAKER_CONTACTS («ליד העבודה» / «ליד הבית» / «ליד סבתא») → place=that exact label (or id), near empty — server biases from the saved row; FORBIDDEN inventing nicknames not in saved data; FORBIDDEN near=speaker when they named a saved place. Inside-region (באזור השרון / בתוך גוש דן) → geo_mode:area_restrict + place=region + near empty (server locationRestriction; FORBIDDEN near=speaker; FORBIDDEN stale PENDING_LOCATION override). Near-me / clear pin deixis («מכאן» / «מהמיקום ששלחתי» / «כאן» meaning the pin) → near=speaker. «שם» / «ליד המקום הזה» after a place named in recent chat (ignore intervening reminder noise) when that place is the clearer referent and no competing pin → re-emit that place in place, near empty — not automatic near=speaker. When THIS turn has BOTH PENDING_LOCATION and LAST_LIVE_LOCATION and bare «שם»/unclear deixis fits either → ASK (places=null) — FORBIDDEN preferring LAST_LIVE merely because it is AVAILABLE; clear pin OR clear prior-place/name cue → act, do not ask. Parking examples: איפה יש חניון ליד הקניון? / תמצא לי חניה קרובה / איפה אפשר להחנות ליד המסעדה? / יש חניון בתשלום באזור?; ordinary business תמצא לי מסעדה ליד הקניון. Parking-place asks → intent:\"parking\" (server forces included_type parking + parkingOptions; FORBIDDEN inventing public/private ownership): איפה יש חניון ליד הקניון? → { query:\"חניון\", place:\"קניון\"|area, intent:\"parking\" }; תמצא לי חניה קרובה → { query:\"חניה\", near:\"speaker\"|place, intent:\"parking\" }; איפה אפשר להחנות ליד המסעדה? → { query:\"חניה\", place:\"מסעדה\"|area, intent:\"parking\" }; יש חניה חינם באזור? → { query:\"חניה\", place|near, intent:\"parking\", parking_cost:\"free\" }; יש חניון בתשלום באזור? → { query:\"חניון\", place|near, intent:\"parking\", parking_cost:\"paid\" }. מה המסעדות באזור שלי + PENDING_LOCATION → places { query:\"מסעדות\", place:\"\", near:\"speaker\", intent:\"business\"|omit }. Filters via fields (not stuffed into query): open_now:true for פתוח עכשיו; min_rating 0–5 exact (e.g. 4.1) for דירוג מעל X; parking_cost free|paid for חניה חינם/בתשלום (server local-filters ParkingOptions; FORBIDDEN stuffing חינם/בתשלום only into query); included_type ∈ restaurant|cafe|bakery|supermarket|pharmacy|hair_care|parking; radius_meters for near-me bias only (NOT a hard fence). Business attribute aspects only when asked: parking|accessibility|outdoor|children|payment (FORBIDDEN inventing missing attrs as no). יש חניה במסעדה? / attribute of a named business → intent business + aspects [parking], NOT intent parking. LIVE CAPABILITY (F/Q/V/U) before emitting: F = map to structured fields (open_now, min_rating, parking_cost, included_type, intent?, geo_mode?); Q = only search params the Places API supports; V = residual semantic filter when returned fields (name/address/rating/parkingOptions/…) are expected to evidence the ask → require_live_select:true; U = cannot verify (e.g. בטיחות/ownership) → NEVER require_live_select for U alone, NEVER invent verification; disclose the limit in response; if remaining F/Q/V still useful continue (e.g. חניון חינם ובטוח → parking_cost:\"free\" + disclose safety unverified, require_live_select:false); if U blocks any useful answer → explain BEFORE fetch (places=null). Distinguish אין תוצאה במסננים המבוקשים vs לא ניתן לוודא קריטריון שאינו נתמך. FORBIDDEN presenting results as if an unsupported criterion was checked. Named venue address/phone («מה הכתובת של מסעדת צ'אקרה» / «מה הטלפון של …») → places { query: that venue name (incl. מסעדת/בית קפה when spoken), place:\"\"|known city, aspects:[address]|[phone]|[summary] } THIS turn — city optional (server searches ישראל). FORBIDDEN ack-only «בודקת את הכתובת…» without metadata.places (server cannot append a 2nd bubble). Pure ask → responses may be empty; server fills. WITH ack → ack only + places ACTION; server appends places as 2nd message. FORBIDDEN inventing phones/addresses. Missing query → ask; places=null. Category without city («חשמלאי») → ask where OR near=speaker with pin; places=null until place/pin. Near-me without pin → ask to share WhatsApp location.",
     "WEB_LOOKUP (fast same-turn grounding): שעות פתיחה / מה בקולנוע הערב / הופעות הסופ״ש / עובדה חיצונית קצרה → metadata.web_lookup { query, canonical_query?, cache_scope?: global|user|none, force_refresh? } THIS turn; lists/missions=[]. canonical_query = self-contained normalized query (resolve follow-ups like «ומתי הם סוגרים?» into a standalone fact query). cache_scope: global=shared public fact; user=depends on this speaker/context/location (server keys by authenticated userId); none=ephemeral/live not worth caching. Server enforces scope — never invent user ids. «תבדקי מחדש» → force_refresh:true. FORBIDDEN inventing facts when empty/unverified. Multi-step research/login/booking → metadata.missions.create (NOT web_lookup). Places → metadata.places. Shabbat/holiday/Hebrew calendar → metadata.jewish (local @hebcal/core; NOT web_lookup; zero network).",
@@ -2363,6 +2401,10 @@ export interface TurnContextParts {
   pendingInvite: Parameters<typeof formatPendingInviteContext>[0] | null;
   /** Pending share/assign invitations for this phone. Empty for guests. */
   collabInvites?: string;
+  /**
+   * Slice 1: thin Prospect goals brief (goals/boundaries only). Empty for Members.
+   */
+  prospectGoalsBrief?: string;
   tipsContext: string;
   /**
    * Stage 2: the fixed SESSION_CLOCK / SAVED_DATA reading rules ride in the
@@ -2412,6 +2454,7 @@ export function composeTurnContext(parts: TurnContextParts): string {
     parts.pendingInvite
       ? formatInviteOpeningContext(parts.pendingInvite)
       : "",
+    parts.prospectGoalsBrief?.trim() ?? "",
     parts.collabInvites ?? "",
     parts.tipsContext,
   ]
@@ -2718,6 +2761,7 @@ export async function sendChatMessage(input: {
         userId: input.userId,
         speaker: employee,
         digitalEmployeeId: digital.id,
+        requireNextStep: true,
       }),
     )) ?? "";
   const recipientIsProspect =
@@ -2729,6 +2773,11 @@ export async function sendChatMessage(input: {
     ? []
     : await loadPresentedCollabInvites(employee.phone);
   const collabInvites = formatCollabInviteContext(presentedCollab);
+  const prospectGoalsBrief = shouldInjectProspectGoalsBrief({
+    isProspect: recipientIsProspect,
+  })
+    ? formatProspectGoalsBrief()
+    : "";
   // One wall clock for this turn: SESSION_CLOCK facts + past one-off apply.
   const turnNow = new Date();
   const context = composeTurnContext({
@@ -2749,6 +2798,7 @@ export async function sendChatMessage(input: {
     pendingLocation: guestSpeaker ? null : getPendingLocation(input.employeeId),
     lastLiveLocation: lastLiveLocationCtx,
     pendingInvite: pendingInviteForTurn,
+    prospectGoalsBrief,
     collabInvites,
     tipsContext,
     rulesInInstructions: shouldAttachLucyRuntimeEngine(
@@ -6280,66 +6330,366 @@ export async function sendChatMessage(input: {
           }),
         };
       });
-      // Timed tasks add without an explicit reminder → soft כן/לא offer.
-      // Idempotent: skips when model already offered or a clock was saved.
-      bubbles = applyPostSaveReminderOfferSafetyNet({
+      workingReply = setEngineSpokenBubbles(workingReply, bubbles);
+    }
+    // —— PIE Arbitration + PIE-2 State (review fixes: hydrate once, record-before-emit) ——
+    const inboundUserText = stripWhatsAppReplyPrefix(input.message).trim();
+    const pieScope = {
+      userId: input.userId,
+      employeeId: employee.id,
+      digitalEmployeeId: digital.id,
+    };
+    const inboundTurnCount =
+      (await withoutFailingTurn("pie_inbound_turn_count_failed", () =>
+        prisma.chatMessage.count({
+          where: {
+            conversationId: conversation.id,
+            author: { not: "assistant" },
+          },
+        }),
+      )) ?? 1;
+    const turnRef = Math.max(1, inboundTurnCount);
+
+    if (/^(כן|לא)$/u.test(inboundUserText)) {
+      const openReminder = await withoutFailingTurn(
+        "pie_open_reminder_lookup_failed",
+        () =>
+          findOpenReminderOffer({
+            scope: pieScope,
+            conversationId: conversation.id,
+          }),
+      );
+      if (openReminder) {
+        if (inboundUserText === "כן") {
+          await withoutFailingTurn("pie_reminder_accept_failed", () =>
+            resolveOpportunityAccepted({
+              scope: pieScope,
+              opportunityKey: openReminder.opportunityKey,
+              opportunityId: openReminder.id,
+            }),
+          );
+        } else {
+          await withoutFailingTurn("pie_reminder_decline_failed", () =>
+            resolveOpportunityDeclined({
+              scope: pieScope,
+              opportunityKey: openReminder.opportunityKey,
+              opportunityId: openReminder.id,
+              kind: "act_followup",
+            }),
+          );
+        }
+      }
+    }
+
+    if (isExplicitScopedSuppressUtterance(inboundUserText)) {
+      await withoutFailingTurn("pie_scoped_suppress_failed", () =>
+        applyExplicitScopedSuppress({
+          scope: pieScope,
+          conversationId: conversation.id,
+        }),
+      );
+    } else if (isLiftScopedSuppressUtterance(inboundUserText)) {
+      await withoutFailingTurn("pie_lift_suppress_failed", () =>
+        liftExplicitScopedSuppress({
+          scope: pieScope,
+          conversationId: conversation.id,
+        }),
+      );
+    }
+
+    if (isExplicitQuietUtterance(inboundUserText)) {
+      markSessionQuiet(conversation.id);
+      await withoutFailingTurn("pie_preference_quiet_failed", () =>
+        setInitiativePreference({
+          scope: pieScope,
+          mode: "quiet",
+          source: "explicit_utterance",
+        }),
+      );
+    } else if (isExplicitProactiveUtterance(inboundUserText)) {
+      await withoutFailingTurn("pie_preference_proactive_failed", () =>
+        setInitiativePreference({
+          scope: pieScope,
+          mode: "proactive",
+          source: "explicit_utterance",
+        }),
+      );
+    } else if (isExplicitBalancedUtterance(inboundUserText)) {
+      await withoutFailingTurn("pie_preference_balanced_failed", () =>
+        setInitiativePreference({
+          scope: pieScope,
+          mode: "balanced",
+          source: "explicit_utterance",
+        }),
+      );
+    }
+
+    const pieState =
+      (await withoutFailingTurn("pie_state_load_failed", () =>
+        loadPieStateForTurn({
+          scope: pieScope,
+          inboundTurnCount: turnRef,
+          conversationId: conversation.id,
+        }),
+      )) ?? {
+        preference: { mode: "balanced" as const, source: "default" as const },
+        suppressKeys: new Set<string>(),
+      };
+    if (pieState.preference.mode === "quiet") {
+      markSessionQuiet(conversation.id);
+    }
+
+    let pieBubbles = parseLlmReply(workingReply).responseBubbles ?? [];
+    const timedTaskMutation = listMutations.find(
+      (row) =>
+        row.action === "add" &&
+        row.listType === "tasks" &&
+        Boolean(row.calendarYmd?.trim()) &&
+        row.itemId,
+    );
+    const reminderOpportunityKey = timedTaskMutation
+      ? reminderOfferOpportunityKey(timedTaskMutation.itemId)
+      : softOfferFallbackKey(conversation.id, turnRef);
+
+    // H6: soft already in model bubbles — strip if offered exists; else record-before-keep.
+    const softAlreadyInBubbles = bubblesHaveSoftYesNoOffer(pieBubbles);
+    if (softAlreadyInBubbles) {
+      const softKey =
+        timedTaskMutation != null
+          ? reminderOfferOpportunityKey(timedTaskMutation.itemId)
+          : softOfferFallbackKey(conversation.id, turnRef);
+      if (pieState.suppressKeys.has(softKey)) {
+        pieBubbles = stripSoftYesNoOfferBubbles(pieBubbles);
+        workingReply = setEngineSpokenBubbles(workingReply, pieBubbles);
+      } else {
+        let recorded: { id: string; created: boolean } | null = null;
+        try {
+          recorded = await recordOpportunityOffered({
+            scope: pieScope,
+            opportunityKey: softKey,
+            kind: "act_followup",
+            entityRef: timedTaskMutation?.itemId ?? null,
+            conversationId: conversation.id,
+            turnRef,
+          });
+        } catch (error) {
+          recordWhatsAppEvent(
+            "pie_state_record_failed",
+            error instanceof Error ? error.message : "soft_offer_record",
+          );
+          recorded = null;
+        }
+        if (!recorded || recorded.created === false) {
+          pieBubbles = stripSoftYesNoOfferBubbles(pieBubbles);
+          workingReply = setEngineSpokenBubbles(workingReply, pieBubbles);
+        }
+        // created:true → keep soft buttons (already in bubbles); no inject.
+      }
+    }
+
+    const reminderOfferEligible =
+      !softAlreadyInBubbles &&
+      shouldInjectPostSaveReminderOffer({
         metadata,
         listMutations,
         reminderSavedCount: reminderResult.saved.length,
-        bubbles,
+        bubbles: pieBubbles,
       });
-      workingReply = setEngineSpokenBubbles(workingReply, bubbles);
+
+    const pieDecision = decidePieArbitration({
+      conversationId: conversation.id,
+      inboundTurnCount: turnRef,
+      inboundUserText,
+      bubbles: pieBubbles,
+      reminderOfferEligible,
+      // Slice 1: Prospect Join / high-risk consent own the turn — no tip competition.
+      consentOwnsTurn:
+        Boolean(highRiskOffer) ||
+        Boolean(prospectJoinOffer) ||
+        prospectAssignJoinGated ||
+        prospectCircuitBreakerTripped,
+      tipCandidateAvailable: true,
+      preferenceMode: pieState.preference.mode,
+      suppressKeys: pieState.suppressKeys,
+      reminderOpportunityKey,
+    });
+
+    // Soft inject: record-before-emit; created:false → no inject (H5).
+    let reminderShown = false;
+    if (pieDecision.injectReminderOffer && reminderOpportunityKey) {
+      let recorded: { id: string; created: boolean } | null = null;
+      try {
+        recorded = await recordOpportunityOffered({
+          scope: pieScope,
+          opportunityKey: reminderOpportunityKey,
+          kind: "act_followup",
+          entityRef: timedTaskMutation?.itemId ?? null,
+          conversationId: conversation.id,
+          turnRef,
+        });
+      } catch (error) {
+        recordWhatsAppEvent(
+          "pie_state_record_failed",
+          error instanceof Error ? error.message : "reminder_record",
+        );
+        recorded = null;
+      }
+      if (recorded?.created === true) {
+        const before = pieBubbles;
+        pieBubbles = applyPieReminderOfferIfChosen({
+          decision: pieDecision,
+          metadata,
+          listMutations,
+          reminderSavedCount: reminderResult.saved.length,
+          bubbles: pieBubbles,
+        });
+        reminderShown = bubblesHaveSoftYesNoOffer(pieBubbles);
+        if (!reminderShown) {
+          // H1: orphan expire only the row created this attempt.
+          await withoutFailingTurn("pie_offer_orphan_expired", () =>
+            expireOpportunityById({ opportunityId: recorded.id }),
+          );
+        }
+        void before;
+      }
+      // created:false or record fail → no inject
     }
-    // Prospect onboard Tip #1/#3 still append after Accept/Decline and Join CTA.
-    // Only high-risk confirm turns suppress the cadence (CTA owns the turn).
-    const suppressProspectOnboardTips = Boolean(highRiskOffer);
-    let prospectInboundTurns = 0;
-    if (recipientIsProspect && !consultFrom && !suppressProspectOnboardTips) {
-      prospectInboundTurns =
-        (await withoutFailingTurn("prospect_turn_count_failed", () =>
-          prisma.chatMessage.count({
-            where: {
-              conversationId: conversation.id,
-              author: { not: "assistant" },
-            },
-          }),
-        )) ?? 0;
+
+    // Raise / Consent: fail-open UI; await record; never strip CTA for idempotency (H5).
+    if (pieDecision.chosenKind === "open_item_raise") {
+      const raiseKey = raiseOpportunityKey(
+        timedTaskMutation?.itemId ?? conversation.id,
+        "raise",
+      );
+      try {
+        await recordOpportunityOffered({
+          scope: pieScope,
+          opportunityKey: raiseKey,
+          kind: "open_item_raise",
+          conversationId: conversation.id,
+          turnRef,
+        });
+      } catch (error) {
+        recordWhatsAppEvent(
+          "pie_state_record_failed",
+          error instanceof Error ? error.message : "raise_record",
+        );
+      }
+    } else if (pieDecision.chosenKind === "consent_cta") {
+      const consentKey = consentOpportunityKey(
+        highRiskOffer
+          ? String((highRiskOffer as { id?: string }).id ?? conversation.id)
+          : `${conversation.id}:${turnRef}`,
+      );
+      try {
+        await recordOpportunityOffered({
+          scope: pieScope,
+          opportunityKey: consentKey,
+          kind: "consent_cta",
+          conversationId: conversation.id,
+          turnRef,
+        });
+      } catch (error) {
+        recordWhatsAppEvent(
+          "pie_state_record_failed",
+          error instanceof Error ? error.message : "consent_record",
+        );
+      }
     }
+
+    workingReply = setEngineSpokenBubbles(workingReply, pieBubbles);
+
     const tipTurn =
-      (await withoutFailingTurn("tips_apply_failed", () =>
-        resolveAndRecordTipsForTurn({
-          userId: input.userId,
-          speaker: employee,
-          digitalEmployeeId: digital.id,
-          appliedOps: tipOps,
-          modelTipKeys: metadata.tips ?? [],
-          turnFactItems: tipTurnFactItems,
-          tipExtraFacts: {
-            search_topic: tipSearchTopic,
-            reminder_title:
-              tipReminderTitle ||
-              tipTurnFactItems.find((r) => r.listType === "reminders")
-                ?.itemLabel ||
-              null,
-            list_type: tipTurnFactItems[0]?.listType ?? null,
-            item_label: tipTurnFactItems[0]?.itemLabel ?? null,
-          },
-          addressGender: employee.addressGender,
-          billing: {
-            conversationId: conversation.id,
-            employeeId: employee.id,
-            digitalEmployeeId: digital.id,
-          },
-          ...(recipientIsProspect && !suppressProspectOnboardTips
-            ? {
-                prospectOnboarding: {
-                  enabled: true,
-                  inboundTurnCount: Math.max(1, prospectInboundTurns),
-                },
-              }
-            : {}),
-        }),
-      )) ?? { texts: [], tipIds: [] };
+      pieDecision.allowTipResolve
+        ? ((await withoutFailingTurn("tips_apply_failed", () =>
+            resolveAndRecordTipsForTurn({
+              userId: input.userId,
+              speaker: employee,
+              digitalEmployeeId: digital.id,
+              appliedOps: tipOps,
+              modelTipKeys: metadata.tips ?? [],
+              turnFactItems: tipTurnFactItems,
+              tipExtraFacts: {
+                search_topic: tipSearchTopic,
+                reminder_title:
+                  tipReminderTitle ||
+                  tipTurnFactItems.find((r) => r.listType === "reminders")
+                    ?.itemLabel ||
+                  null,
+                list_type: tipTurnFactItems[0]?.listType ?? null,
+                item_label: tipTurnFactItems[0]?.itemLabel ?? null,
+              },
+              addressGender: employee.addressGender,
+              billing: {
+                conversationId: conversation.id,
+                employeeId: employee.id,
+                digitalEmployeeId: digital.id,
+              },
+              requireNextStep: true,
+              prospectOnboarding: { enabled: false, inboundTurnCount: 1 },
+              suppressKeys: pieState.suppressKeys,
+              recordProgress: false,
+            }),
+          )) ?? { texts: [], tipIds: [], tipKeys: [] })
+        : { texts: [], tipIds: [], tipKeys: [] };
+
+    // Tip: record offered then commit TipProgress only if shown (H5 created:true).
+    const tipTextsForReply: string[] = [];
+    if (tipTurn.texts.length > 0 && (tipTurn.tipKeys?.length ?? 0) > 0) {
+      const tipKey = tipTurn.tipKeys[0]!;
+      const tipId = tipTurn.tipIds[0];
+      let recorded: { id: string; created: boolean } | null = null;
+      try {
+        recorded = await recordOpportunityOffered({
+          scope: pieScope,
+          opportunityKey: tipOpportunityKey(tipKey),
+          kind: "capability_opportunity",
+          capabilityId: tipKey,
+          conversationId: conversation.id,
+          turnRef,
+        });
+      } catch (error) {
+        recordWhatsAppEvent(
+          "pie_state_record_failed",
+          error instanceof Error ? error.message : "tip_record",
+        );
+        recorded = null;
+      }
+      if (recorded?.created === true) {
+        tipTextsForReply.push(...tipTurn.texts);
+        if (tipId) {
+          await withoutFailingTurn("pie_tip_progress_failed", () =>
+            recordTipShown({
+              tipId,
+              employeeId: employee.id,
+              digitalEmployeeId: digital.id,
+            }),
+          );
+        }
+      }
+    }
+
+    // H2: cadence only if initiative appears in final reply bubbles / tip notice.
+    const finalBubbles = parseLlmReply(
+      setEngineSpokenBubbles(workingReply, pieBubbles),
+    ).responseBubbles ?? pieBubbles;
+    const softShownFinal = bubblesHaveSoftYesNoOffer(finalBubbles);
+    const raiseShownFinal = bubblesHaveRaise(finalBubbles);
+    const consentShownFinal =
+      Boolean(highRiskOffer) || bubblesHaveConsentCta(finalBubbles);
+    const tipShownFinal = tipTextsForReply.length > 0;
+    const initiativeShownInFinalReply =
+      softShownFinal ||
+      raiseShownFinal ||
+      consentShownFinal ||
+      tipShownFinal ||
+      reminderShown;
+    if (initiativeShownInFinalReply) {
+      notePieInitiativeEmitted(conversation.id, turnRef);
+    }
+    // Expose tip texts via tipTurn for notice composition below.
+    tipTurn.texts.length = 0;
+    tipTurn.texts.push(...tipTextsForReply);
     const notice = [
       guestMutationNotice,
       registerNotice,

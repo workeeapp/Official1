@@ -410,7 +410,7 @@ describe("UWM Phase 3 poll + evidence (fixtures)", () => {
       cacheHit: true,
       spec: concertSpec(),
     });
-    expect(staleItems[0]?.publishedAt).toBe("2019-01-01T00:00:00Z");
+    expect(staleItems[0]?.publishedAt).toBe("2019-01-01T00:00:00.000Z");
     expect(staleItems[0]?.retrievedAt).not.toBe(staleItems[0]?.publishedAt);
     expect(staleItems[0]!.provenance.every((p) => p.cacheHit === true)).toBe(
       true,

@@ -44,6 +44,7 @@ import {
   setWebMonitorPollImplForTests,
 } from "../src/services/reminder-fire.js";
 import { pollWebMonitor } from "../src/services/semantic-web-monitor.service.js";
+import { setUwmCreateBootstrapSearchImplForTests } from "../src/services/uwm-create-bootstrap.js";
 import {
   assertEvalDbAndGtfsUntouched,
   cleanupHarnessAccount,
@@ -71,10 +72,19 @@ describe(`UWM Phase 4 dual schedule (eval-db) ${RUN}`, () => {
     });
     composeScheduledOutbound.mockResolvedValue("");
     setWebMonitorPollImplForTests(null);
+    // Create-turn bootstrap would otherwise hit live web_search; this suite
+    // arms via an explicit poll after create.
+    setUwmCreateBootstrapSearchImplForTests(async () => ({
+      text: "",
+      sources: [],
+      usage: null,
+      raw: null,
+    }));
   });
 
   afterEach(async () => {
     setWebMonitorPollImplForTests(null);
+    setUwmCreateBootstrapSearchImplForTests(null);
     if (account) {
       await cleanupHarnessAccount(account);
       account = null;

@@ -29,6 +29,7 @@ import {
   normalizeCandidates,
   shaContent,
 } from "./uwm-normalize.js";
+import { extractEventAtFromRetrievalText } from "./uwm-event-at.js";
 import {
   computeNextPrecise,
   computePreciseFireAt,
@@ -66,6 +67,11 @@ export type PollWebMonitorInput = {
    * time_before_event (catch-up / armed fire).
    */
   preciseOnly?: boolean;
+  /**
+   * Create-turn bootstrap: run discovery / normalize / arm nextPrecise but
+   * never return shouldNotify (chat reply owns the ack; no WhatsApp from poll).
+   */
+  suppressNotify?: boolean;
   /** Test seams */
   searchImpl?: CachedWebSearchOptions["searchImpl"];
   pageFetchImpl?: (url: string) => Promise<PageFetchResult>;
@@ -292,6 +298,14 @@ export async function pollWebMonitor(
     }
 
     src.failCount = 0;
+    // Page path: same eventAt contract as web_search (UTC absolute only).
+    // Date-only / timezone-less local never become eventAt.
+    const pageExtracted = pageText.includes("UWM_FIXTURE_ITEMS")
+      ? null
+      : extractEventAtFromRetrievalText({
+          text: pageText,
+          sources: [src.url],
+        });
     const fromPage = extractRawCandidates({
       text: pageText.includes("UWM_FIXTURE_ITEMS")
         ? pageText
@@ -303,8 +317,19 @@ export async function pollWebMonitor(
               summary: pageText.slice(0, 400),
               bodyFp: shaContent([pageText.slice(0, 4000)]),
               retrievalOk: true,
-              eventAt: extractIsoDate(pageText),
+              eventAt: pageExtracted?.eventAtIso ?? null,
               locationText: null,
+              ...(pageExtracted
+                ? {
+                    attributes: {
+                      eventAtLocal: pageExtracted.localWall,
+                      eventAtTimeZone: pageExtracted.timeZone,
+                      eventAtTimeZoneSource: pageExtracted.timeZoneSource,
+                      eventAtSnippet: pageExtracted.snippet,
+                      eventAtExtractedFrom: "web_page_prose",
+                    },
+                  }
+                : {}),
             },
           ])}`,
       sources: [src.url],
@@ -564,6 +589,9 @@ export async function pollWebMonitor(
         identityCore: item.identityCore,
         aspectFps: item.aspectFps,
         changeHistory: [],
+        ...(item.attributes && Object.keys(item.attributes).length > 0
+          ? { attributes: item.attributes }
+          : {}),
       };
 
       // Reschedule: material eventAt move before pre-phase fires → clear phase only if unmet
@@ -629,6 +657,9 @@ export async function pollWebMonitor(
             evidenceGrade: item.evidenceGrade,
             provenance: item.provenance,
             status: "active",
+            ...(item.attributes && Object.keys(item.attributes).length > 0
+              ? { attributes: item.attributes }
+              : {}),
             boundUrls: [
               ...new Set([
                 ...(st.boundUrls ?? []),
@@ -801,11 +832,24 @@ export async function pollWebMonitor(
         aspectFps: item.aspectFps,
         changeHistory: [],
         status: "active",
+        ...(item.attributes && Object.keys(item.attributes).length > 0
+          ? { attributes: item.attributes }
+          : {}),
       };
     } else {
       const cur = state.items[item.itemId]!;
       if (!cur.identityCore && item.identityCore) {
         cur.identityCore = item.identityCore;
+      }
+      if (
+        item.attributes &&
+        Object.keys(item.attributes).length > 0 &&
+        (!cur.attributes || Object.keys(cur.attributes).length === 0)
+      ) {
+        cur.attributes = item.attributes;
+      }
+      if (item.eventAt && !cur.eventAt) {
+        cur.eventAt = item.eventAt;
       }
     }
   }
@@ -854,8 +898,18 @@ export async function pollWebMonitor(
     itemCount: Object.keys(state.items).length,
   });
 
+  const outNotify = input.suppressNotify
+    ? {
+        shouldNotify: false as const,
+        fingerprint: "",
+        reason: "no_match" as const,
+        ...(notify.item ? { item: notify.item } : {}),
+        ...(notify.phase ? { phase: notify.phase } : {}),
+      }
+    : notify;
+
   return {
-    notify,
+    notify: outNotify,
     monitorState: state,
     discoveryUsed,
     boundPageUsed,
@@ -915,7 +969,3 @@ function deriveTitle(text: string, url: string): string {
   }
 }
 
-function extractIsoDate(text: string): string | null {
-  const m = text.match(/\b(20\d{2}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2})?)/);
-  return m?.[1] ?? null;
-}

@@ -68,6 +68,7 @@ import { shouldSuppressLegacyForeignClock } from "./reminder-high-risk-auth.js";
 import {
   executeWatchTriggerActions,
   listIncompleteWatchFingerprints,
+  markWatchTriggerActionsGateBlocked,
   markWatchTriggerNotified,
   parseWatchTriggerExecLedger,
   parseWatchTriggerPackage,
@@ -1026,9 +1027,31 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
             reason: applyGate.reason,
             fingerprint: watchEventFingerprint.slice(0, 40),
           });
+          // Terminal gate block — do not leave pending Actions that Recovery
+          // could execute later without a fresh Gate pass on this fingerprint.
+          try {
+            watchLedger = await markWatchTriggerActionsGateBlocked({
+              reminderId: reminder.id,
+              ledger: watchLedger,
+              package: watchPackage,
+              fingerprint: watchEventFingerprint,
+              reason: applyGate.reason,
+              now,
+            });
+          } catch (gateLedgerError) {
+            recordWhatsAppEvent(
+              "watch_trigger_gate_ledger_error",
+              `id=${reminder.id} ${
+                gateLedgerError instanceof Error
+                  ? gateLedgerError.message.slice(0, 80)
+                  : "unknown"
+              }`,
+            );
+          }
         } else {
           try {
             // Also retry any older incomplete fingerprints without touching notify.
+            // Gate-blocked fingerprints are excluded by watchTriggerNeedsActionRecovery.
             for (const fp of listIncompleteWatchFingerprints(
               watchLedger,
               watchPackage,

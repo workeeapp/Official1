@@ -192,6 +192,47 @@ export function injectPostSaveReminderOfferBubbles(
   return [...bubbles, offer];
 }
 
+/**
+ * Remove soft כן/לא offer bubbles (and drop empty bubbles left behind).
+ * Used when State forbids re-emit or recordOpportunityOffered failed.
+ */
+export function stripSoftYesNoOfferBubbles(
+  bubbles: LlmSpokenBubble[],
+): LlmSpokenBubble[] {
+  return bubbles
+    .map((bubble) => {
+      if (!bubbleHasSoftYesNoOffer(bubble)) {
+        return bubble;
+      }
+      const buttons = (bubble.buttons ?? []).filter(
+        (button) => !isSoftYesNoButton(button),
+      );
+      const text = (bubble.text ?? "").trim();
+      const isOfferCopy =
+        text === POST_SAVE_REMINDER_OFFER_TEXT ||
+        /רוצה שאוסיף לזה גם תזכורת/u.test(text);
+      if (buttons.length === 0 && isOfferCopy) {
+        return null;
+      }
+      if (buttons.length === 0 && !text) {
+        return null;
+      }
+      return {
+        ...bubble,
+        buttons: buttons.length > 0 ? buttons : undefined,
+        text: isOfferCopy && buttons.length === 0 ? "" : bubble.text,
+      };
+    })
+    .filter((bubble): bubble is LlmSpokenBubble => {
+      if (!bubble) {
+        return false;
+      }
+      const hasText = Boolean((bubble.text ?? "").trim());
+      const hasButtons = (bubble.buttons ?? []).length > 0;
+      return hasText || hasButtons;
+    });
+}
+
 /** Pure pipeline helper for tests and chat.service. */
 export function applyPostSaveReminderOfferSafetyNet(input: {
   metadata: LlmMetadata;

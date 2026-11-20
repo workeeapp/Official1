@@ -29,6 +29,10 @@ export type NormalizedMonitorItem = {
   summary?: string;
   url?: string;
   sourceUrls: string[];
+  /**
+   * Absolute UTC kickoff only (`…Z` or normalized offset).
+   * Never date-only; never timezone-less local wall time.
+   */
   eventAt?: string | null;
   locationText?: string | null;
   attributes: Record<string, string | number | boolean | null>;
@@ -37,6 +41,7 @@ export type NormalizedMonitorItem = {
   aspectFps?: Record<string, string>;
   confidence: number;
   retrievedAt: string;
+  /** Absolute UTC, or date-only YYYY-MM-DD; never invented midnight. */
   publishedAt?: string | null;
   verified: boolean;
   evidenceGrade: UwmEvidenceGrade;
@@ -59,6 +64,7 @@ export type UwmMonitorItemState = {
   lastSeenAt: string;
   contentFp: string;
   identityCore?: string;
+  /** Absolute UTC only — see NormalizedMonitorItem.eventAt. */
   eventAt?: string | null;
   status?: "active" | "cancelled" | "expired";
   evidenceGrade?: UwmEvidenceGrade;
@@ -71,6 +77,12 @@ export type UwmMonitorItemState = {
   changeHistory?: UwmChangeHistoryEntry[];
   /** Alternate itemIds merged into this one. */
   aliases?: string[];
+  /**
+   * Optional fact attrs. eventAt provenance keys:
+   * eventAtLocal, eventAtTimeZone, eventAtSnippet, eventAtTimeZoneSource;
+   * date-only facts may use eventDate (YYYY-MM-DD) — not for T−N arming.
+   */
+  attributes?: Record<string, string | number | boolean | null>;
 };
 
 /** Armed precise pre-event notification on this Reminder (one at a time). */
@@ -78,7 +90,9 @@ export type UwmNextPrecise = {
   itemId: string;
   objectiveId: string;
   minutesBefore: number;
+  /** Absolute UTC ISO. */
   fireAtIso: string;
+  /** Absolute UTC ISO. */
   eventAtIso: string;
 };
 

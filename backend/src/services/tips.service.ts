@@ -43,6 +43,16 @@ import {
   type TipComposeFacts,
 } from "./tip-compose.js";
 import { sendWhatsAppText } from "./whatsapp-send.js";
+import {
+  resolveSpeakerCapabilityFamiliarity,
+  shouldSuppressTipOffer,
+  type CapabilityFamiliarity,
+} from "./capability-evidence.js";
+import {
+  tipKeyExcludedAsCapabilityAd,
+  tipTextHasNextStep,
+} from "./pie-arbitration.js";
+import { tipOpportunityKey } from "./pie-interaction-state.js";
 
 const LUCY_NAME = "לוסי";
 
@@ -65,6 +75,8 @@ export interface TipTurnFactItem {
 export interface TipTurnResult {
   texts: string[];
   tipIds: string[];
+  /** Stable tip keys for PIE-2 opportunityKey recording. */
+  tipKeys: string[];
 }
 
 type TipWithDigital = Tip & {
@@ -666,7 +678,8 @@ export function collectAppliedTipOps(input: {
   return ops;
 }
 
-async function recordTipShown(input: {
+/** Commit TipProgress after tip text is included in the final reply (PIE-2). */
+export async function recordTipShown(input: {
   tipId: string;
   employeeId: string;
   digitalEmployeeId: string;
@@ -818,6 +831,7 @@ function tipFullyEligibleForKeyPick(
   lastShownByTip: Map<string, Date>,
   keyToTipId: Map<string, string>,
   now: Date,
+  familiarityById?: ReadonlyMap<string, CapabilityFamiliarity>,
 ): boolean {
   if (!tipEligibleByQuotaAndCooldown(tip, showCountByTip, lastShownByTip, now)) {
     return false;
@@ -831,7 +845,31 @@ function tipFullyEligibleForKeyPick(
   ) {
     return false;
   }
+  if (
+    familiarityById &&
+    shouldSuppressTipOffer({
+      tipKey: tip.key,
+      triggerKind: tip.triggerKind,
+      familiarityById,
+    })
+  ) {
+    return false;
+  }
   return true;
+}
+
+function tipSuppressedByCapability(
+  tip: Tip,
+  familiarityById: ReadonlyMap<string, CapabilityFamiliarity> | undefined,
+): boolean {
+  if (!familiarityById) {
+    return false;
+  }
+  return shouldSuppressTipOffer({
+    tipKey: tip.key,
+    triggerKind: tip.triggerKind,
+    familiarityById,
+  });
 }
 
 function pickSortedTip(candidates: Tip[]): Tip | null {
@@ -870,30 +908,64 @@ export async function resolveAndRecordTipsForTurn(input: {
   /** Test clock for cooldowns. */
   now?: Date;
   /**
-   * Wave 1 PLG Prospect: auto-pick a short onboard tip on inbound turns 1 or 3
-   * (skip 2 so tips are not back-to-back). Caller skips button-only replies.
+   * Legacy Prospect auto-pick on turns 1|3. PIE-1: callers must leave this
+   * disabled — prospect tips only via Arbitration as next-step opportunities
+   * (they currently fail next-step and must not broadcast).
    */
   prospectOnboarding?: {
     enabled: boolean;
     inboundTurnCount: number;
   };
+  /**
+   * PIE-1: when true (default), only tips with a clear next-step may emit.
+   * Capability ads / prospect_onboard_* / general_* are excluded.
+   */
+  requireNextStep?: boolean;
   /** Extra tip FACTS (reminder title, web lookup topic, assignee). */
   tipExtraFacts?: TipComposeFacts | null;
+  /** PIE-2: skip tip keys whose opportunityKey is suppressed. */
+  suppressKeys?: ReadonlySet<string> | null;
+  /**
+   * When false, pick+compose only — caller must call recordTipShown after
+   * State offered succeeds and tip text is included in the final reply.
+   * Default true for legacy unit tests.
+   */
+  recordProgress?: boolean;
 }): Promise<TipTurnResult> {
   await ensureDefaultTips(input.userId);
   const now = input.now ?? new Date();
+  // Opt-in: chat PIE-1 passes true. Unit/ladder tests keep legacy catalog behavior.
+  const requireNextStep = input.requireNextStep === true;
   const speakerIsGuest = isGuestEmployee(input.speaker);
-  const tips = await prisma.tip.findMany({
-    where: { userId: input.userId, enabled: true },
-    orderBy: [{ order: "asc" }, { createdAt: "asc" }],
-  });
+  const [tips, familiarityById] = await Promise.all([
+    prisma.tip.findMany({
+      where: { userId: input.userId, enabled: true },
+      orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+    }),
+    resolveSpeakerCapabilityFamiliarity({
+      userId: input.userId,
+      employeeId: input.speaker.id,
+      digitalEmployeeId: input.digitalEmployeeId,
+      now,
+    }),
+  ]);
+  const passesNextStep = (tip: Tip): boolean => {
+    if (!requireNextStep) {
+      return true;
+    }
+    if (tipKeyExcludedAsCapabilityAd(tip.key)) {
+      return false;
+    }
+    return tipTextHasNextStep(tip.text);
+  };
   const eligible = tips.filter(
     (tip) =>
       audienceMatches(tip.audience, speakerIsGuest) &&
-      digitalMatches(tip.digitalEmployeeId, input.digitalEmployeeId),
+      digitalMatches(tip.digitalEmployeeId, input.digitalEmployeeId) &&
+      passesNextStep(tip),
   );
   if (eligible.length === 0) {
-    return { texts: [], tipIds: [] };
+    return { texts: [], tipIds: [], tipKeys: [] };
   }
 
   const progressRows = await prisma.tipProgress.findMany({
@@ -922,6 +994,9 @@ export async function resolveAndRecordTipsForTurn(input: {
     if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
       continue;
     }
+    if (tipSuppressedByCapability(tip, familiarityById)) {
+      continue;
+    }
     if (!input.appliedOps.some((applied) => actionTipMatches(tip, applied))) {
       continue;
     }
@@ -942,6 +1017,9 @@ export async function resolveAndRecordTipsForTurn(input: {
       continue;
     }
     if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
+      continue;
+    }
+    if (tipSuppressedByCapability(tip, familiarityById)) {
       continue;
     }
     contextual.push(tip);
@@ -975,6 +1053,7 @@ export async function resolveAndRecordTipsForTurn(input: {
           lastShownByTip,
           keyToTipId,
           now,
+          familiarityById,
         )
       ) {
         continue;
@@ -999,16 +1078,19 @@ export async function resolveAndRecordTipsForTurn(input: {
       ) {
         continue;
       }
+      if (tipSuppressedByCapability(tip, familiarityById)) {
+        continue;
+      }
       webTips.push(tip);
     }
     chosen = pickSortedTip(webTips);
   }
 
-  // Prospect first-exposure: engine may pick onboard tips without model keys.
-  // Cadence is turn 1/3 — skip seeded-general cross-cooldown (that gap is for
-  // ordinary catalog generals, not same-session PLG onboard tips).
+  // PIE-1: never auto-broadcast when requireNextStep (chat production path).
+  // Legacy unit tests may still enable prospectOnboarding without requireNextStep.
   if (
     !chosen &&
+    input.requireNextStep !== true &&
     input.prospectOnboarding?.enabled &&
     (input.prospectOnboarding.inboundTurnCount === 1 ||
       input.prospectOnboarding.inboundTurnCount === 3)
@@ -1029,18 +1111,28 @@ export async function resolveAndRecordTipsForTurn(input: {
       if (!isUnlocked(tip, eligible, showCountByTip, keyToTipId)) {
         continue;
       }
+      if (tipSuppressedByCapability(tip, familiarityById)) {
+        continue;
+      }
       onboard.push(tip);
     }
     chosen = pickSortedTip(onboard);
   }
 
   if (!chosen) {
-    return { texts: [], tipIds: [] };
+    return { texts: [], tipIds: [], tipKeys: [] };
+  }
+
+  // PIE-2: suppress before compose / TipProgress (avoid LLM + shown for blocked keys).
+  if (
+    input.suppressKeys?.has(tipOpportunityKey(chosen.key))
+  ) {
+    return { texts: [], tipIds: [], tipKeys: [] };
   }
 
   const instructions = chosen.text.trim();
   if (!instructions) {
-    return { texts: [], tipIds: [] };
+    return { texts: [], tipIds: [], tipKeys: [] };
   }
   let body: string | null;
   if (tipOutputMode(chosen) === "dynamic") {
@@ -1056,15 +1148,18 @@ export async function resolveAndRecordTipsForTurn(input: {
     body = instructions;
   }
   if (!body?.trim()) {
-    return { texts: [], tipIds: [] };
+    return { texts: [], tipIds: [], tipKeys: [] };
   }
 
-  await recordTipShown({
-    tipId: chosen.id,
-    employeeId: input.speaker.id,
-    digitalEmployeeId: input.digitalEmployeeId,
-  });
-  return { texts: [body], tipIds: [chosen.id] };
+  // Default true for legacy tests; chat passes false and commits after State+emit.
+  if (input.recordProgress !== false) {
+    await recordTipShown({
+      tipId: chosen.id,
+      employeeId: input.speaker.id,
+      digitalEmployeeId: input.digitalEmployeeId,
+    });
+  }
+  return { texts: [body], tipIds: [chosen.id], tipKeys: [chosen.key] };
 }
 
 /**
@@ -1078,24 +1173,45 @@ export async function formatAvailableTipsContext(input: {
   speaker: PublicEmployee;
   digitalEmployeeId: string;
   now?: Date;
+  /** PIE-1 default true — hide capability ads from AVAILABLE_TIPS. */
+  requireNextStep?: boolean;
 }): Promise<string> {
   await ensureDefaultTips(input.userId);
   const now = input.now ?? new Date();
+  const requireNextStep = input.requireNextStep === true;
   const speakerIsGuest = isGuestEmployee(input.speaker);
   // Same tip universe as resolveAndRecordTipsForTurn so unlockAfterKey /
   // ladder progress against action tips stay consistent with recording.
-  const tips = await prisma.tip.findMany({
-    where: {
+  const [tips, familiarityById] = await Promise.all([
+    prisma.tip.findMany({
+      where: {
+        userId: input.userId,
+        enabled: true,
+      },
+      orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+    }),
+    resolveSpeakerCapabilityFamiliarity({
       userId: input.userId,
-      enabled: true,
-    },
-    orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+      employeeId: input.speaker.id,
+      digitalEmployeeId: input.digitalEmployeeId,
+      now,
+    }),
+  ]);
+  const eligible = tips.filter((tip) => {
+    if (
+      !audienceMatches(tip.audience, speakerIsGuest) ||
+      !digitalMatches(tip.digitalEmployeeId, input.digitalEmployeeId)
+    ) {
+      return false;
+    }
+    if (!requireNextStep) {
+      return true;
+    }
+    if (tipKeyExcludedAsCapabilityAd(tip.key)) {
+      return false;
+    }
+    return tipTextHasNextStep(tip.text);
   });
-  const eligible = tips.filter(
-    (tip) =>
-      audienceMatches(tip.audience, speakerIsGuest) &&
-      digitalMatches(tip.digitalEmployeeId, input.digitalEmployeeId),
-  );
   if (eligible.length === 0) {
     return "";
   }
@@ -1123,6 +1239,7 @@ export async function formatAvailableTipsContext(input: {
         lastShownByTip,
         keyToTipId,
         now,
+        familiarityById,
       ),
   );
   if (remaining.length === 0) {

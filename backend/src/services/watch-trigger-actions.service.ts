@@ -28,6 +28,19 @@ export const WATCH_TRIGGER_PACKAGE_VERSION = 1 as const;
 export const WATCH_TRIGGER_EXEC_VERSION = 1 as const;
 /** Soft cap — prune only terminal event entries beyond this. */
 export const WATCH_TRIGGER_EXEC_MAX_EVENTS = 32;
+/** lastError prefix when UWM evidence gate blocks Apply for a fingerprint. */
+export const WATCH_TRIGGER_GATE_BLOCK_PREFIX = "gate:";
+
+export function isWatchTriggerGateBlockedError(
+  lastError: string | undefined | null,
+): boolean {
+  return String(lastError ?? "").startsWith(WATCH_TRIGGER_GATE_BLOCK_PREFIX);
+}
+
+export function watchTriggerGateBlockError(reason: string): string {
+  const clean = String(reason ?? "blocked").trim() || "blocked";
+  return `${WATCH_TRIGGER_GATE_BLOCK_PREFIX}${clean}`;
+}
 
 export type WatchTriggerActionMode = "static" | "event_bound";
 export type WatchTriggerActionStatus = "pending" | "done" | "failed";
@@ -85,6 +98,23 @@ const ALLOWED_FACT_BINDS = new Set([
 
 const BUILTIN_LIST_TYPES = new Set(["shopping", "tasks"]);
 
+/**
+ * P0 item identity label for Watch→Action packages.
+ * Priority: שם פריט → שם משימה → title → name → item.
+ */
+export function watchTriggerItemLabel(
+  item: Record<string, unknown>,
+): string {
+  return String(
+    item["שם פריט"] ??
+      item["שם משימה"] ??
+      item.title ??
+      item.name ??
+      item.item ??
+      "",
+  ).trim();
+}
+
 function stableActionKey(list: LlmListAction, index: number): string {
   const itemIds = list.items
     .map((item) =>
@@ -97,15 +127,7 @@ function stableActionKey(list: LlmListAction, index: number): string {
     .filter(Boolean)
     .join(",");
   const title = list.items
-    .map((item) =>
-      String(
-        item["שם פריט"] ??
-          item.title ??
-          item.name ??
-          item.item ??
-          "",
-      ).trim(),
-    )
+    .map((item) => watchTriggerItemLabel(item as Record<string, unknown>))
     .filter(Boolean)
     .join("|");
   const basis = [
@@ -153,12 +175,9 @@ function isOwnerOnlyListAction(list: LlmListAction): string | null {
     }
   }
   if (list.action === "add") {
-    const hasIdentity = list.items.some((item) => {
-      const label = String(
-        item["שם פריט"] ?? item.title ?? item.name ?? item.item ?? "",
-      ).trim();
-      return Boolean(label);
-    });
+    const hasIdentity = list.items.some((item) =>
+      Boolean(watchTriggerItemLabel(item as Record<string, unknown>)),
+    );
     if (!hasIdentity) {
       return "add_requires_item_identity";
     }
@@ -942,6 +961,7 @@ export async function executeWatchTriggerActions(input: {
 /**
  * Mark notification attempt for a fingerprint without changing Action statuses.
  * Incomplete event entries for other fingerprints are preserved.
+ * Does not reopen actions already marked gate-blocked (`gate:*`).
  */
 export async function markWatchTriggerNotified(input: {
   reminderId: string;
@@ -967,6 +987,47 @@ export async function markWatchTriggerNotified(input: {
   return persistLedger(input.reminderId, ledger, actionKeys);
 }
 
+/**
+ * Record that Apply was refused by the UWM evidence gate for this fingerprint.
+ * Actions become terminal `failed` with `gate:<reason>` so Recovery must not
+ * execute them without a fresh Gate pass on a later fire of that fingerprint
+ * (executeWatchTriggerActions may still retry the same fingerprint when Gate
+ * later returns ok for it).
+ */
+export async function markWatchTriggerActionsGateBlocked(input: {
+  reminderId: string;
+  ledger: WatchTriggerExecLedger;
+  package: WatchTriggerPackage;
+  fingerprint: string;
+  reason: string;
+  now?: Date;
+}): Promise<WatchTriggerExecLedger> {
+  const now = input.now ?? new Date();
+  const fingerprint = input.fingerprint.trim().slice(0, 64);
+  const actionKeys = input.package.actions.map((a) => a.key);
+  const ledger: WatchTriggerExecLedger = {
+    version: WATCH_TRIGGER_EXEC_VERSION,
+    events: { ...input.ledger.events },
+  };
+  for (const [fp, event] of Object.entries(ledger.events)) {
+    ledger.events[fp] = { ...event, actions: { ...event.actions } };
+  }
+  const event = ensureEventEntry(ledger, fingerprint, actionKeys, now);
+  const err = watchTriggerGateBlockError(input.reason);
+  for (const key of actionKeys) {
+    const prev = event.actions[key];
+    if (prev?.status === "done") {
+      continue;
+    }
+    event.actions[key] = {
+      status: "failed",
+      attempts: (prev?.attempts ?? 0) + 1,
+      lastError: err,
+    };
+  }
+  return persistLedger(input.reminderId, ledger, actionKeys);
+}
+
 export function watchTriggerNeedsActionRecovery(
   ledger: WatchTriggerExecLedger,
   pkg: WatchTriggerPackage,
@@ -977,8 +1038,19 @@ export function watchTriggerNeedsActionRecovery(
     return false;
   }
   return pkg.actions.some((action) => {
-    const status = event.actions[action.key]?.status;
-    return status !== "done";
+    const state = event.actions[action.key];
+    if (!state || state.status === "done") {
+      return false;
+    }
+    // Gate-blocked fingerprints stay closed until that fingerprint itself
+    // re-enters execute under a fresh Gate ok (not via cross-fp Recovery).
+    if (
+      state.status === "failed" &&
+      isWatchTriggerGateBlockedError(state.lastError)
+    ) {
+      return false;
+    }
+    return true;
   });
 }
 
