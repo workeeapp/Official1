@@ -359,8 +359,14 @@ describe("LLM action schema", () => {
       "POST-SAVE REMINDER OFFER vs EXPLICIT REMINDER",
     );
     expect(config.systemMessage).toContain("Branch B — TASK ONLY");
+    // Branch B offer gate (current copy): timed/date tasks get soft offer; undated → confirm only.
+    // Legacy "OFFER ONLY WHEN USEFUL (contextual judgment…)" title was retired; Assign intention
+    // still says offer only when a time/deadline makes it useful (Product Contract Phase 1).
     expect(config.systemMessage).toContain(
-      "OFFER ONLY WHEN USEFUL (contextual judgment, never mandatory)",
+      "OFFER WHEN THE TASK HAS A DATE AND/OR TIME",
+    );
+    expect(config.systemMessage).toContain(
+      "Undated tasks with nothing to miss → confirm only",
     );
     expect(config.systemMessage).toContain(
       "When you offer, responses use TWO separate WhatsApp messages",
@@ -368,7 +374,6 @@ describe("LLM action schema", () => {
     expect(config.systemMessage).toContain(
       "NEVER choose between navigation and כן/לא",
     );
-    expect(config.systemMessage).toContain("No offer → [0] confirm only.");
     expect(config.systemMessage).not.toContain(
       "FORBIDDEN a single responses entry with no offer",
     );

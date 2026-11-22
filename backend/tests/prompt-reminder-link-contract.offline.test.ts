@@ -27,10 +27,10 @@ describe("Prompt reminder link contract (Stage 1)", () => {
   });
 
   it("until-done stays jobs / expects_reply; not recurrence clocks", () => {
-    expect(configText).toMatch(/UNTIL-DONE NUDGE/);
+    expect(configText).toMatch(/UNTIL-DONE \/ CHECK-WITH \/ REPLY-RELAY/);
     expect(configText).toMatch(/expects_reply:true/);
     expect(configText).toMatch(
-      /FORBIDDEN converting this to list_type reminders recurrence/,
+      /FORBIDDEN converting until-done\/check-with to list_type reminders recurrence/,
     );
   });
 
