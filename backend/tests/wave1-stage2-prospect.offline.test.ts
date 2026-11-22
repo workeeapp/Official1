@@ -185,9 +185,15 @@ vi.mock("../src/services/contact.service.js", () => ({
   applyDirectoryActions: vi.fn(),
 }));
 
-vi.mock("../src/services/employee-targets.service.js", () => ({
-  planTargetedActions: () => ({ applications: [], relays: [] }),
-}));
+vi.mock("../src/services/employee-targets.service.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/services/employee-targets.service.js")
+  >();
+  return {
+    ...actual,
+    planTargetedActions: () => ({ applications: [], relays: [] }),
+  };
+});
 
 import { emptyLlmMetadata } from "@workee/shared";
 import {
@@ -229,6 +235,18 @@ describe("ProspectWriteGate", () => {
   it("does not block chat-only turns", () => {
     const gated = applyProspectWriteGate(emptyLlmMetadata());
     expect(gated.blocked).toBe(false);
+  });
+
+  it("F28: blocks outbound messages and excludes them from join snapshot", () => {
+    const gated = applyProspectWriteGate({
+      ...emptyLlmMetadata(),
+      messages: [{ targets: ["עמית"], text: "היי מה קורה" }],
+    } as never);
+    expect(gated.blocked).toBe(true);
+    expect(gated.actionKind).toBe("message");
+    expect(gated.metadata.messages ?? []).toEqual([]);
+    const snap = gated.snapshot as { metadata?: { messages?: unknown[] } } | null;
+    expect(snap?.metadata?.messages ?? []).toEqual([]);
   });
 
   it("formats join CTA without claiming saved", () => {
@@ -313,7 +331,29 @@ describe("Explicit Join consent flip", () => {
       actionKind: "reminder",
       snapshot: {
         metadata: {
-          reminders: [{ action: "create", item: "לקחת תיק", when: "מחר 9:00" }],
+          reminders: [
+            {
+              action: "add",
+              item: "לקחת תיק",
+              listType: "tasks",
+              date: "",
+              time: "09:00",
+              repeat: "once",
+              ping: [],
+              targets: [],
+              text: "",
+              inSeconds: null,
+              everyCount: null,
+              everyUnit: null,
+              weekdays: null,
+              confirmed: true,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+              composePlace: "",
+              reminderId: "",
+            },
+          ],
         },
       },
       summaryText: "לקחת תיק",
@@ -395,6 +435,108 @@ describe("Explicit Join consent flip", () => {
       inviteId: "inv-share",
       recipientIsProspect: false,
     });
+  });
+
+  it("F30: Join replay does not treat Join as Class V — foreign remind is not applied", async () => {
+    userFindUnique.mockResolvedValue({ consentPending: true });
+    userUpdateMany.mockResolvedValue({ count: 1 });
+    pendingFindFirst.mockResolvedValue({
+      id: "p-foreign",
+      actionKind: "reminder",
+      snapshot: {
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "תזכיר לעמית",
+              listType: "tasks",
+              date: "",
+              time: "10:00",
+              repeat: "once",
+              ping: ["עמית"],
+              targets: [],
+              text: "היי",
+              inSeconds: null,
+              everyCount: null,
+              everyUnit: null,
+              weekdays: null,
+              confirmed: true,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+              composePlace: "",
+              reminderId: "",
+            },
+          ],
+        },
+      },
+      summaryText: "תזכיר לעמית",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const out = await handleExplicitJoinAccept({
+      userId: "u1",
+      employeeId: "e1",
+      digitalEmployeeId: "d1",
+      joinCommand: `${EXPLICIT_JOIN_ACCEPT_PREFIX}:p-foreign`,
+      recipientPhone: "972501111111",
+    });
+    expect(out.ok).toBe(true);
+    expect(out.joined).toBe(true);
+    expect(applyReminders).not.toHaveBeenCalled();
+    expect(out.spoken).not.toMatch(/שמרתי/);
+    expect(out.spoken).toMatch(/הצטרפת|אישור נוסף|נסחו/);
+  });
+
+  it("F30: Join still replays personal self-reminder after Gate", async () => {
+    applyReminders.mockClear();
+    userFindUnique.mockResolvedValue({ consentPending: true });
+    userUpdateMany.mockResolvedValue({ count: 1 });
+    pendingFindFirst.mockResolvedValue({
+      id: "p-self",
+      actionKind: "reminder",
+      snapshot: {
+        metadata: {
+          reminders: [
+            {
+              action: "add",
+              item: "לקחת תיק",
+              listType: "tasks",
+              date: "",
+              time: "09:00",
+              repeat: "once",
+              ping: [],
+              targets: [],
+              text: "",
+              inSeconds: null,
+              everyCount: null,
+              everyUnit: null,
+              weekdays: null,
+              confirmed: true,
+              compose: false,
+              composeSource: "",
+              composeLookbackHours: 0,
+              composePlace: "",
+              reminderId: "",
+            },
+          ],
+        },
+      },
+      summaryText: "לקחת תיק",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const out = await handleExplicitJoinAccept({
+      userId: "u1",
+      employeeId: "e1",
+      digitalEmployeeId: "d1",
+      joinCommand: `${EXPLICIT_JOIN_ACCEPT_PREFIX}:p-self`,
+      recipientPhone: "972501111111",
+    });
+    expect(out.ok).toBe(true);
+    expect(out.joined).toBe(true);
+    expect(applyReminders).toHaveBeenCalled();
+    expect(out.spoken).toMatch(/בוצע|שמרתי/);
   });
 });
 

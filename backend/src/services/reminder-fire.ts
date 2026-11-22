@@ -65,6 +65,7 @@ import {
   completeDeliveryAttempt,
 } from "./delivery-attempt.service.js";
 import { shouldSuppressLegacyForeignClock } from "./reminder-high-risk-auth.js";
+import { jobMetaFrom, type JobMeta } from "./job-meta.js";
 import {
   executeWatchTriggerActions,
   listIncompleteWatchFingerprints,
@@ -315,6 +316,170 @@ async function workerItemIdForReminder(reminderId: string): Promise<string | nul
   return row?.workerItemId ?? null;
 }
 
+const FAIL_NOTICE_PURPOSE = "reminder_fail_notice";
+
+/** Deterministic Reminder.itemKey so a crash after create still dedupes. */
+function failNoticeItemKey(sourceReminderId: string): string {
+  return `כשל_מסירה:${sourceReminderId}`.slice(0, 255);
+}
+
+async function loadJobMetaForReminder(reminder: {
+  id: string;
+  workerItemId?: string | null;
+}): Promise<JobMeta | null> {
+  const workerId =
+    (typeof reminder.workerItemId === "string" && reminder.workerItemId.trim()) ||
+    (await workerItemIdForReminder(reminder.id));
+  if (!workerId || typeof prisma.employeeListItem?.findUnique !== "function") {
+    return null;
+  }
+  try {
+    const row = await prisma.employeeListItem.findUnique({
+      where: { id: workerId },
+      select: { data: true },
+    });
+    return jobMetaFrom(row?.data ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who should hear about a reliable Reminder delivery failure.
+ * Job/nudge → askerId from meta. Human actor → that actor.
+ * Digital actor without job meta → null (ownerId may be the subject — never guess).
+ */
+function resolveFailNoticeAskerId(input: {
+  actor: { id: string; kind: string } | undefined;
+  jobMeta: JobMeta | null;
+}): string | null {
+  const fromJob = input.jobMeta?.askerId?.trim();
+  if (fromJob) {
+    return fromJob;
+  }
+  if (input.actor?.kind === "human" && input.actor.id.trim()) {
+    return input.actor.id.trim();
+  }
+  return null;
+}
+
+/**
+ * One asker notice after reliable suppress/fail. Idempotent via Reminder.itemKey
+ * + DeliveryAttempt (purpose reminder_fail_notice). Ledger skip on
+ * accepted|sending|unknown — no in_flight→failed recover (avoids duplicate race).
+ */
+async function notifyAskerOfReliableDeliveryFailure(input: {
+  reminder: {
+    id: string;
+    userId: string;
+    actorId: string;
+    ownerId: string;
+    pingIds: unknown;
+    itemLabel: string | null;
+    messageText: string;
+    workerItemId?: string | null;
+  };
+  employees: Array<{ id: string; kind: string; phone?: string | null; name: string; nickname?: string | null }>;
+  actor: { id: string; kind: string } | undefined;
+  jobMeta: JobMeta | null;
+  now: Date;
+  reason: "suppress" | "delivery_failed";
+}): Promise<void> {
+  if (!input.reminder.userId || typeof prisma.reminder?.create !== "function") {
+    return;
+  }
+  const askerId = resolveFailNoticeAskerId({
+    actor: input.actor,
+    jobMeta: input.jobMeta,
+  });
+  if (!askerId) {
+    return;
+  }
+  const pings = pingIds(input.reminder.pingIds);
+  // Self-ping / fail-notice clocks: asker is the recipient — no loop.
+  if (pings.length > 0 && pings.every((id) => id === askerId)) {
+    return;
+  }
+
+  const itemKey = failNoticeItemKey(input.reminder.id);
+  try {
+    const existing = await prisma.reminder.findFirst({
+      where: { userId: input.reminder.userId, itemKey },
+      select: { id: true },
+    });
+    if (existing) {
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  const asker = input.employees.find((row) => row.id === askerId);
+  const destination = asker?.phone?.trim() || `in_app:${askerId}`;
+  const claimArgs = {
+    userId: input.reminder.userId,
+    sourceKey: `reminder:${input.reminder.id}`,
+    destination,
+    purpose: FAIL_NOTICE_PURPOSE,
+  };
+
+  const claim = await claimDeliverySend(claimArgs);
+  // Normal ledger contract: accepted | sending | unknown → skip (no recover).
+  // A stuck sending/unknown without a Reminder row may lose the notice once;
+  // do not force failed→re-claim (that raced into duplicate notices).
+  if (!claim.maySend) {
+    return;
+  }
+
+  const destLabel =
+    asker && pings[0]
+      ? input.employees.find((row) => row.id === pings[0])?.nickname?.trim() ||
+        input.employees.find((row) => row.id === pings[0])?.name ||
+        "הנמען"
+      : "הנמען";
+  const chore =
+    (input.reminder.itemLabel || input.reminder.messageText || "").trim().slice(0, 80) ||
+    "תזכורת";
+  const text =
+    input.reason === "suppress"
+      ? `לא הצלחתי לשלוח ל${destLabel} את התזכורת «${chore}» (נחסמה לפני שליחה).`
+      : `לא הצלחתי לשלוח ל${destLabel} את התזכורת «${chore}».`;
+  const label = `לא נשלחה תזכורת: ${chore}`.slice(0, 255);
+
+  try {
+    await prisma.reminder.create({
+      data: {
+        userId: input.reminder.userId,
+        ownerId: askerId,
+        actorId: askerId,
+        itemKey,
+        itemLabel: label,
+        listType: "tasks",
+        fireAt: input.now,
+        repeat: "once",
+        pingIds: [askerId],
+        messageText: text.slice(0, 4096),
+      },
+    });
+    scheduleSoon(input.now);
+    if (claim.attemptId) {
+      await completeDeliveryAttempt({
+        attemptId: claim.attemptId,
+        status: "accepted",
+      });
+    }
+  } catch (error) {
+    if (claim.attemptId) {
+      await completeDeliveryAttempt({
+        attemptId: claim.attemptId,
+        status: "failed",
+        lastError:
+          error instanceof Error ? error.message : "fail_notice_create",
+      });
+    }
+  }
+}
+
 async function maybeActivateScheduledJob(input: {
   userId?: string;
   workerItemId: string | null;
@@ -542,9 +707,10 @@ export async function settleFiredReminder(
   }
 
   if (reminder.userId) {
+    const firedMeta = jobMetaFrom(firedTaskData);
     await recordAuditEvent({
       userId: reminder.userId,
-      actorEmployeeId: reminder.actorId,
+      actorEmployeeId: firedMeta?.askerId || reminder.actorId,
       action: "reminder_fire",
       entityType: "Reminder",
       entityId: reminder.id,
@@ -607,6 +773,13 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
     const speaker = lucy ?? digitals[0];
     const actor = employees.find((employee) => employee.id === reminder.actorId);
     const actorName = actor?.nickname?.trim() || actor?.name || "";
+    const jobMeta = await loadJobMetaForReminder(reminder);
+    // Lucy-operated Job/nudge clocks: attribute to the human asker, not «מאת לוסי».
+    // When messageText already names the asker, formatAttributedOutbound skips a prefix.
+    const attributionName =
+      actor?.kind === "digital"
+        ? jobMeta?.askerName?.trim() || ""
+        : actorName;
     // Stage 6: suppress legacy human-actor foreign clocks without Class V auth marker.
     if (
       shouldSuppressLegacyForeignClock({
@@ -623,6 +796,14 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         "reminder_legacy_foreign_suppress",
         `id=${reminder.id} item=${reminder.itemLabel}`,
       );
+      await notifyAskerOfReliableDeliveryFailure({
+        reminder,
+        employees,
+        actor,
+        jobMeta,
+        now,
+        reason: "suppress",
+      });
       await settleFiredReminder(reminder, now, "failed", {
         retryWhenFailed: false,
       });
@@ -1156,7 +1337,7 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
       const composed = await composeScheduledOutbound({
         brief: reminder.messageText,
         itemLabel: reminder.itemLabel,
-        actorName,
+        actorName: attributionName || actorName,
         recipientName,
         previousText: reminder.lastComposedText,
         facts: factsBundle,
@@ -1266,9 +1447,10 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         );
       const destIsActor =
         dest === reminder.actorId ||
-        Boolean(actor?.phone && phonesMatch(actor.phone, dest));
+        Boolean(actor?.phone && phonesMatch(actor.phone, dest)) ||
+        Boolean(jobMeta?.askerId && dest === jobMeta.askerId);
       const text = formatAttributedOutbound({
-        actorName,
+        actorName: attributionName,
         destIsActor,
         item: reminder.composeAtFire ? undefined : reminder.itemLabel,
         text: outboundBody,
@@ -1474,6 +1656,16 @@ export async function fireDueReminders(now = new Date()): Promise<number> {
         "composeCondition" in reminder ? reminder.composeCondition : null,
       ),
     );
+    if (sendStatus === "failed" && !skipSend) {
+      await notifyAskerOfReliableDeliveryFailure({
+        reminder,
+        employees,
+        actor,
+        jobMeta,
+        now,
+        reason: "delivery_failed",
+      });
+    }
     await settleReminder(sendStatus, {
       forceDone:
         watchOnce &&

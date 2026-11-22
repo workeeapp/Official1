@@ -15,6 +15,7 @@ import {
   reminderLabelsMatch,
   resolveReminderFireAt,
   resolveReminderAboutIds,
+  asReminderSkipReason,
   resolveReminderPingDestinations,
   toReminderSnapshotRow,
   unknownDestNames,
@@ -177,6 +178,19 @@ describe("resolveReminderFireAt", () => {
   });
 });
 
+describe("asReminderSkipReason", () => {
+  it("preserves known ReminderSkipReason values", () => {
+    expect(asReminderSkipReason("no_phone")).toBe("no_phone");
+    expect(asReminderSkipReason("db")).toBe("db");
+    expect(asReminderSkipReason("no_time")).toBe("no_time");
+  });
+
+  it("maps unknown nested package reasons to db", () => {
+    expect(asReminderSkipReason("nested_package_failed")).toBe("db");
+    expect(asReminderSkipReason(undefined)).toBe("db");
+  });
+});
+
 describe("resolveReminderPingDestinations", () => {
   it("keeps a phone number when it is not an employee", () => {
     expect(
@@ -188,9 +202,27 @@ describe("resolveReminderPingDestinations", () => {
     ).toEqual(["0502222222"]);
   });
 
+  it("empty ping with fallbackId null returns [] (no invent)", () => {
+    expect(
+      resolveReminderPingDestinations({ ping: [] }, [tal], null),
+    ).toEqual([]);
+  });
+
+  it("empty ping with actor fallback still resolves to self", () => {
+    expect(
+      resolveReminderPingDestinations({ ping: [] }, [tal], tal.id),
+    ).toEqual([tal.id]);
+  });
+
   it("does not fall back to the speaker when only a non-employee name is given", () => {
     expect(
       resolveReminderPingDestinations({ ping: ["מיכל"] }, [tal], tal.id),
+    ).toEqual([]);
+  });
+
+  it("unresolved name with null fallback still returns []", () => {
+    expect(
+      resolveReminderPingDestinations({ ping: ["מיכל"] }, [tal], null),
     ).toEqual([]);
   });
 

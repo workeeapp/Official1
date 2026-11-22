@@ -1,6 +1,7 @@
 /**
  * Wave 1 Stage 2 — ProspectWriteGate (R1: zero LLM consent).
  * Detects durable personal / responsibility writes while consentPending.
+ * F28: also blocks outbound `messages` (Prospects skip HighRisk Gate).
  */
 import {
   emptyLlmMetadata,
@@ -15,7 +16,8 @@ export type ProspectBlockedKind =
   | "directory"
   | "assign_accept"
   | "job"
-  | "mission";
+  | "mission"
+  | "message";
 
 export type ProspectWriteGateResult = {
   blocked: boolean;
@@ -31,7 +33,7 @@ function hasEntries(value: unknown): boolean {
   return Array.isArray(value) && value.length > 0;
 }
 
-/** True when metadata would persist personal / responsibility state. */
+/** True when metadata would persist personal / responsibility state or outbound. */
 export function prospectMetadataHasDurableWrites(metadata: LlmMetadata): boolean {
   return (
     hasEntries(metadata.lists) ||
@@ -41,6 +43,7 @@ export function prospectMetadataHasDurableWrites(metadata: LlmMetadata): boolean
     hasEntries(metadata.directory) ||
     hasEntries(metadata.jobs) ||
     hasEntries(metadata.missions) ||
+    hasEntries(metadata.messages) ||
     metadata.register != null
   );
 }
@@ -65,6 +68,9 @@ export function classifyProspectBlockedKind(
   }
   if (hasEntries(metadata.missions)) {
     return "mission";
+  }
+  if (hasEntries(metadata.messages)) {
+    return "message";
   }
   return "save";
 }
@@ -97,12 +103,17 @@ function summaryForKind(kind: ProspectBlockedKind, metadata: LlmMetadata): strin
       .trim()
       .slice(0, 120);
   }
+  if (kind === "message" && metadata.messages?.[0]) {
+    const who = (metadata.messages[0].targets ?? []).join(", ") || "מישהו";
+    return `הודעה אל ${who}`.slice(0, 120);
+  }
   return "שמירה אישית";
 }
 
 /**
- * Strip durable writes for Prospects. Caller must stage PendingProspectAction
- * and attach Explicit Join CTA — never claim the action was saved.
+ * Strip durable writes (and outbound messages) for Prospects.
+ * F28: messages are not included in the join snapshot — after join the user
+ * re-asks; Join replay must not auto-send staged outbound.
  */
 export function applyProspectWriteGate(
   metadata: LlmMetadata,
@@ -118,6 +129,7 @@ export function applyProspectWriteGate(
   }
   const actionKind = classifyProspectBlockedKind(metadata);
   const summaryText = summaryForKind(actionKind, metadata);
+  // Personal durable writes only — never stage outbound messages for replay.
   const snapshot = {
     v: 1,
     type: "prospect_pending_writes",
@@ -136,7 +148,7 @@ export function applyProspectWriteGate(
     blocked: true,
     metadata: {
       ...emptyLlmMetadata(),
-      // Keep conversational responses / messages empty of durable mutates.
+      // Keep conversational responses; strip mutates + outbound messages.
       responses: metadata.responses,
       confirm: metadata.confirm,
     },
@@ -157,6 +169,9 @@ export function formatProspectJoinOfferText(input: {
   if (input.actionKind === "assign_accept") {
     return "בשמחה! כדי שאוכל לשמור אחריות על המשימה אצלך (בכפוף לתנאי השימוש), אשרי למטה ואז נאשר את הקבלה:";
   }
+  if (input.actionKind === "message") {
+    return "בשמחה! כדי שאוכל לשלוח הודעות בשמך (בכפוף לתנאי השימוש), אשרי למטה ואז ננסח מחדש את השליחה:";
+  }
   const what = input.summaryText?.trim() || "את זה";
   return `בשמחה! כדי שאוכל לשמור לך תזכורות ורשימות אישיות (בכפוף לתנאי השימוש), אשרי למטה ומיד אשמור לך את «${what}»:`;
 }
@@ -169,6 +184,9 @@ export function prospectJoinButtonLabel(
   }
   if (actionKind === "assign_accept") {
     return "אישור והצטרפות";
+  }
+  if (actionKind === "message") {
+    return "כן, אחרי הצטרפות";
   }
   return "כן, תשמרי לי";
 }

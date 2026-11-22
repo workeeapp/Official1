@@ -471,6 +471,11 @@ export async function applyDirectoryActions(input: {
   actions: LlmDirectoryAction[];
   /** Humans on the account — resolve directory.targets for co-share. */
   employees?: PublicEmployee[];
+  /**
+   * F2 fall-through: phone add/update only when Gate/V already authorized.
+   * Default false — ungated callers cannot plant/redirect numbers.
+   */
+  authorizePhoneFields?: boolean;
 }): Promise<{
   saved: SpeakerContact[];
   removed: Array<{ id: string; name: string }>;
@@ -499,6 +504,7 @@ export async function applyDirectoryActions(input: {
 
   const employees = input.employees ?? [];
   const bookPartnerIds = await loadBookPartnerIds(input.ownerEmployeeId);
+  const phoneAuthorized = input.authorizePhoneFields === true;
 
   for (const action of input.actions) {
     if (action.action === "share_book") {
@@ -629,7 +635,12 @@ export async function applyDirectoryActions(input: {
       const nextName = action.name.trim()
         ? action.name.trim().slice(0, 100)
         : existing.name;
-      const nextPhone = action.phone.trim()
+      const phoneProvided = Boolean(action.phone.trim());
+      // F2: refuse phone field change unless Gate/V authorized this turn.
+      if (phoneProvided && !phoneAuthorized) {
+        continue;
+      }
+      const nextPhone = phoneProvided
         ? toWhatsAppAddress(action.phone)
         : existing.phone;
       const descriptionProvided = typeof action.description === "string";
@@ -671,6 +682,10 @@ export async function applyDirectoryActions(input: {
     const phone = toWhatsAppAddress(action.phone);
     const description = normalizeContactDescription(action.description);
     if (!name || !looksLikePhone(phone)) {
+      continue;
+    }
+    // F2: new contact with phone requires Gate/V authorization.
+    if (!phoneAuthorized) {
       continue;
     }
 

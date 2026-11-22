@@ -13,6 +13,7 @@ import {
   type LlmMetadata,
 } from "@workee/shared";
 import {
+  ForbiddenError,
   isMissingTableError,
   NotFoundError,
   ValidationError,
@@ -88,6 +89,7 @@ import {
   describePastOneOffRewrite,
   shouldRewritePastOneOffDateUpdateAsAdd,
 } from "./one-off-task-occurrence.js";
+import { tasksItemIsMeeting } from "./capability-evidence.js";
 
 export type ItemScope = "personal" | "shared";
 
@@ -1605,6 +1607,16 @@ export async function updateEmployeeRecord(
     include: { list: true },
   });
   if (listItem) {
+    // F14: same ACL as chat apply — account membership alone is not enough.
+    const allowed = await humanItemAccessAllowed(
+      employeeId,
+      actorId,
+      listItem,
+      {},
+    );
+    if (!allowed) {
+      throw new ForbiddenError("Item access denied");
+    }
     return updateOwnedListItem(listItem, fields, actorId);
   }
 
@@ -1612,6 +1624,15 @@ export async function updateEmployeeRecord(
     where: { id: itemId, employeeId, deletedAt: null },
   });
   if (filing) {
+    const allowed = await humanItemAccessAllowed(
+      employeeId,
+      actorId,
+      filing,
+      {},
+    );
+    if (!allowed) {
+      throw new ForbiddenError("Item access denied");
+    }
     return updateOwnedFiling(filing, fields, actorId);
   }
 
@@ -1628,6 +1649,15 @@ export async function deleteEmployeeRecord(
     include: { list: true },
   });
   if (listItem) {
+    const allowed = await humanItemAccessAllowed(
+      employeeId,
+      actorId,
+      listItem,
+      {},
+    );
+    if (!allowed) {
+      throw new ForbiddenError("Item access denied");
+    }
     return deleteOwnedListItem(listItem, actorId);
   }
 
@@ -1635,6 +1665,15 @@ export async function deleteEmployeeRecord(
     where: { id: itemId, employeeId, deletedAt: null },
   });
   if (filing) {
+    const allowed = await humanItemAccessAllowed(
+      employeeId,
+      actorId,
+      filing,
+      {},
+    );
+    if (!allowed) {
+      throw new ForbiddenError("Item access denied");
+    }
     return deleteOwnedFiling(filing, actorId);
   }
 
@@ -2211,6 +2250,17 @@ export function calendarYmdFromItemData(
   return null;
 }
 
+/** Spread onto ListItemMutation when tasks row has meeting evidence. */
+function meetingFlagForListType(
+  listType: string,
+  data: unknown,
+): { isMeeting?: true } {
+  if (listType !== "tasks") {
+    return {};
+  }
+  return tasksItemIsMeeting(data) ? { isMeeting: true } : {};
+}
+
 export interface ListItemMutation {
   action: "add" | "update" | "remove";
   itemId: string;
@@ -2225,6 +2275,11 @@ export interface ListItemMutation {
    * pre-delete for remove). Absent when the row has no calendar date.
    */
   calendarYmd?: string;
+  /**
+   * Tasks row with meeting evidence (date+time, all-day, or end time).
+   * Used so tip ops do not treat ordinary tasks as meetings.
+   */
+  isMeeting?: boolean;
   /** Named custom list opened/updated with no real rows (columns only). */
   listShell?: boolean;
   /** Row added to a list that this same action created (new list). */
@@ -2321,6 +2376,11 @@ function shareMissFromItem(
 /** NEW task+nested-remind transaction failed — surfaces as lists apply_miss. */
 export type NestedRemindTxnMiss = {
   reason: "nested_remind_txn_failed";
+  /**
+   * User-facing reminder skip (chat → reminderResult.skipped).
+   * Omit / other → treated as db. `no_phone` keeps the phone ask copy.
+   */
+  reminderSkipReason?: "no_phone";
   op: "add";
   listType: string;
   listName?: string;
@@ -3328,6 +3388,7 @@ async function applyListAction(
           ) || removedKey,
         listName: targetListName || resolvedAction.listName || undefined,
         ...(removedCalendarYmd ? { calendarYmd: removedCalendarYmd } : {}),
+        ...meetingFlagForListType(resolvedAction.listType, removedData),
         ...(access && existing.reminderId
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
@@ -3633,6 +3694,7 @@ async function applyListAction(
             existing.itemKey,
           listName: rowListName,
           ...(shareNoopYmd ? { calendarYmd: shareNoopYmd } : {}),
+          ...meetingFlagForListType(resolvedAction.listType, nextDataRecord),
           ...(access && existing.reminderId
             ? { workerTaskInvolvedIds: access.involvedIds }
             : {}),
@@ -3763,6 +3825,7 @@ async function applyListAction(
           existing.itemKey,
         listName: rowListName,
         ...(updateYmd ? { calendarYmd: updateYmd } : {}),
+        ...meetingFlagForListType(resolvedAction.listType, nextDataRecord),
         ...(access && existing.reminderId
           ? { workerTaskInvolvedIds: access.involvedIds }
           : {}),
@@ -3881,6 +3944,7 @@ async function applyListAction(
             itemLabel,
             listName: listNameForMut,
             ...(addYmd ? { calendarYmd: addYmd } : {}),
+            ...meetingFlagForListType(resolvedAction.listType, nextDataRecord),
             ...(collabApply ? { collabApply } : {}),
             pendingReminds,
             nestedClocksApplied: true,
@@ -3915,9 +3979,13 @@ async function applyListAction(
                 : `add ${resolvedAction.listType}: ${nextItemKey}`,
             });
           }
-        } catch {
+        } catch (error) {
+          const noPhone =
+            error instanceof Error &&
+            error.message === "nested_remind_no_phone";
           nestedRemindMisses.push({
             reason: "nested_remind_txn_failed",
+            ...(noPhone ? { reminderSkipReason: "no_phone" as const } : {}),
             op: "add",
             listType: resolvedAction.listType,
             listName: listNameForMut,
@@ -3954,6 +4022,7 @@ async function applyListAction(
         itemLabel,
         listName: listNameForMut,
         ...(addYmd ? { calendarYmd: addYmd } : {}),
+        ...meetingFlagForListType(resolvedAction.listType, nextDataRecord),
         ...(collabApply ? { collabApply } : {}),
       });
       attachmentOutcome = mergeAttachmentOutcomes(

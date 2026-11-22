@@ -31,7 +31,11 @@ vi.mock("../src/services/audit.service.js", () => ({
   recordAuditEvent: vi.fn(async () => undefined),
 }));
 
-import { createItemWithNestedRemindersAtomic } from "../src/services/reminder.service.js";
+import {
+  asReminderSkipReason,
+  createItemWithNestedRemindersAtomic,
+  formatReminderApplyNotice,
+} from "../src/services/reminder.service.js";
 import { ymdHm } from "../src/services/reminder-soft-link.js";
 import {
   buildApplyResult,
@@ -172,6 +176,136 @@ describe("createItemWithNestedRemindersAtomic (offline mock)", () => {
     ).rejects.toThrow(/nested_remind_forced_reminder_fail/);
     expect(itemCreate).not.toHaveBeenCalled();
   });
+
+  it("nested self (owner===actor) empty ping still pings the actor", async () => {
+    itemCreate.mockResolvedValue({ id: ITEM });
+    reminderCreate.mockResolvedValue({
+      id: REM,
+      fireAt: ymdHm(2026, 12, 15, 9, 0),
+    });
+    linkCreate.mockResolvedValue({});
+    transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        employeeListItem: { create: itemCreate },
+        reminder: { create: reminderCreate },
+        employeeListItemReminderLink: { create: linkCreate },
+      }),
+    );
+
+    await createItemWithNestedRemindersAtomic({
+      userId: "user",
+      actorId: ACTOR.id,
+      ownerEmployeeId: ACTOR.id,
+      listId: LIST,
+      listType: "tasks",
+      itemKey: "משימה",
+      itemLabel: "משימה",
+      itemCreateData: {
+        data: { "שם משימה": "משימה" },
+        scope: "personal",
+        addedById: ACTOR.id,
+        visibleTo: [ACTOR.id],
+      },
+      reminds: [{ date: "2026-12-15", time: "09:00", text: "תזכורת", ping: [] }],
+      employees: [ACTOR],
+    });
+
+    expect(reminderCreate).toHaveBeenCalledTimes(1);
+    expect(reminderCreate.mock.calls[0][0].data.pingIds).toEqual([ACTOR.id]);
+  });
+
+  it("atomic no_phone miss maps to formatter no_phone notice", () => {
+    const nestedRemindMisses: NestedRemindTxnMiss[] = [
+      {
+        reason: "nested_remind_txn_failed",
+        reminderSkipReason: "no_phone",
+        op: "add",
+        listType: "tasks",
+        itemLabel: "משימה לטל",
+        detail: "משימה לטל",
+        remindLabels: ["תזכורת"],
+      },
+    ];
+    const result = applyResultAfterAtomicRollback({
+      listMutations: [],
+      nestedRemindMisses,
+    });
+    const skipped = result.domains.reminders
+      ? // rebuild skipped the same way chat does for the notice
+        nestedRemindMisses.flatMap((miss) => {
+          const labels =
+            miss.remindLabels.length > 0 ? miss.remindLabels : [miss.itemLabel];
+          const reason = asReminderSkipReason(miss.reminderSkipReason);
+          return labels.map((item) => ({ item, reason }));
+        })
+      : [];
+    expect(skipped).toEqual([{ item: "תזכורת", reason: "no_phone" }]);
+    expect(formatReminderApplyNotice({ removed: [], missed: [], skipped })).toBe(
+      "אין לי מספר ליעד. מה המספר?",
+    );
+    expect(result.domains.lists?.applied).toEqual([]);
+  });
+
+  it("atomic generic txn miss still maps skipped to db", () => {
+    const nestedRemindMisses: NestedRemindTxnMiss[] = [
+      {
+        reason: "nested_remind_txn_failed",
+        op: "add",
+        listType: "tasks",
+        itemLabel: "משימה",
+        detail: "משימה",
+        remindLabels: ["תזכורת"],
+      },
+    ];
+    const skipped = nestedRemindMisses.flatMap((miss) => {
+      const labels =
+        miss.remindLabels.length > 0 ? miss.remindLabels : [miss.itemLabel];
+      const reason = asReminderSkipReason(miss.reminderSkipReason);
+      return labels.map((item) => ({ item, reason }));
+    });
+    expect(skipped).toEqual([{ item: "תזכורת", reason: "db" }]);
+    expect(formatReminderApplyNotice({ removed: [], missed: [], skipped })).toBe(
+      "לא נשמרה «תזכורת» — השמירה נכשלה.",
+    );
+  });
+
+  it("nested assign (owner!==actor) empty ping creates no Reminder", async () => {
+    const ASSIGNEE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    itemCreate.mockResolvedValue({ id: ITEM });
+    reminderCreate.mockResolvedValue({
+      id: REM,
+      fireAt: ymdHm(2026, 12, 15, 9, 0),
+    });
+    linkCreate.mockResolvedValue({});
+    transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        employeeListItem: { create: itemCreate },
+        reminder: { create: reminderCreate },
+        employeeListItemReminderLink: { create: linkCreate },
+      }),
+    );
+
+    await expect(
+      createItemWithNestedRemindersAtomic({
+        userId: "user",
+        actorId: ACTOR.id,
+        ownerEmployeeId: ASSIGNEE,
+        listId: LIST,
+        listType: "tasks",
+        itemKey: "משימה לטל",
+        itemLabel: "משימה לטל",
+        itemCreateData: {
+          data: { "שם משימה": "משימה לטל" },
+          scope: "shared",
+          addedById: ACTOR.id,
+          visibleTo: [ASSIGNEE, ACTOR.id],
+        },
+        reminds: [{ date: "2026-12-15", time: "09:00", text: "תזכורת", ping: [] }],
+        employees: [ACTOR],
+      }),
+    ).rejects.toThrow(/nested_remind_no_phone/);
+    expect(reminderCreate).not.toHaveBeenCalled();
+  });
 });
 
 /**
@@ -185,12 +319,13 @@ function applyResultAfterAtomicRollback(input: {
   reminderSaved?: Array<{ id: string; item: string; itemLabel: string }>;
 }) {
   // Mirror chat.service: one skipped clock per remindLabels entry.
-  const skipped: Array<{ item: string; reason: "db" }> = [];
+  const skipped: Array<{ item: string; reason: "db" | "no_phone" }> = [];
   for (const miss of input.nestedRemindMisses) {
     const labels =
       miss.remindLabels.length > 0 ? miss.remindLabels : [miss.itemLabel];
+    const skipReason = asReminderSkipReason(miss.reminderSkipReason);
     for (const label of labels) {
-      skipped.push({ item: label, reason: "db" });
+      skipped.push({ item: label, reason: skipReason });
     }
   }
   const requested = captureRequestedFromMetadata({

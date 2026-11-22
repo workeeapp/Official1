@@ -73,6 +73,7 @@ import {
   parseWatchTriggerPackage,
 } from "./watch-trigger-actions.service.js";
 import { selectSourcesForWatch } from "./uwm-source-selector.js";
+import { isHumanActorForeignPingClock } from "./reminder-high-risk-auth.js";
 import { sanitizeReminderPingFields } from "./worker-tracking-title.js";
 import {
   decideCreateOrReuseClock,
@@ -147,6 +148,21 @@ export type ReminderSkipReason =
   | "too_frequent"
   | "no_place"
   | "anchor_failed";
+
+/** Map nested/package skip strings onto ReminderSkipReason (unknown → db). */
+export function asReminderSkipReason(reason: string | undefined): ReminderSkipReason {
+  switch (reason) {
+    case "no_time":
+    case "db":
+    case "no_phone":
+    case "too_frequent":
+    case "no_place":
+    case "anchor_failed":
+      return reason;
+    default:
+      return "db";
+  }
+}
 
 export const SUB_HOURLY_REFUSAL =
   "אי אפשר לקבוע חזרה כל פחות מ־5 דקות או בשניות. הכי תכוף שאפשר הוא כל 5 דקות.";
@@ -1210,9 +1226,13 @@ export async function createItemWithNestedRemindersAtomic(input: {
       const pingIds = resolveReminderPingDestinations(
         reminder,
         input.employees,
-        input.actorId,
+        nestedReminderPingFallback(input.ownerEmployeeId, input.actorId),
         contacts,
       );
+      // Assign book + empty ping: do not invent asker (or anyone) as recipient.
+      if (pingIds.length === 0) {
+        throw new Error("nested_remind_no_phone");
+      }
       const key = reminder.item.trim().slice(0, 255) || "reminder";
       const pingFields = sanitizeReminderPingFields({
         item: reminder.item.trim().slice(0, 255) || key,
@@ -1327,7 +1347,7 @@ export type NestedRemindApplyResult = {
     ping?: string;
     requestedItemId?: string;
   }>;
-  skipped: Array<{ item: string; reason: string }>;
+  skipped: Array<{ item: string; reason: string; dest?: string }>;
   failedItemIds: string[];
   nestedItemIds: string[];
   fingerprintsByReminderId: Map<string, string>;
@@ -1463,6 +1483,9 @@ export async function applyNestedReminderPackages(input: {
   employees: PublicEmployee[];
   contacts?: SpeakerContact[];
   packages: NestedRemindPackage[];
+  /** F3/F16: stamp foreign nested clocks when Gate/V authorized this turn. */
+  foreignClockAuthorized?: boolean;
+  highRiskAuthorized?: boolean;
 }): Promise<NestedRemindApplyResult> {
   const saved: NestedRemindApplyResult["saved"] = [];
   const skipped: NestedRemindApplyResult["skipped"] = [];
@@ -1539,12 +1562,17 @@ export async function applyNestedReminderPackages(input: {
             throw new Error("nested_remind_no_time");
           }
           const hasExplicitTime = Boolean(String(reminder.time ?? "").trim());
+          const ownerEmployeeId = pack.ownerEmployeeId || input.actor.id;
           const pingIds = resolveReminderPingDestinations(
             reminder,
             input.employees,
-            input.actor.id,
+            nestedReminderPingFallback(ownerEmployeeId, input.actor.id),
             contacts,
           );
+          // Assign book + empty ping: refuse create/reuse (no asker invent).
+          if (pingIds.length === 0) {
+            throw new Error("nested_remind_no_phone");
+          }
           // F uses resolved ping ids (stable across retry / DB reload).
           const pingKeys = [...pingIds].map(String).sort();
           const fp = fingerprintFromReminderAction({
@@ -1629,10 +1657,18 @@ export async function applyNestedReminderPackages(input: {
               : reminder.recurrence === null
                 ? { recurrence: Prisma.DbNull, repeat: "once" }
                 : { repeat: reminder.repeat || "once" };
+          const nestedForeign = isHumanActorForeignPingClock({
+            actorId: input.actor.id,
+            pingIds,
+            employees: input.employees,
+          });
+          const nestedAuth =
+            Boolean(input.highRiskAuthorized) ||
+            Boolean(input.foreignClockAuthorized);
           const row = await tx.reminder.create({
             data: {
               userId: input.userId,
-              ownerId: pack.ownerEmployeeId || input.actor.id,
+              ownerId: ownerEmployeeId,
               actorId: input.actor.id,
               itemKey: key,
               itemLabel: label,
@@ -1646,6 +1682,9 @@ export async function applyNestedReminderPackages(input: {
               composeSource: reminder.composeSource || "",
               composeLookbackHours: reminder.composeLookbackHours || 0,
               composePlace: reminder.composePlace || "",
+              ...(nestedForeign && nestedAuth
+                ? { highRiskAuthorizedAt: new Date() }
+                : {}),
             },
           });
           if (!tx.employeeListItemReminderLink?.create) {
@@ -1682,10 +1721,15 @@ export async function applyNestedReminderPackages(input: {
       });
 
       saved.push(...packageSaved);
-    } catch {
+    } catch (error) {
       failedItemIds.push(pack.itemId);
       await compensateNestedPackageFailure(pack);
-      skipped.push({ item: pack.itemLabel, reason: "nested_package_failed" });
+      const noPhone =
+        error instanceof Error && error.message === "nested_remind_no_phone";
+      skipped.push({
+        item: pack.itemLabel,
+        reason: noPhone ? "no_phone" : "nested_package_failed",
+      });
     }
   }
 
@@ -2832,7 +2876,8 @@ export function resolveReminderPingDestinations(
     text?: string;
   },
   employees: PublicEmployee[],
-  fallbackId: string,
+  /** Empty ping/targets → this id. `null` = no fallback (return []). */
+  fallbackId: string | null,
   contacts: SpeakerContact[] = [],
 ): string[] {
   const named = [
@@ -2878,7 +2923,18 @@ export function resolveReminderPingDestinations(
   if (people.length > 0) {
     return people;
   }
-  return named.length > 0 ? [] : [fallbackId];
+  if (named.length > 0 || !fallbackId) {
+    return [];
+  }
+  return [fallbackId];
+}
+
+/** Nested clocks: empty ping → actor only when the item sits on the speaker's book. */
+function nestedReminderPingFallback(
+  ownerEmployeeId: string,
+  actorId: string,
+): string | null {
+  return ownerEmployeeId === actorId ? actorId : null;
 }
 
 export function formatPingLabel(
@@ -2952,6 +3008,46 @@ export function isAttachmentOnlyReminderUpdate(reminder: LlmReminderAction): boo
   );
 }
 
+/** F27: content/compose/attachment rewrite on an existing foreign clock. */
+function reminderSensitiveFieldsChanged(
+  reminder: LlmReminderAction,
+  existing: {
+    messageText?: string | null;
+    composeAtFire?: boolean | null;
+    composeSource?: string | null;
+    composePlace?: string | null;
+  } | null,
+): boolean {
+  if (!existing) {
+    return false;
+  }
+  if (reminder.text.trim() && reminder.text.trim() !== String(existing.messageText ?? "").trim()) {
+    return true;
+  }
+  if (reminder.compose === true && existing.composeAtFire !== true) {
+    return true;
+  }
+  if (
+    reminder.composeSource?.trim() &&
+    reminder.composeSource.trim() !== String(existing.composeSource ?? "").trim()
+  ) {
+    return true;
+  }
+  if (
+    reminder.composePlace?.trim() &&
+    reminder.composePlace.trim() !== String(existing.composePlace ?? "").trim()
+  ) {
+    return true;
+  }
+  if ((reminder.attachmentIds?.length ?? 0) > 0) {
+    return true;
+  }
+  if ((reminder.detachAttachmentIds?.length ?? 0) > 0) {
+    return true;
+  }
+  return false;
+}
+
 export async function applyReminders(input: {
   userId: string;
   actor: PublicEmployee;
@@ -2961,10 +3057,15 @@ export async function applyReminders(input: {
   /** Reminder ids already cancelled this turn (e.g. list-remove cascade). */
   alreadyCancelledReminderIds?: Iterable<string>;
   /**
-   * Stage 6: Class V authorized high-risk confirm — stamp highRiskAuthorizedAt
-   * so foreign ping clocks may fire.
+   * Stage 6 / F3: Class V authorized — stamp highRiskAuthorizedAt so foreign
+   * ping clocks may fire.
    */
   highRiskAuthorized?: boolean;
+  /**
+   * F3: Gate signal-allowed foreign remind(s) this turn (or Class V).
+   * Stamps foreign clocks so fire is not silently suppressed (Gap A).
+   */
+  foreignClockAuthorized?: boolean;
   /** Optional clock for create-turn UWM bootstrap (tests / deterministic arm). */
   now?: Date;
 }): Promise<{
@@ -3632,9 +3733,28 @@ export async function applyReminders(input: {
         nextSource === "mashov" ||
         nextSource === "smartschool" ||
         resolvedCondition !== Prisma.DbNull;
-      const authStamp = input.highRiskAuthorized
+      const foreignPing = isHumanActorForeignPingClock({
+        actorId: input.actor.id,
+        pingIds,
+        employees: input.employees,
+      });
+      const clockAuthorized =
+        Boolean(input.highRiskAuthorized) ||
+        Boolean(input.foreignClockAuthorized);
+      // F3: stamp when Gate/V authorized foreign; F27: clear stamp on ungated
+      // sensitive rewrite of an existing foreign clock (fail-closed at fire).
+      const sensitiveRewrite =
+        Boolean(existing) &&
+        foreignPing &&
+        !clockAuthorized &&
+        reminderSensitiveFieldsChanged(reminder, existing);
+      const authStamp = clockAuthorized
         ? { highRiskAuthorizedAt: new Date() }
-        : {};
+        : sensitiveRewrite
+          ? { highRiskAuthorizedAt: null }
+          : foreignPing && !existing
+            ? {} // should not create ungated foreign — leave unstamped (suppress)
+            : {};
       // P0 Watch→Action package: only with a compose condition; owner-only.
       const existingPackage =
         existing && "onTriggerActions" in existing

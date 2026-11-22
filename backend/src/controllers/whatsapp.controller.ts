@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { getEnv } from "../config/env.js";
 import { recordWhatsAppEvent } from "../services/whatsapp-log.js";
 import { getWhatsAppStatus as loadWhatsAppStatus } from "../services/whatsapp-status.js";
 import {
@@ -7,6 +8,11 @@ import {
   verifyWhatsAppWebhook,
   WhatsAppForbiddenError,
 } from "../services/whatsapp.service.js";
+import {
+  verifyWhatsAppWebhookSignature,
+  WHATSAPP_SIGNATURE_HEADER,
+  type WhatsAppRawBody,
+} from "../services/whatsapp-webhook-signature.js";
 
 export function verifyWebhook(req: Request, res: Response): void {
   try {
@@ -30,6 +36,18 @@ export async function getWhatsAppStatus(_req: Request, res: Response): Promise<v
 }
 
 export function receiveWebhook(req: Request, res: Response): void {
+  const env = getEnv();
+  const rawReq = req as Request & WhatsAppRawBody;
+  const verified = verifyWhatsAppWebhookSignature({
+    rawBody: rawReq.rawBody,
+    signatureHeader: req.get(WHATSAPP_SIGNATURE_HEADER) ?? undefined,
+    appSecret: env.WHATSAPP_APP_SECRET,
+  });
+  if (!verified.ok) {
+    res.status(verified.status).end();
+    return;
+  }
+
   const inbound = extractInboundTexts(req.body);
   const fields = webhookFields(req.body);
   recordWhatsAppEvent("webhook_post", `fields=${fields} inbound=${inbound.length}`);

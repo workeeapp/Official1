@@ -4303,4 +4303,51 @@ describe("employee records", () => {
     expect(events[0]?.metadata.lists[0]?.action).toBe("remove");
     expect(events[0]?.purchased).toBeUndefined();
   });
+
+  it("F14: refuses REST update of another human's personal item without ACL", async () => {
+    const strangerId = "stranger-human";
+    itemFindFirst.mockResolvedValue({
+      id: "item-private",
+      itemKey: "חלב",
+      data: { "שם פריט": "חלב" },
+      scope: "personal",
+      addedById: talId,
+      visibleTo: [talId],
+      list: { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" },
+    });
+    employeeFindUnique.mockResolvedValue({
+      kind: "human",
+      isOwner: false,
+    });
+    await expect(
+      updateEmployeeRecord(
+        talId,
+        "item-private",
+        [{ label: "שם פריט", value: "חלב גנוב" }],
+        strangerId,
+      ),
+    ).rejects.toMatchObject({ statusCode: 403, code: "FORBIDDEN" });
+    expect(itemUpdate).not.toHaveBeenCalled();
+  });
+
+  it("F14: owner/self can still update own personal item", async () => {
+    itemFindFirst.mockResolvedValue({
+      id: "item-own",
+      itemKey: "לחם",
+      data: { "שם פריט": "לחם" },
+      scope: "personal",
+      addedById: talId,
+      visibleTo: [talId],
+      list: { id: "tal-shop", employeeId: talId, listType: "shopping", name: "" },
+    });
+    itemUpdate.mockResolvedValue({ id: "item-own" });
+    const events = await updateEmployeeRecord(
+      talId,
+      "item-own",
+      [{ label: "שם פריט", value: "לחם" }],
+      talId,
+    );
+    expect(itemUpdate).toHaveBeenCalled();
+    expect(events).toEqual([]);
+  });
 });

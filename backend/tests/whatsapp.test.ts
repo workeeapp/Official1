@@ -46,10 +46,17 @@ import {
   rememberWhatsAppOutbound,
   resetWhatsAppOutboundMemory,
 } from "../src/services/whatsapp-outbound-memory.js";
+import {
+  signWhatsAppWebhookBody,
+  WHATSAPP_SIGNATURE_HEADER,
+} from "../src/services/whatsapp-webhook-signature.js";
+
+const WEBHOOK_TEST_SECRET = "test-whatsapp-app-secret-f0";
 
 describe("WhatsApp webhook", () => {
   beforeEach(() => {
     process.env.WHATSAPP_VERIFY_TOKEN = "test-verify-token";
+    process.env.WHATSAPP_APP_SECRET = WEBHOOK_TEST_SECRET;
     resetEnvCache();
     resetWhatsAppEvents();
   });
@@ -79,6 +86,45 @@ describe("WhatsApp webhook", () => {
 
   it("acknowledges inbound text messages", async () => {
     const app = createApp();
+    const payload = {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    id: "wamid.1",
+                    from: "972501234567",
+                    text: { body: "hello" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const raw = Buffer.from(JSON.stringify(payload), "utf8");
+    const response = await request(app)
+      .post("/api/whatsapp/webhook")
+      .set(
+        WHATSAPP_SIGNATURE_HEADER,
+        signWhatsAppWebhookBody(raw, WEBHOOK_TEST_SECRET),
+      )
+      .set("Content-Type", "application/json")
+      .send(raw.toString("utf8"));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ status: "ok" });
+    expect(listWhatsAppEvents()[0]?.step).toBe("inbound_text");
+    expect(listWhatsAppEvents().some((event) => event.step === "webhook_post")).toBe(
+      true,
+    );
+  });
+
+  it("rejects unsigned inbound before recording webhook events", async () => {
+    const app = createApp();
     const response = await request(app)
       .post("/api/whatsapp/webhook")
       .send({
@@ -101,12 +147,8 @@ describe("WhatsApp webhook", () => {
         ],
       });
 
-    expect(response.status).toBe(200);
-    expect(response.body).toEqual({ status: "ok" });
-    expect(listWhatsAppEvents()[0]?.step).toBe("inbound_text");
-    expect(listWhatsAppEvents().some((event) => event.step === "webhook_post")).toBe(
-      true,
-    );
+    expect([401, 403]).toContain(response.status);
+    expect(listWhatsAppEvents()).toEqual([]);
   });
 
   it("attaches in-memory quoted outbound text on swipe-reply", () => {

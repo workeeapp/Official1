@@ -189,6 +189,7 @@ import {
   clocksEligibleForExactKeySoftLink,
   excludeNestedItemsFromSoftLinkCandidates,
   filterTopLevelRemindersAgainstNested,
+  asReminderSkipReason,
   formatReminderApplyNotice,
   formatReminderDeleteFallback,
   itemsFromListMutationsForSoftLink,
@@ -262,6 +263,9 @@ import {
   highRiskPrimaryKind,
   highRiskStripsToMisses,
   HIGH_RISK_NEEDS_CONFIRM,
+  isSelfReminderAction,
+  resolveGateIsButtonCommand,
+  type ExistingReminderPingHint,
 } from "./high-risk-action-gate.js";
 import {
   formatCollabInviteAcceptedReply,
@@ -417,6 +421,16 @@ import {
   stripShowTurnMutates,
 } from "./show-turn-guard.js";
 import { stripWhatsAppReplyPrefix } from "./whatsapp-outbound-memory.js";
+import {
+  stripSharedCardBlocksForEis,
+  trustedNlInstructionForShortcuts,
+} from "./high-risk-instruction-channel.js";
+import {
+  parseClarifyBind,
+  parseModelAwaitingProposal,
+  tryCreateClarifyBind,
+  type ClarifyBind,
+} from "./clarify-bind.service.js";
 import { recordWhatsAppEvent } from "./whatsapp-log.js";
 import { planOutboundSends } from "./outbound-hold.js";
 import { formatAttributedOutbound } from "./outbound-text.js";
@@ -511,6 +525,7 @@ const STORED_LAST_NUMBERED_DUMP = "lastNumberedDump";
 const STORED_LAST_NUMBERED_DUMP_CLEARED = "lastNumberedDumpCleared";
 const STORED_LAST_ROUTES_BOARD = "lastRoutesBoard";
 const STORED_LAST_LIVE_LOCATION = "lastLiveLocation";
+const STORED_CLARIFY_BIND = "clarifyBind";
 
 function buildOpenAiRequest(input: {
   conversationId: string;
@@ -533,6 +548,7 @@ export function packStoredLlmRaw(
   lastRoutesBoard?: LastRoutesBoard | null,
   lastNumberedDumpCleared?: boolean,
   lastLiveLocation?: LastLiveLocation | null,
+  clarifyBind?: ClarifyBind | null,
 ): unknown {
   return {
     [STORED_LLM_REQUEST]: request,
@@ -549,6 +565,9 @@ export function packStoredLlmRaw(
     ...(lastLiveLocation
       ? { [STORED_LAST_LIVE_LOCATION]: lastLiveLocation }
       : {}),
+    ...(clarifyBind
+      ? { [STORED_CLARIFY_BIND]: clarifyBind }
+      : {}),
   };
 }
 
@@ -559,6 +578,7 @@ function unpackStoredLlmRaw(raw: unknown): {
   lastNumberedDumpCleared: boolean;
   lastRoutesBoard: LastRoutesBoard | null;
   lastLiveLocation: LastLiveLocation | null;
+  clarifyBind: ClarifyBind | null;
 } {
   if (
     raw &&
@@ -576,6 +596,7 @@ function unpackStoredLlmRaw(raw: unknown): {
       lastLiveLocation: parseLastLiveLocation(
         packed[STORED_LAST_LIVE_LOCATION],
       ),
+      clarifyBind: parseClarifyBind(packed[STORED_CLARIFY_BIND]),
     };
   }
   // Legacy / unpacked response-only raw: still try board / location if present.
@@ -594,6 +615,7 @@ function unpackStoredLlmRaw(raw: unknown): {
     lastLiveLocation: legacy
       ? parseLastLiveLocation(legacy[STORED_LAST_LIVE_LOCATION])
       : null,
+    clarifyBind: legacy ? parseClarifyBind(legacy[STORED_CLARIFY_BIND]) : null,
   };
 }
 
@@ -686,6 +708,7 @@ export function packAssistantLlmRawForTests(input: {
   lastNumberedDumpCleared?: boolean;
   lastRoutesBoard?: LastRoutesBoard | null;
   lastLiveLocation?: LastLiveLocation | null;
+  clarifyBind?: ClarifyBind | null;
 }): unknown {
   return packStoredLlmRaw(
     input.request ?? null,
@@ -694,7 +717,23 @@ export function packAssistantLlmRawForTests(input: {
     input.lastRoutesBoard ?? null,
     input.lastNumberedDumpCleared === true,
     input.lastLiveLocation ?? null,
+    input.clarifyBind ?? null,
   );
+}
+
+/**
+ * P1(O1): clarifyBind lives only on the latest assistant turn.
+ * Older binds are not scanned — intervening assistant turns clear the offer.
+ */
+export async function loadClarifyBindForConversation(
+  conversationId: string,
+): Promise<ClarifyBind | null> {
+  const last = await prisma.chatMessage.findFirst({
+    where: { conversationId, author: "assistant" },
+    orderBy: { createdAt: "desc" },
+    select: { raw: true },
+  });
+  return unpackStoredLlmRaw(last?.raw).clarifyBind;
 }
 
 /**
@@ -1636,6 +1675,8 @@ async function syncTurnReplies(input: {
   lastRoutesBoard?: LastRoutesBoard;
   /** Successful live place use (omit to preserve prior on dump-only writes). */
   lastLiveLocation?: LastLiveLocation;
+  /** P1(O1): server-authored clarify bind for the next turn (omit = none). */
+  clarifyBind?: ClarifyBind | null;
 }): Promise<ChatTurnMessageIds> {
   const bubbles =
     input.bubbles.length > 0 ? input.bubbles : [{ text: "" }];
@@ -1678,11 +1719,14 @@ async function syncTurnReplies(input: {
     input.lastLiveLocation !== undefined
       ? input.lastLiveLocation
       : unpacked.lastLiveLocation;
+  const clarifyToStore =
+    input.clarifyBind !== undefined ? input.clarifyBind : unpacked.clarifyBind;
   const shouldRewriteRaw =
     hasFreshDump ||
     clearDump ||
     input.lastRoutesBoard != null ||
-    input.lastLiveLocation != null;
+    input.lastLiveLocation != null ||
+    input.clarifyBind !== undefined;
   const nextRaw = shouldRewriteRaw
     ? packStoredLlmRaw(
         unpacked.request,
@@ -1691,6 +1735,7 @@ async function syncTurnReplies(input: {
         boardToStore,
         clearDump,
         liveLocToStore,
+        clarifyToStore,
       )
     : existingAssistant?.raw;
   const firstAttachments = attachmentsFor(0);
@@ -2604,6 +2649,12 @@ export async function sendChatMessage(input: {
   attachments?: TurnAttachments;
   /** Cold invite context for לוסי-אורח (register-first check-with). */
   pendingInvite?: PendingInviteContext;
+  /**
+   * P2a: EIS channel for HighRiskActionGate (user instruction only).
+   * WhatsApp passes non-forwarded text with shared cards stripped.
+   * When omitted, Gate derives instruction by stripping card blocks from message.
+   */
+  gateInstructionText?: string;
 }): Promise<{
   reply: string;
   raw: unknown;
@@ -2862,8 +2913,18 @@ export async function sendChatMessage(input: {
   /** Pre-LLM circuit breaker turn must not be overwritten by collab offer buttons. */
   let prospectCircuitBreakerTripped = false;
   const inboundCommand = stripWhatsAppReplyPrefix(input.message).trim();
+  /**
+   * F21: NL shortcuts (block / invite-cancel) only on trusted EIS — same channel
+   * as Gate. Forwarded bodies → empty EIS → no free-text shortcut. Opaque
+   * buttons still use inboundCommand.
+   */
+  const trustedNlInstruction = trustedNlInstructionForShortcuts({
+    consultFrom: Boolean(consultFrom),
+    gateInstructionText: input.gateInstructionText,
+    inboundCommand,
+  });
   let senderBlockReply: string | null = null;
-  // Anti-abuse: opaque block_sender:… or free-text «תחסמי את …».
+  // Anti-abuse: opaque block_sender:… or free-text «תחסמי את …» on trusted EIS only.
   if (!guestSpeaker && !consultFrom && employee.phone) {
     const {
       isBlockSenderCommand,
@@ -2875,8 +2936,8 @@ export async function sendChatMessage(input: {
     let blockedPhone: string | null = null;
     if (isBlockSenderCommand(inboundCommand)) {
       blockedPhone = parseBlockSenderCommand(inboundCommand);
-    } else {
-      const free = parseBlockSenderFreeText(inboundCommand);
+    } else if (trustedNlInstruction) {
+      const free = parseBlockSenderFreeText(trustedNlInstruction);
       if (free) {
         blockedPhone = await resolveBlockedPhoneFromLabel({
           userId: input.userId,
@@ -3093,7 +3154,8 @@ export async function sendChatMessage(input: {
       const cancelOut = await tryCancelAskerPendingInvite({
         userId: input.userId,
         askerEmployeeId: employee.id,
-        message: input.message,
+        // F21: never cancel from forward/quote body — trusted EIS only.
+        message: trustedNlInstruction,
       });
       if (cancelOut.cancelled) {
         turn = {
@@ -3526,8 +3588,32 @@ export async function sendChatMessage(input: {
     >[] = [];
     // Prospects: skip Class V high-risk staging — ProspectWriteGate → Join owns
     // durable / assign-out writes (R1). Members keep high-risk confirm as usual.
+    /** P1(O1): bind created this turn for the next user reply (persisted on assistant raw). */
+    let turnClarifyBind: ClarifyBind | null = null;
     if (!guestSpeaker && !recipientIsProspect) {
       const speakerUtterance = stripWhatsAppReplyPrefix(input.message).trim();
+      // F7: consult relay text is model-authored — never EIS allow authority.
+      const gateInstructionText = consultFrom
+        ? ""
+        : input.gateInstructionText !== undefined
+          ? input.gateInstructionText
+          : stripSharedCardBlocksForEis(speakerUtterance);
+      const knownTargetNames = collectKnownTargetNames({
+        contacts: speakerContacts,
+        employees: [...employees, ...externalPartners],
+        excludeEmployeeId: employee.id,
+      });
+      const priorClarifyBind = await loadClarifyBindForConversation(
+        conversation.id,
+      );
+      const existingReminderPings: ExistingReminderPingHint[] = (
+        speakerSnapshot.reminders ?? []
+      ).map((row) => ({
+        reminderId: String(row.reminder_id ?? "").trim(),
+        pingLabels: Array.isArray(row.ping)
+          ? row.ping.map(String).filter(Boolean)
+          : [],
+      })).filter((row) => row.reminderId);
       const gated = applyHighRiskActionGate(metadata, {
         speaker: employee,
         digitalWorkerNames: digitalWorkerGateNames(
@@ -3535,12 +3621,15 @@ export async function sendChatMessage(input: {
         ),
         allowAuthorizedSnapshot: Boolean(authorizedHighRiskConfirmId),
         speakerText: speakerUtterance,
-        isButtonCommand: isOpaqueConfirmCommand(speakerUtterance),
-        knownTargetNames: collectKnownTargetNames({
-          contacts: speakerContacts,
-          employees: [...employees, ...externalPartners],
-          excludeEmployeeId: employee.id,
+        instructionText: gateInstructionText,
+        // F13: prefix alone is not intent — only after successful Class V / collab ingest.
+        isButtonCommand: resolveGateIsButtonCommand({
+          authorizedHighRiskConfirmId,
+          authorizedCollabConfirmId,
         }),
+        knownTargetNames,
+        clarifyBind: priorClarifyBind,
+        existingReminderPings,
         openJobs: openJobs.map((job) => ({
           id: job.id,
           askerId: job.meta.askerId,
@@ -3583,6 +3672,21 @@ export async function sendChatMessage(input: {
             )) ?? null;
         }
       }
+      // ClarifyBind creation: WA / Web free-text have no trusted_control today.
+      // bindAuthority stays "none" — EIS / awaiting / dry-Gate are not provenance.
+      // Infrastructure + Gate allow hooks remain for a future server-issued control.
+      const visibleItemIds = new Set<string>([
+        ...lastNumberedDump.map((line) => String(line.id ?? "").trim()),
+        ...(turnVisibleRefs ? [...turnVisibleRefs.keys()] : []),
+      ].filter(Boolean));
+      turnClarifyBind = tryCreateClarifyBind({
+        instructionText: gateInstructionText,
+        proposal: parseModelAwaitingProposal(metadata),
+        visibleItemIds,
+        knownTargetNames,
+        speaker: employee,
+        bindAuthority: "none",
+      });
     }
     // Present + stage opaque Accept/Decline when ack mode is on and this turn
     // is not already consuming a collab V command or a high-risk offer.
@@ -3715,6 +3819,7 @@ export async function sendChatMessage(input: {
           directory: [],
           jobs: [],
           missions: [],
+          messages: [],
         };
         metadata = {
           ...metadata,
@@ -3725,6 +3830,7 @@ export async function sendChatMessage(input: {
           directory: [],
           jobs: [],
           missions: [],
+          messages: [],
         };
         prospectJoinOffer = {
           text: formatProspectJoinOfferText({
@@ -3792,6 +3898,7 @@ export async function sendChatMessage(input: {
     const shareMisses: ShareApplyMiss[] = [];
     const nestedRemindMisses: Array<{
       reason: string;
+      reminderSkipReason?: "no_phone";
       op: string;
       listType: string;
       listName?: string;
@@ -3955,6 +4062,19 @@ export async function sendChatMessage(input: {
             reminds: row.pendingReminds ?? [],
             nestedCompensate: row.nestedCompensate,
           }));
+    const speakerGateNames = [
+      employee.name,
+      employee.nickname ?? "",
+      employee.phone ?? "",
+    ].filter(Boolean);
+    // F3/F16: after Gate, remaining foreign top-level or nested clocks may stamp.
+    const foreignClockAuthorized =
+      Boolean(authorizedHighRiskConfirmId) ||
+      (metadata.reminders ?? []).some(
+        (row) =>
+          !isSelfReminderAction(row, speakerGateNames, employee.phone),
+      ) ||
+      nestedPackages.length > 0;
     const nestedResult =
       nestedPackages.length > 0
         ? await applyNestedReminderPackages({
@@ -3963,6 +4083,8 @@ export async function sendChatMessage(input: {
             employees: humansForPlan,
             contacts: speakerContacts,
             packages: nestedPackages,
+            highRiskAuthorized: Boolean(authorizedHighRiskConfirmId),
+            foreignClockAuthorized,
           })
         : {
             saved: [],
@@ -4037,13 +4159,17 @@ export async function sendChatMessage(input: {
       contacts: speakerContacts,
       alreadyCancelledReminderIds: cancelledReminderIds,
       highRiskAuthorized: Boolean(authorizedHighRiskConfirmId),
+      foreignClockAuthorized,
     });
     // Merge nested clocks into reminder apply accounting (join already written).
     reminderResult.saved.push(...nestedResult.saved);
     reminderResult.skipped.push(
       ...nestedResult.skipped.map((row) => ({
         item: row.item,
-        reason: "db" as const,
+        reason: asReminderSkipReason(row.reason),
+        ...(typeof row.dest === "string" && row.dest.trim()
+          ? { dest: row.dest.trim() }
+          : {}),
       })),
     );
     attachmentOutcome = mergeAttachmentOutcomes(
@@ -4081,6 +4207,12 @@ export async function sendChatMessage(input: {
           ownerEmployeeId: employee.id,
           actions: metadata.directory ?? [],
           employees: humansForPlan,
+          // F2: phone writes only after Gate/V (or Class V execute) this turn.
+          authorizePhoneFields:
+            Boolean(authorizedHighRiskConfirmId) ||
+            (metadata.directory ?? []).some((row) =>
+              Boolean(row.phone?.trim()),
+            ),
         });
     attachmentOutcome = mergeAttachmentOutcomes(
       attachmentOutcome,
@@ -4095,10 +4227,11 @@ export async function sendChatMessage(input: {
           Array.isArray(miss.remindLabels) && miss.remindLabels.length > 0
             ? miss.remindLabels
             : [miss.itemLabel];
+        const skipReason = asReminderSkipReason(miss.reminderSkipReason);
         for (const label of labels) {
           reminderResult.skipped.push({
             item: label,
-            reason: "db",
+            reason: skipReason,
           });
         }
       }
@@ -4575,6 +4708,8 @@ export async function sendChatMessage(input: {
           digitalEmployeeId: relay.target.id,
           skipHandoffFollow: true,
           consult: { fromWorkerId: digital.id, fromWorkerName: assistantSpeaker },
+          // F7: model-authored consult relay is never Gate EIS / user instruction.
+          gateInstructionText: "",
         }),
       );
       notifications.push(...(answer?.notifications ?? []));
@@ -6814,6 +6949,8 @@ export async function sendChatMessage(input: {
       ...(turnLastLiveLocation
         ? { lastLiveLocation: turnLastLiveLocation }
         : {}),
+      // Always set so a prior bind is not left on a rewrite without a new O1 offer.
+      clarifyBind: turnClarifyBind,
     });
 
     if (highRiskOffer) {

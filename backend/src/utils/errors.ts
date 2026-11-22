@@ -42,6 +42,12 @@ export class NotFoundError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message = "You do not have permission to perform this action.") {
+    super(403, "FORBIDDEN", message);
+  }
+}
+
 export class ServiceUnavailableError extends AppError {
   constructor(message = "Service temporarily unavailable. Please try again later.") {
     super(503, "SERVICE_UNAVAILABLE", message);

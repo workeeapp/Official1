@@ -9,11 +9,14 @@
  */
 import {
   emptyLlmMetadata,
+  llmItemLabel,
+  reminderActionFromNestedRemind,
   type LlmDirectoryAction,
   type LlmFilingAction,
   type LlmJobAction,
   type LlmListAction,
   type LlmListOp,
+  type LlmListType,
   type LlmMessageAction,
   type LlmMetadata,
   type LlmReminderAction,
@@ -26,6 +29,13 @@ import {
   employeeDisplayName,
 } from "./employee-targets.service.js";
 import type { ResultIntentMiss } from "./apply-result.js";
+import {
+  clarifyBindAllowsMultiRemove,
+  clarifyBindAllowsReminder,
+  isSummaryEnvelopeInstruction,
+  type ClarifyBind,
+} from "./clarify-bind.service.js";
+import { splitItemRemind } from "./reminder-soft-link.js";
 
 export type HighRiskPolicy = "P-Out" | "P-Share" | "P-Mass";
 
@@ -39,7 +49,15 @@ export type HighRiskActionKind =
   | "share_book"
   | "participants"
   | "delete_list"
-  | "multi_remove";
+  | "multi_remove"
+  | "directory_phone";
+
+/** Live clock dest labels for F27 effective-ping on update with empty ping. */
+export type ExistingReminderPingHint = {
+  reminderId: string;
+  /** Display names / phones already on the clock. */
+  pingLabels: string[];
+};
 
 export type HighRiskPOutMode = "signal" | "strict";
 
@@ -75,6 +93,18 @@ export type HighRiskGateContext = {
   /** Raw speaker utterance this turn (for signal + grounding). */
   speakerText?: string;
   /**
+   * P2a EIS channel: text proven as user instruction for allow-signals.
+   * When set, outbound/share/mass intent regexes use this instead of speakerText.
+   * Shared contact/location cards and forwarded bodies must not appear here.
+   * When omitted, falls back to speakerText (tests / legacy callers).
+   */
+  instructionText?: string;
+  /**
+   * P1(O1): server-validated clarify bind from the prior assistant turn.
+   * Narrows allow for remind_when / delete_scope only; not Class V.
+   */
+  clarifyBind?: ClarifyBind | null;
+  /**
    * Known resolvable human labels: contacts, household employees,
    * active thread participants (display names / nicknames).
    */
@@ -88,6 +118,11 @@ export type HighRiskGateContext = {
    * jobs.answer actually delivers a report to someone other than the speaker.
    */
   openJobs?: HighRiskOpenJobRef[];
+  /**
+   * F27: active clocks for this speaker — resolve empty-ping updates to the
+   * real destination before classifying self vs foreign.
+   */
+  existingReminderPings?: ExistingReminderPingHint[];
 };
 
 /** Minimal open-job identity for Gate effect checks (no full JobMeta). */
@@ -104,21 +139,38 @@ export type HighRiskOpenJobRef = {
 export const HIGH_RISK_NEEDS_CONFIRM =
   "רגע לפני שאמשיך — הפעולה הזו צריכה אישור מפורש ממך.";
 
-/** Explicit outbound / remind / share intent in the speaker channel. */
+/**
+ * Explicit outbound / remind / share intent in the speaker channel.
+ * F22: no substring שלח/ask/קצ — שלחתי / please ask / task must not allow.
+ * Whole-token שלח (male imperative) still allows «שלח למיכל».
+ */
 export const OUTBOUND_INTENT_RE =
-  /תגידי|תגיד|תשלחי|תשלח|תמסרי|תמסור|תעדכני|תעדכן|תשאלי|תשאל|תזכירי|תזכיר|תשתפי|תשתף|תקצי|תקצה|שלחי|שלח|גידי|מסרי|עדכני|שאלי|הזכירי|שתפי|קצי|tell\b|send\b|remind\b|share\b|ask\b/i;
+  /תגידי|תגיד|תשלחי|תשלח|תשלחו|שלחי|(?<![\u0590-\u05FFa-zA-Z])שלח(?![\u0590-\u05FFa-zA-Z])|תמסרי|תמסור|תעדכני|תעדכן|תשאלי|תשאל|תזכירי|תזכיר|תשתפי|תשתף|תקצי|תקצה|תעבירי|תעביר|\btell\b|\bsend\b|\bremind\b|\bshare\b|\bask\s+(?:him|her|them|to)\b/i;
 
-/** Explicit share / assign intent (P-Share allow in signal mode). */
+/**
+ * Explicit share / assign intent (P-Share allow in signal mode).
+ * F22: no bare קצ; bare שתף/שתפי only as whole tokens (not משתף / אשתף).
+ */
 export const SHARE_INTENT_RE =
-  /תשתפי|תשתף|שתפי|שתף|תקצי|תקצה|קצי|תעבירי|תעביר|באחריות|share\b|assign\b/i;
+  /תשתפי|תשתף|(?<![\u0590-\u05FFa-zA-Z])(?:שתפי|שתף)(?![\u0590-\u05FFa-zA-Z])|תקצי|תקצה|תעבירי|תעביר|באחריות|\bshare\b|\bassign\b/i;
 
 /** Explicit unshare intent. */
 export const UNSHARE_INTENT_RE =
   /תורידי שיתוף|תוריד שיתוף|הסירי שיתוף|הסר שיתוף|בטלי שיתוף|בטל שיתוף|unshare\b/i;
 
-/** Explicit mass-delete / bulk-remove intent (P-Mass allow in signal mode). */
+/**
+ * Explicit mass-delete / bulk-remove intent (P-Mass allow in signal mode).
+ * F22: no bare תמחקי/תמחק (matches תמחקתי); keep list/all scopes.
+ */
 export const MASS_INTENT_RE =
-  /תמחקי את רשימת|תמחק את רשימת|תמחקי הכל|תמחק הכל|תמחקי את כל|תמחק את כל|תסירי את כל|תסיר את כל|תסירי את|תמחקי|תמחק|delete[_\s-]?list|clear all|remove all/i;
+  /תמחקי את רשימת|תמחק את רשימת|תמחקי הכל|תמחק הכל|תמחקי את כל|תמחק את כל|תסירי את כל|תסיר את כל|תמחקי את כולם|תמחק את כולם|תמחקי את שני|תמחק את שני|delete[_\s-]?list|clear all|remove all/i;
+
+/**
+ * F2: explicit contact phone add/update intent (not a bare «אנשי קשר» query).
+ * Require save/update verbs near phone-book / number language.
+ */
+export const DIRECTORY_PHONE_INTENT_RE =
+  /(?:תוסיפ[יי]?|תוסיף|הוסיפ[יי]?|תעדכנ[יי]?|תעדכן|שמרי|שמור|update|add|save).{0,48}(?:מספר|טלפון|אנשי\s*קשר|contact|phone)|(?:מספר|טלפון|אנשי\s*קשר|contact|phone).{0,48}(?:תוסיפ[יי]?|תוסיף|הוסיפ[יי]?|תעדכנ[יי]?|תעדכן|שמרי|שמור|update|add|save)/i;
 
 const SELF_PING_TOKENS = new Set(
   ["self", "me", "myself", "לי", "לעצמי", "עצמי", "אותי"].map((s) =>
@@ -137,6 +189,19 @@ export function resolveHighRiskPOutMode(
   } catch {
     return "signal";
   }
+}
+
+/**
+ * F13: opaque command *prefix* alone is never intent.
+ * True only after successful Class V / collab pending ingest this turn.
+ */
+export function resolveGateIsButtonCommand(input: {
+  authorizedHighRiskConfirmId?: string | null;
+  authorizedCollabConfirmId?: string | null;
+}): boolean {
+  return Boolean(
+    input.authorizedHighRiskConfirmId || input.authorizedCollabConfirmId,
+  );
 }
 
 export function hasOutboundIntentSignal(
@@ -164,7 +229,8 @@ export function hasShareIntentSignal(
   if (!text) {
     return false;
   }
-  return SHARE_INTENT_RE.test(text) || /שתפ|קצ/.test(text);
+  // F22: SHARE_INTENT_RE only — dropped loose /שתפ|קצ/ (קצת / משתף).
+  return SHARE_INTENT_RE.test(text);
 }
 
 export function hasUnshareIntentSignal(
@@ -292,6 +358,10 @@ function speakerSet(names: string[]): Set<string> {
   return new Set(names.map((n) => normalizeLabel(n)).filter(Boolean));
 }
 
+/**
+ * F26: exact label match only (aligned with matchEmployee aliases).
+ * Substring self/Lucy matches caused wrong P-Out skips (e.g. טל ⊂ טלי).
+ */
 function isSpeakerName(raw: string, speakers: Set<string>): boolean {
   const norm = normalizeLabel(raw);
   if (!norm) {
@@ -302,13 +372,6 @@ function isSpeakerName(raw: string, speakers: Set<string>): boolean {
   }
   if (SELF_PING_TOKENS.has(norm)) {
     return true;
-  }
-  for (const entry of speakers) {
-    if (entry.includes(norm) || norm.includes(entry)) {
-      if (Math.min(entry.length, norm.length) >= 2) {
-        return true;
-      }
-    }
   }
   return false;
 }
@@ -326,9 +389,12 @@ export function messageTargetsOnlySpeaker(
 }
 
 /**
- * Self-reminders must never be classified as foreign — including empty ping,
- * "self"/"לי", speaker name/nickname, phone digits, and guest alias after
- * /as-prospect (אורח …XXXX).
+ * Self-reminders must never be classified as foreign — including empty ping
+ * on *create*, "self"/"לי", speaker name/nickname, phone digits, and guest
+ * alias after /as-prospect (אורח …XXXX).
+ *
+ * F27: updates with empty ping are NOT auto-self — callers must pass
+ * effective ping via `effectiveReminderPingTargets` / Gate context hints.
  */
 export function isSelfReminderAction(
   reminder: Pick<LlmReminderAction, "ping" | "targets">,
@@ -347,7 +413,7 @@ export function isSelfReminderAction(
       }
     }
   }
-  const raw = [...reminder.ping, ...reminder.targets]
+  const raw = [...(reminder.ping ?? []), ...(reminder.targets ?? [])]
     .map((t) => t.trim())
     .filter(Boolean);
   if (raw.length === 0) {
@@ -362,6 +428,49 @@ export function isSelfReminderAction(
     }
     return false;
   });
+}
+
+/**
+ * F27: resolve ping labels for Gate — empty update ping → existing clock dest.
+ * Unknown update id with empty ping → [] (treated as foreign / strip).
+ */
+export function effectiveReminderPingTargets(
+  reminder: Pick<LlmReminderAction, "action" | "ping" | "targets" | "reminderId">,
+  existingReminderPings?: ExistingReminderPingHint[],
+): string[] {
+  const named = [...(reminder.ping ?? []), ...(reminder.targets ?? [])]
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (named.length > 0) {
+    return named;
+  }
+  if (reminder.action !== "update") {
+    return [];
+  }
+  const id = reminder.reminderId?.trim() ?? "";
+  if (!id) {
+    return [];
+  }
+  const hint = (existingReminderPings ?? []).find((row) => row.reminderId === id);
+  return hint?.pingLabels.map((t) => t.trim()).filter(Boolean) ?? [];
+}
+
+export function hasDirectoryPhoneIntentSignal(
+  speakerText: string | undefined,
+  isButtonCommand?: boolean,
+): boolean {
+  if (isButtonCommand) {
+    return true;
+  }
+  const text = speakerText?.trim() ?? "";
+  if (!text) {
+    return false;
+  }
+  if (!DIRECTORY_PHONE_INTENT_RE.test(text)) {
+    return false;
+  }
+  // Require digits so bare «אנשי קשר» / status asks cannot allow phone plant.
+  return text.replace(/\D/g, "").length >= 7;
 }
 
 const JOB_OUTBOUND_ACTIONS = new Set<LlmJobAction["action"]>([
@@ -496,6 +605,7 @@ function primaryActionKind(stripped: HighRiskStripReason[]): HighRiskActionKind 
     "send",
     "schedule_foreign",
     "job_outbound",
+    "directory_phone",
     "share",
     "assign",
     "unshare",
@@ -528,7 +638,8 @@ export function highRiskStripsToMisses(
           ? ("reminders" as const)
           : row.detail.startsWith("filing")
             ? ("filing" as const)
-            : row.detail.startsWith("directory")
+            : row.kind === "directory_phone" ||
+                row.detail.startsWith("directory")
               ? ("directory" as const)
               : ("lists" as const);
     misses.push({
@@ -565,10 +676,10 @@ function signalAllowsOutbound(
   if (!targetsResolvedAgainstKnown(others, ctx.knownTargetNames)) {
     return false;
   }
-  // Explicit send/remind verb OR the speaker named that known target.
-  return (
-    hasOutboundIntentSignal(ctx.speakerText, ctx.isButtonCommand) ||
-    targetsNamedInSpeakerText(others, ctx.speakerText)
+  // P2a + F1: EIS verbs only; summary/paste envelopes do not allow P-Out.
+  return hasOutboundIntentSignal(
+    eisTextForAllowSignals(ctx),
+    ctx.isButtonCommand,
   );
 }
 
@@ -587,10 +698,7 @@ function signalAllowsShare(
   if (!targetsResolvedAgainstKnown(others, ctx.knownTargetNames)) {
     return false;
   }
-  return (
-    hasShareIntentSignal(ctx.speakerText, ctx.isButtonCommand) ||
-    targetsNamedInSpeakerText(others, ctx.speakerText)
-  );
+  return hasShareIntentSignal(eisTextForAllowSignals(ctx), ctx.isButtonCommand);
 }
 
 function signalAllowsUnshare(
@@ -608,9 +716,9 @@ function signalAllowsUnshare(
   if (!targetsResolvedAgainstKnown(others, ctx.knownTargetNames)) {
     return false;
   }
-  return (
-    hasUnshareIntentSignal(ctx.speakerText, ctx.isButtonCommand) ||
-    targetsNamedInSpeakerText(others, ctx.speakerText)
+  return hasUnshareIntentSignal(
+    eisTextForAllowSignals(ctx),
+    ctx.isButtonCommand,
   );
 }
 
@@ -618,7 +726,38 @@ function signalAllowsMass(ctx: HighRiskGateContext): boolean {
   if (resolveHighRiskPOutMode(ctx.pOutMode) !== "signal") {
     return false;
   }
-  return hasMassIntentSignal(ctx.speakerText, ctx.isButtonCommand);
+  return hasMassIntentSignal(eisTextForAllowSignals(ctx), ctx.isButtonCommand);
+}
+
+function signalAllowsDirectoryPhone(ctx: HighRiskGateContext): boolean {
+  if (resolveHighRiskPOutMode(ctx.pOutMode) !== "signal") {
+    return false;
+  }
+  return hasDirectoryPhoneIntentSignal(
+    eisTextForAllowSignals(ctx),
+    ctx.isButtonCommand,
+  );
+}
+
+/** P2a: prefer explicit instruction channel when the caller provided one. */
+function instructionTextForEis(ctx: HighRiskGateContext): string | undefined {
+  if (ctx.instructionText !== undefined) {
+    return ctx.instructionText;
+  }
+  return ctx.speakerText;
+}
+
+/**
+ * F1: summary/analysis envelopes mix user instruction with quoted payload.
+ * Do not treat payload verbs as speaker outbound intent (no provenance claim).
+ * Direct instructions without envelope markers still allow.
+ */
+function eisTextForAllowSignals(ctx: HighRiskGateContext): string | undefined {
+  const text = instructionTextForEis(ctx);
+  if (text && isSummaryEnvelopeInstruction(text)) {
+    return "";
+  }
+  return text;
 }
 
 export function applyHighRiskActionGate(
@@ -656,7 +795,7 @@ export function applyHighRiskActionGate(
       detail: targetsGroundedForSignal(
         row.targets,
         ctx.knownTargetNames,
-        ctx.speakerText,
+        instructionTextForEis(ctx),
       )
         ? "messages_missing_intent_signal"
         : "messages_to_other_or_unresolved",
@@ -667,22 +806,54 @@ export function applyHighRiskActionGate(
   const remindersIn = metadata.reminders ?? [];
   const reminders: LlmReminderAction[] = [];
   for (const row of remindersIn) {
-    if (isSelfReminderAction(row, speakerNames, ctx.speaker.phone)) {
+    // F27: empty-ping updates use existing clock dest, not auto-self.
+    const pingTargets = effectiveReminderPingTargets(
+      row,
+      ctx.existingReminderPings,
+    );
+    const selfProbe: Pick<LlmReminderAction, "ping" | "targets"> = {
+      ping: pingTargets,
+      targets: [],
+    };
+    // Create with empty ping remains self; update with empty+unknown id → foreign.
+    const treatAsSelf =
+      row.action === "update" &&
+      [...(row.ping ?? []), ...(row.targets ?? [])].every((t) => !String(t).trim())
+        ? pingTargets.length > 0 &&
+          isSelfReminderAction(selfProbe, speakerNames, ctx.speaker.phone)
+        : isSelfReminderAction(
+            {
+              ping: pingTargets.length > 0 ? pingTargets : row.ping,
+              targets: pingTargets.length > 0 ? [] : row.targets,
+            },
+            speakerNames,
+            ctx.speaker.phone,
+          );
+    if (treatAsSelf) {
       reminders.push(row);
       continue;
     }
     // Foreign ping: allow in signal mode when known + remind intent.
-    const pingTargets = [...row.ping, ...row.targets]
-      .map((t) => t.trim())
-      .filter(Boolean);
     if (signalAllowsOutbound(pingTargets, ctx, speakerNames)) {
+      reminders.push(row);
+      continue;
+    }
+    // P1(O1): prior clarify bind may complete schedule only within bound targets.
+    if (
+      ctx.clarifyBind &&
+      clarifyBindAllowsReminder(ctx.clarifyBind, row) &&
+      targetsResolvedAgainstKnown(pingTargets, ctx.knownTargetNames)
+    ) {
       reminders.push(row);
       continue;
     }
     stripped.push({
       policy: "P-Out",
       kind: "schedule_foreign",
-      detail: "reminder_foreign_ping",
+      detail:
+        row.action === "update" && pingTargets.length === 0
+          ? "reminder_update_unknown_dest"
+          : "reminder_foreign_ping",
     });
     snap.reminders = [...(snap.reminders ?? []), row];
   }
@@ -700,7 +871,10 @@ export function applyHighRiskActionGate(
       // decline / counter / close / clear_clock (+ unexpected reportText).
       if (
         resolveHighRiskPOutMode(ctx.pOutMode) === "signal" &&
-        hasOutboundIntentSignal(ctx.speakerText, ctx.isButtonCommand)
+        hasOutboundIntentSignal(
+          eisTextForAllowSignals(ctx),
+          ctx.isButtonCommand,
+        )
       ) {
         jobs.push(row);
         continue;
@@ -716,7 +890,15 @@ export function applyHighRiskActionGate(
     jobs.push(row);
   }
 
-  const listsIn = metadata.lists ?? [];
+  // F16: nested items[].remind must follow the same P-Out rules as top-level.
+  const listsAfterNested = gateNestedRemindsInLists(
+    metadata.lists ?? [],
+    ctx,
+    speakerNames,
+    stripped,
+    snap,
+  );
+  const listsIn = listsAfterNested;
   const listsKept: LlmListAction[] = [];
   for (const row of listsIn) {
     const kind = listActionShareKind(row, speakerNames);
@@ -869,6 +1051,24 @@ export function applyHighRiskActionGate(
       snap.directory = [...(snap.directory ?? []), row];
       continue;
     }
+    // F2: personal directory add/update with a phone is P-Out unless EIS+digits
+    // (or Class V button). Prevents PI-7 plant/redirect via ungated fall-through.
+    if (
+      (row.action === "add" || row.action === "update") &&
+      Boolean(row.phone?.trim())
+    ) {
+      if (signalAllowsDirectoryPhone(ctx)) {
+        directory.push(row);
+        continue;
+      }
+      stripped.push({
+        policy: "P-Out",
+        kind: "directory_phone",
+        detail: `directory.${row.action}_phone`,
+      });
+      snap.directory = [...(snap.directory ?? []), row];
+      continue;
+    }
     directory.push(row);
   }
 
@@ -879,6 +1079,13 @@ export function applyHighRiskActionGate(
   for (const row of listsKept) {
     if (row.action === "remove" && (dropAllRemoves || row.items.length >= 2)) {
       if (massAllowed) {
+        lists.push(row);
+        continue;
+      }
+      if (
+        ctx.clarifyBind &&
+        clarifyBindAllowsMultiRemove(ctx.clarifyBind, row)
+      ) {
         lists.push(row);
         continue;
       }
@@ -933,6 +1140,105 @@ export function highRiskPrimaryKind(
   stripped: HighRiskStripReason[],
 ): HighRiskActionKind {
   return primaryActionKind(stripped);
+}
+
+/**
+ * F16: peel foreign nested items[].remind the same way as top-level reminders.
+ * Keeps the list item; strips only ungated nested clocks into strippedSnapshot.
+ */
+function gateNestedRemindsInLists(
+  listsIn: LlmListAction[],
+  ctx: HighRiskGateContext,
+  speakerNames: string[],
+  stripped: HighRiskStripReason[],
+  snap: LlmMetadata,
+): LlmListAction[] {
+  const out: LlmListAction[] = [];
+  for (const row of listsIn) {
+    if (row.listType !== "shopping" && row.listType !== "tasks") {
+      out.push(row);
+      continue;
+    }
+    if (row.action !== "add" && row.action !== "update") {
+      out.push(row);
+      continue;
+    }
+    const nextItems: LlmListAction["items"] = [];
+    let rowChanged = false;
+    for (const rawItem of row.items) {
+      if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+        nextItems.push(rawItem);
+        continue;
+      }
+      const peeled = splitItemRemind(rawItem as Record<string, unknown>);
+      if (peeled.reminds.length === 0) {
+        nextItems.push(rawItem);
+        continue;
+      }
+      const keptReminds: Record<string, unknown>[] = [];
+      let itemChanged = false;
+      const label =
+        llmItemLabel(peeled.item) ||
+        String(
+          peeled.item["שם משימה"] ??
+            peeled.item["שם פריט"] ??
+            peeled.item.name ??
+            "",
+        ).trim() ||
+        "פריט";
+      const itemId =
+        String(peeled.item.item_id ?? peeled.item.itemId ?? "").trim() ||
+        "nested";
+      for (const remind of peeled.reminds) {
+        const action = reminderActionFromNestedRemind(remind, {
+          itemLabel: label,
+          listType: row.listType as LlmListType,
+          itemId,
+        });
+        if (!action) {
+          keptReminds.push(remind);
+          continue;
+        }
+        const pingTargets = [...(action.ping ?? []), ...(action.targets ?? [])]
+          .map((t) => t.trim())
+          .filter(Boolean);
+        const self = isSelfReminderAction(
+          { ping: pingTargets, targets: [] },
+          speakerNames,
+          ctx.speaker.phone,
+        );
+        if (self) {
+          keptReminds.push(remind);
+          continue;
+        }
+        if (signalAllowsOutbound(pingTargets, ctx, speakerNames)) {
+          keptReminds.push(remind);
+          continue;
+        }
+        itemChanged = true;
+        rowChanged = true;
+        stripped.push({
+          policy: "P-Out",
+          kind: "schedule_foreign",
+          detail: "nested_remind_foreign_ping",
+        });
+        snap.reminders = [...(snap.reminders ?? []), action];
+      }
+      if (!itemChanged) {
+        nextItems.push(rawItem);
+        continue;
+      }
+      const rebuilt: Record<string, unknown> = { ...peeled.item };
+      if (keptReminds.length === 1) {
+        rebuilt.remind = keptReminds[0];
+      } else if (keptReminds.length > 1) {
+        rebuilt.reminds = keptReminds;
+      }
+      nextItems.push(rebuilt as LlmListAction["items"][number]);
+    }
+    out.push(rowChanged ? { ...row, items: nextItems } : row);
+  }
+  return out;
 }
 
 /** Build known-target labels for Gate grounding (contacts + humans + thread). */

@@ -279,6 +279,7 @@ describe("saved locations cross-source (eval-db, stub LLM)", () => {
       userId: account!.userId,
       ownerEmployeeId: account!.employeeId,
       employees: account!.employees,
+      authorizePhoneFields: true,
       actions: [
         {
           action: "add",

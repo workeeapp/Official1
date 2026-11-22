@@ -592,6 +592,14 @@ export interface LlmRegisterAction {
   gender: "male" | "female";
 }
 
+/** P1(O1): model proposal that a clarify follow-up is needed (server owns scope). */
+export type LlmAwaitingClarify = {
+  kind: "remind_when" | "delete_scope";
+  targets?: string[];
+  /** Opaque item ids for delete_scope (item_id). */
+  itemIds?: string[];
+};
+
 export interface LlmMetadata {
   lists: LlmListAction[];
   /** List-level alter/delete (rename, columns, participants, delete whole list). */
@@ -600,6 +608,11 @@ export interface LlmMetadata {
   messages?: LlmMessageAction[];
   reminders?: LlmReminderAction[];
   directory?: LlmDirectoryAction[];
+  /**
+   * P1(O1): optional clarify proposal when the model asks instead of acting.
+   * Server may ignore or narrow; never trusts this as authorization alone.
+   */
+  awaiting?: LlmAwaitingClarify | null;
   /** Lifecycle updates for jobs listed in OPEN_JOBS this turn. */
   jobs?: LlmJobAction[];
   /** Open-world missions (create/approve_plan/cancel from Lucy; tool loop from executor). */
@@ -1564,6 +1577,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const flights = parseFlightsAction(meta);
   const liveSelectParsed = parseLiveSelect(meta);
   const tips = parseTipKeys(meta);
+  const awaiting = parseAwaitingClarify(meta);
   return {
     messages,
     reminders,
@@ -1579,6 +1593,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
     lists,
     listOps,
     filing,
+    ...(awaiting ? { awaiting } : {}),
     ...(sendAttachments.length > 0 ? { sendAttachments } : {}),
     ...(showDump ? { showDump } : {}),
     ...(showDumpSection ? { showDumpSection } : {}),
@@ -2552,6 +2567,35 @@ export function parseReportHistoryKinds(
     return kinds;
   }
   return kinds;
+}
+
+function parseAwaitingClarify(
+  meta: Record<string, unknown>,
+): LlmAwaitingClarify | null {
+  const raw = meta.awaiting ?? meta.Awaiting;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const kindRaw = String(record.kind ?? "").trim();
+  const kind =
+    kindRaw === "remind_when" || kindRaw === "remind-when"
+      ? ("remind_when" as const)
+      : kindRaw === "delete_scope" || kindRaw === "delete-scope"
+        ? ("delete_scope" as const)
+        : null;
+  if (!kind) {
+    return null;
+  }
+  const targets = readStringList(record.targets);
+  const itemIds = readStringList(
+    record.item_ids ?? record.itemIds ?? record.ids,
+  );
+  return {
+    kind,
+    ...(targets.length > 0 ? { targets } : {}),
+    ...(itemIds.length > 0 ? { itemIds } : {}),
+  };
 }
 
 function parseConfirm(meta: Record<string, unknown>): boolean | null {

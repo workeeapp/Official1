@@ -35,6 +35,11 @@ const envSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
   WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional(),
   WHATSAPP_APP_ID: z.string().optional(),
+  /**
+   * Meta App Secret — HMAC key for X-Hub-Signature-256 on POST /webhook.
+   * Required in production when WHATSAPP_ACCESS_TOKEN is set (startup assert).
+   */
+  WHATSAPP_APP_SECRET: z.string().optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
   WHATSAPP_DEFAULT_EMPLOYEE: z.string().optional(),
   /**

@@ -131,44 +131,92 @@ export function buildPendingConfirmRow(input: {
   };
 }
 
-/** Engine summary from snapshot — not model copy. */
+/** Soft cap per prose field — keep readable; never drop whole ops (F29). */
+const SUMMARY_FIELD_CHARS = 400;
+
+function clipSummaryField(text: string, max = SUMMARY_FIELD_CHARS): string {
+  const t = text.trim();
+  if (t.length <= max) {
+    return t;
+  }
+  return `${t.slice(0, max)}…`;
+}
+
+/** Engine summary from snapshot — not model copy. F29: every op, no 6-line drop. */
 export function summarizeHighRiskSnapshot(
   snapshot: LlmMetadata,
   actionKind: HighRiskActionKind | string,
   openJobs?: HighRiskOpenJobRef[],
 ): string {
   const lines: string[] = [];
+  const outboundFiles = snapshot.sendAttachments?.length ?? 0;
   for (const msg of snapshot.messages ?? []) {
     const who = msg.targets.join(", ") || "?";
-    const body = msg.text.trim().slice(0, 120);
+    const body = clipSummaryField(msg.text);
     lines.push(`שליחה אל ${who}: «${body}»`);
+  }
+  if (outboundFiles > 0) {
+    lines.push(`שליחת ${outboundFiles} קבצים שמורים`);
   }
   for (const row of snapshot.lists ?? []) {
     if (row.targets.length > 0) {
       lines.push(
-        `${row.action === "add" ? "הוספה" : "עדכון"} עם ${row.targets.join(", ")} (${row.listType})`,
+        `${row.action === "add" ? "הוספה" : row.action === "remove" ? "מחיקה" : "עדכון"} עם ${row.targets.join(", ")} (${row.listType}, ${row.items.length} פריטים)`,
       );
     } else if (row.action === "remove") {
       lines.push(`מחיקת ${row.items.length} פריטים מ-${row.listType}`);
+    } else if (row.action === "add" || row.action === "update") {
+      lines.push(
+        `${row.action === "add" ? "הוספה" : "עדכון"} ב-${row.listType} (${row.items.length} פריטים)`,
+      );
     }
   }
   for (const row of snapshot.filing ?? []) {
     if (row.targets.length > 0) {
       lines.push(`תיוק «${row.itemName}» עם ${row.targets.join(", ")}`);
+    } else if (row.action === "remove_filing") {
+      lines.push(`מחיקת תיוק «${row.itemName}»`);
+    } else {
+      lines.push(`תיוק «${row.itemName}»`);
     }
   }
   for (const op of snapshot.listOps ?? []) {
     if (op.action === "delete_list") {
-      lines.push("מחיקת רשימה שלמה");
+      lines.push(
+        `מחיקת רשימה שלמה${op.listId?.trim() ? ` (${op.listId.trim()})` : ""}`,
+      );
     } else if (op.addParticipants.length || op.removeParticipants.length) {
-      lines.push("שינוי משתתפים ברשימה");
+      const bits: string[] = [];
+      if (op.addParticipants.length) {
+        bits.push(`הוספת ${op.addParticipants.join(", ")}`);
+      }
+      if (op.removeParticipants.length) {
+        bits.push(`הסרת ${op.removeParticipants.join(", ")}`);
+      }
+      lines.push(`שינוי משתתפים ברשימה: ${bits.join("; ")}`);
     }
   }
   for (const row of snapshot.reminders ?? []) {
-    lines.push(`תזכורת/שעון אל ${[...row.ping, ...row.targets].join(", ") || "?"}`);
+    const dest = [...row.ping, ...row.targets].join(", ") || "?";
+    const parts = [`תזכורת/שעון אל ${dest}`];
+    if (row.item?.trim()) {
+      parts.push(`«${clipSummaryField(row.item, 200)}»`);
+    }
+    if (row.compose) {
+      parts.push(
+        row.composeSource?.trim()
+          ? `compose:${row.composeSource.trim()}`
+          : "compose",
+      );
+    }
+    if ((row.attachmentIds?.length ?? 0) > 0) {
+      parts.push(`+${row.attachmentIds!.length} קבצים`);
+    }
+    lines.push(parts.join(" · "));
   }
   for (const row of snapshot.directory ?? []) {
-    lines.push(`ספר טלפונים: ${row.action} ${row.name}`.trim());
+    const phone = row.phone?.trim() ? ` (${row.phone.trim()})` : "";
+    lines.push(`ספר טלפונים: ${row.action} ${row.name}${phone}`.trim());
   }
   for (const row of snapshot.jobs ?? []) {
     const report = row.reportText.trim();
@@ -181,8 +229,8 @@ export function summarizeHighRiskSnapshot(
       const toWhom = asker ? `אל ${asker}` : "לאדם אחר";
       lines.push(
         said
-          ? `דיווח ${toWhom}: «${report.slice(0, 120)}» (על בסיס: «${said.slice(0, 80)}»)`
-          : `דיווח ${toWhom}: «${report.slice(0, 120)}»`,
+          ? `דיווח ${toWhom}: «${clipSummaryField(report)}» (על בסיס: «${clipSummaryField(said, 200)}»)`
+          : `דיווח ${toWhom}: «${clipSummaryField(report)}»`,
       );
       continue;
     }
@@ -190,14 +238,14 @@ export function summarizeHighRiskSnapshot(
     if (row.action === "counter") {
       lines.push(
         said
-          ? `הצעת מועד חלופי שתישלח לאישור: «${said.slice(0, 120)}»`
+          ? `הצעת מועד חלופי שתישלח לאישור: «${clipSummaryField(said)}»`
           : "הצעת מועד חלופי שתישלח לאישור",
       );
     } else if (row.action === "decline" || row.action === "close") {
       const who = asker ? ` אל ${asker}` : " לשואל";
       lines.push(
         said
-          ? `סיום בדיקה עם עדכון${who}: «${said.slice(0, 120)}»`
+          ? `סיום בדיקה עם עדכון${who}: «${clipSummaryField(said)}»`
           : `סיום בדיקה עם עדכון${who}`,
       );
     } else if (row.action === "clear_clock") {
@@ -206,7 +254,7 @@ export function summarizeHighRiskSnapshot(
       const who = asker ? ` אל ${asker}` : " לשואל";
       lines.push(
         said
-          ? `עדכון${who} על התשובה: «${said.slice(0, 120)}»`
+          ? `עדכון${who} על התשובה: «${clipSummaryField(said)}»`
           : `עדכון${who} על תשובה לבדיקה פתוחה`,
       );
     }
@@ -226,7 +274,7 @@ export function summarizeHighRiskSnapshot(
                 : "פעולה שדורשת אישור";
     lines.push(kindLabel);
   }
-  return lines.slice(0, 6).join("\n");
+  return lines.join("\n");
 }
 
 function toJson(value: unknown): Prisma.InputJsonValue {

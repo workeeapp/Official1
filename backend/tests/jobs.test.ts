@@ -713,6 +713,7 @@ describe("createJobsFromRelays", () => {
     expect(nudge.kind).toBe("nudge");
     expect(nudge.auto).toBe(true);
     const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.actorId).toBe(LUCY);
     expect(clock.pingIds).toEqual([ERAN]);
     expect(clock.messageText).toBe("דחוף מאוד — עמית מחכה לתשובה: מה שלומך?");
     const delay = clock.fireAt.getTime() - before;
@@ -745,6 +746,7 @@ describe("createJobsFromRelays", () => {
       ],
     });
     const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.actorId).toBe(LUCY);
     expect(clock.pingIds).toEqual([AMIT]);
     expect(clock.messageText).toBe("דחוף — אם הכנת פיצה?");
     expect(clock.messageText).not.toContain("מחכה לתשובה");
@@ -1807,9 +1809,11 @@ describe("applyJobActions", () => {
     expect(nudgeData.data[JOB_META_KEY].kind).toBe("nudge");
     expect(nudgeData.data[JOB_META_KEY].jobItemId).toBe("job-1");
     const clock = reminderCreate.mock.calls[0][0].data;
+    expect(clock.actorId).toBe(LUCY);
     expect(clock.ownerId).toBe(ERAN);
     expect(clock.pingIds).toEqual([ERAN]);
     expect(clock.repeat).toBe("once");
+    expect(itemCreate.mock.calls[0][0].data.addedById).toBe(AMIT);
     expect(itemUpdate).toHaveBeenCalledWith({
       where: { id: "nudge-1" },
       data: { reminderId: "clock-1" },
@@ -2093,6 +2097,7 @@ describe("createScheduledJobsFromRelays", () => {
     expect(reminderCreate).toHaveBeenCalledTimes(1);
     const clock = reminderCreate.mock.calls[0][0].data;
     expect(clock.fireAt.getTime()).toBe(now.getTime() + 7200_000);
+    expect(clock.actorId).toBe(LUCY);
     expect(clock.pingIds).toEqual([AMIT]);
     expect(clock.messageText).toBe("קנית חלב?");
     expect(clock.workerItemId).toBe("job-1");

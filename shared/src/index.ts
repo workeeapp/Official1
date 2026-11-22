@@ -332,6 +332,7 @@ export type {
   ReportSection,
   ReportHistoryKind,
   LlmMetadata,
+  LlmAwaitingClarify,
   LlmShowDumpSection,
   LlmShowDumpUrgency,
   LlmShowDumpDateScope,

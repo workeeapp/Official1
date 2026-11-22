@@ -26,6 +26,10 @@ import { applyListOps } from "./list-ops.service.js";
 import { applyReminders } from "./reminder.service.js";
 import { applyDirectoryActions } from "./contact.service.js";
 import { findPendingCollabInvites } from "./whatsapp-invite.service.js";
+import {
+  applyHighRiskActionGate,
+  digitalWorkerGateNames,
+} from "./high-risk-action-gate.js";
 
 export type ExplicitJoinResult = {
   ok: boolean;
@@ -116,16 +120,45 @@ export async function handleExplicitJoinAccept(input: {
     };
   }
   const metadata = metadataFromSnapshot(pending.snapshot);
+  // F30: Join accept is consent-to-join only — never Class V authorize.
+  // Re-run HighRisk Gate with empty EIS and no button/snapshot bypass.
+  const gated = applyHighRiskActionGate(metadata, {
+    speaker: actor,
+    digitalWorkerNames: digitalWorkerGateNames(digitalEmployees(employees)),
+    allowAuthorizedSnapshot: false,
+    isButtonCommand: false,
+    instructionText: "",
+    speakerText: "",
+    knownTargetNames: [],
+    clarifyBind: null,
+  });
+  const safeMetadata = gated.metadata;
   const summary = pending.summaryText.trim() || "את זה";
+  if (!prospectReplayHasWork(safeMetadata)) {
+    await consumePendingProspectAction(pending.id);
+    return {
+      ok: true,
+      joined: true,
+      spoken:
+        "הצטרפת בהצלחה. הפעולה שדורשת אישור נוסף לא בוצעה אוטומטית — נסחו אותה שוב ואאשר כרגיל.",
+    };
+  }
   try {
     await replayProspectPendingWrites({
       userId: input.userId,
       actor,
       employees,
       digitalEmployeeId: input.digitalEmployeeId,
-      metadata,
+      metadata: safeMetadata,
     });
     await consumePendingProspectAction(pending.id);
+    if (gated.didStrip) {
+      return {
+        ok: true,
+        joined: true,
+        spoken: `הצטרפת וביצעתי את החלקים האישיים של «${summary}». חלקים שדורשים אישור נוסף לא בוצעו — נסחו אותם שוב ואאשר כרגיל.`,
+      };
+    }
     return {
       ok: true,
       joined: true,
@@ -139,6 +172,17 @@ export async function handleExplicitJoinAccept(input: {
       spoken: "הצטרפת בהצלחה, אבל השמירה לא הושלמה — נסו שוב ואשמור.",
     };
   }
+}
+
+/** True when replay would persist something (messages never staged — F28). */
+function prospectReplayHasWork(metadata: LlmMetadata): boolean {
+  return (
+    (metadata.lists?.length ?? 0) > 0 ||
+    (metadata.listOps?.length ?? 0) > 0 ||
+    (metadata.filing?.length ?? 0) > 0 ||
+    (metadata.reminders?.length ?? 0) > 0 ||
+    (metadata.directory?.length ?? 0) > 0
+  );
 }
 
 async function connectPendingShareInvites(input: {
@@ -247,6 +291,8 @@ async function replayProspectPendingWrites(input: {
       ownerEmployeeId: input.actor.id,
       actions: input.metadata.directory ?? [],
       employees: humans,
+      // F30 already re-Gated; surviving phone rows are authorized.
+      authorizePhoneFields: true,
     });
   }
 }

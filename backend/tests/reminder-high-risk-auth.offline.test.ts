@@ -109,6 +109,25 @@ describe("Stage 6 legacy foreign clock auth", () => {
     ).toBe(false);
   });
 
+  it("F3: stamped foreign clocks fire; unstamped stay suppressed (Gap A closed by stamp-on-allow)", () => {
+    expect(
+      shouldSuppressLegacyForeignClock({
+        actorId: ACTOR.id,
+        pingIds: [OTHER.id],
+        highRiskAuthorizedAt: new Date(),
+        employees,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSuppressLegacyForeignClock({
+        actorId: ACTOR.id,
+        pingIds: [OTHER.id],
+        highRiskAuthorizedAt: null,
+        employees,
+      }),
+    ).toBe(true);
+  });
+
   it("never suppresses personal clocks for lack of marker", () => {
     expect(
       shouldSuppressLegacyForeignClock({

@@ -175,6 +175,7 @@ describe("unified share C5 domains (eval-db)", () => {
       userId: account.userId,
       ownerEmployeeId: account.employeeId,
       employees: account.employees,
+      authorizePhoneFields: true,
       actions: [
         {
           action: "add",

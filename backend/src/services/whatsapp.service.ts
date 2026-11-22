@@ -47,6 +47,16 @@ import {
 } from "./whatsapp-outbound-memory.js";
 import { isKnownShowButtonCommand } from "./show-button-dump.js";
 import { markWhatsAppInbound } from "./whatsapp-window.js";
+import {
+  batchGateInstructionText,
+  SHARED_CONTACTS_MARKER,
+  SHARED_LOCATION_MARKER,
+} from "./high-risk-instruction-channel.js";
+
+export {
+  SHARED_CONTACTS_MARKER,
+  SHARED_LOCATION_MARKER,
+} from "./high-risk-instruction-channel.js";
 
 /** Fire-button commands already carry the full ACTION text — skip reply-context wrap. */
 function isReminderFireButtonCommand(text: string): boolean {
@@ -111,6 +121,11 @@ export interface InboundWhatsAppText {
   media?: InboundMedia;
   /** WhatsApp location pin. */
   location?: InboundLocation;
+  /**
+   * Meta Cloud API `context.forwarded` / `context.frequently_forwarded`.
+   * When true the body is UNTRUSTED_DATA for Gate EIS (not instruction).
+   */
+  forwarded?: boolean;
   /**
    * When WhatsApp received the message from the sender (webhook `timestamp`,
    * ISO 8601). Pass-through only — not used for batching yet.
@@ -227,7 +242,12 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
           text?: { body?: unknown };
           interactive?: { button_reply?: { id?: unknown } };
           contacts?: unknown;
-          context?: { id?: unknown; from?: unknown };
+          context?: {
+            id?: unknown;
+            from?: unknown;
+            forwarded?: unknown;
+            frequently_forwarded?: unknown;
+          };
         };
         const buttonCommand = record.interactive?.button_reply?.id;
         const media = readInboundMedia(message as Record<string, unknown>);
@@ -254,6 +274,9 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
         const replyToText = replyToId
           ? lookupWhatsAppOutbound(replyToId)
           : undefined;
+        const forwarded =
+          record.context?.forwarded === true ||
+          record.context?.frequently_forwarded === true;
         const sentAt = readWhatsAppTimestamp(record.timestamp);
         if ((text || media || location) && from && messageId) {
           messages.push({
@@ -264,6 +287,7 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
             ...(replyToText ? { replyToText } : {}),
             ...(media ? { media } : {}),
             ...(location ? { location } : {}),
+            ...(forwarded ? { forwarded: true } : {}),
           });
         }
       }
@@ -272,8 +296,6 @@ export function extractInboundTexts(body: unknown): InboundWhatsAppText[] {
 
   return messages;
 }
-
-export const SHARED_LOCATION_MARKER = "[מיקום שותף בוואטסאפ]";
 
 /**
  * WhatsApp static `location` pin → inbound coords.
@@ -318,8 +340,6 @@ export function formatSharedLocationMessage(loc: InboundLocation): string {
     },
   })}`;
 }
-
-export const SHARED_CONTACTS_MARKER = "[כרטיס איש קשר שותף בוואטסאפ]";
 
 /** One shared contact card after inbound normalize (model-facing). */
 export type InboundSharedContact = {
@@ -730,6 +750,37 @@ export function batchSpokenText(
   return text || transcripts.map((value) => value.trim()).filter(Boolean).join("\n");
 }
 
+/**
+ * Production assembly of sendChatMessage fields from a WhatsApp inbound batch
+ * (same inputs runWhatsAppTurn uses after spoken/reply resolution).
+ * Exported for P2a E2E — no network side effects.
+ */
+export function buildWhatsAppSendChatFields(input: {
+  batch: InboundWhatsAppText[];
+  transcripts?: string[];
+}): {
+  /** Full model-facing utterance (cards, forwards, captions). */
+  message: string;
+  /** EIS channel only. */
+  gateInstructionText: string;
+  spoken: string;
+} {
+  const transcripts = input.transcripts ?? [];
+  const spoken = batchSpokenText(input.batch, transcripts);
+  const replyToText = input.batch.find((m) => m.replyToText)?.replyToText;
+  const message =
+    replyToText &&
+    !isKnownShowButtonCommand(spoken) &&
+    !isReminderFireButtonCommand(spoken)
+      ? formatWhatsAppReplyContext(replyToText, spoken)
+      : spoken;
+  return {
+    message,
+    gateInstructionText: batchGateInstructionText(input.batch),
+    spoken,
+  };
+}
+
 /** Active conversation partner. A guest uses the same Lucy as everyone else. */
 export function whatsAppDigitalForTurn(
   digitals: PublicEmployee[],
@@ -944,16 +995,16 @@ async function runWhatsAppTurn(incoming: InboundWhatsAppText[]): Promise<void> {
       "chat_start",
       `worker=${digital.name} speaker=${speaker.employeeId.slice(0, 8)} files=${stored.length}`,
     );
+    const chatFields = buildWhatsAppSendChatFields({
+      batch,
+      transcripts: stored.map(({ row }) => row.transcript),
+    });
     const turn = await sendChatMessage({
       userId: speaker.userId,
       employeeId: speaker.employeeId,
       digitalEmployeeId: digital.id,
-      message:
-        replyToText &&
-        !isKnownShowButtonCommand(spoken) &&
-        !isReminderFireButtonCommand(spoken)
-          ? formatWhatsAppReplyContext(replyToText, spoken)
-          : spoken,
+      message: chatFields.message,
+      gateInstructionText: chatFields.gateInstructionText,
       ...(attachments ? { attachments } : {}),
       ...(pendingInvite ? { pendingInvite } : {}),
     });

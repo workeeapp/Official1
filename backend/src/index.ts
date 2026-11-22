@@ -5,9 +5,11 @@ import { startReminderTicker } from "./services/reminder-fire.js";
 import { startMissionTicker } from "./services/mission-runner.js";
 import { shutdownMissionBrowsers } from "./services/mission-tools/browser.js";
 import { startWhatsAppSubmissionSweep } from "./services/whatsapp-submission.service.js";
+import { assertWhatsAppWebhookConfig } from "./services/whatsapp-webhook-signature.js";
 
 async function main(): Promise<void> {
   const env = getEnv();
+  assertWhatsAppWebhookConfig(env);
   const app = createApp();
 
   const server = app.listen(env.PORT, () => {

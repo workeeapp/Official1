@@ -69,9 +69,11 @@ vi.mock("../src/services/reminder-fire.js", () => ({
 
 import {
   applyNestedReminderPackages,
+  asReminderSkipReason,
   clocksEligibleForExactKeySoftLink,
   excludeNestedItemsFromSoftLinkCandidates,
   filterTopLevelRemindersAgainstNested,
+  formatReminderApplyNotice,
   linkRemindersToItems,
   removeReminderAndLinkedWorkerTask,
 } from "../src/services/reminder.service.js";
@@ -284,6 +286,138 @@ describe("Phase 1 dual-path engine (service integration)", () => {
           data: expect.objectContaining({ deletedAt: expect.any(Date) }),
         }),
       );
+    });
+
+    it("assign book + empty ping: no Reminder, compensate, no false success", async () => {
+      const ASSIGNEE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+      // Real txn body runs; empty ping throws before reminder.create.
+      transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          reminder: { create: reminderCreate },
+          employeeListItemReminderLink: {
+            create: linkCreate,
+            findUnique: linkFindUnique,
+          },
+        }),
+      );
+      linkFindMany.mockResolvedValue([]);
+      itemUpdate.mockResolvedValue({});
+
+      const result = await applyNestedReminderPackages({
+        userId: USER,
+        actor: ACTOR,
+        employees: [ACTOR],
+        packages: [
+          {
+            itemId: ITEM_A,
+            ownerEmployeeId: ASSIGNEE,
+            listType: "tasks",
+            itemLabel: "משימה לטל",
+            reminds: [{ date: "2026-11-10", time: "09:00", ping: [] }],
+            nestedCompensate: { kind: "soft_delete_item" },
+          },
+        ],
+      });
+
+      expect(reminderCreate).not.toHaveBeenCalled();
+      expect(result.saved).toHaveLength(0);
+      expect(result.failedItemIds).toEqual([ITEM_A]);
+      expect(result.skipped).toEqual([
+        { item: "משימה לטל", reason: "no_phone" },
+      ]);
+      // chat.service merge preserves ReminderSkipReason for the formatter.
+      const mergedSkipped = result.skipped.map((row) => ({
+        item: row.item,
+        reason: asReminderSkipReason(row.reason),
+        ...(row.dest ? { dest: row.dest } : {}),
+      }));
+      expect(mergedSkipped[0]?.reason).toBe("no_phone");
+      expect(
+        formatReminderApplyNotice({
+          removed: [],
+          missed: [],
+          skipped: mergedSkipped,
+        }),
+      ).toBe("אין לי מספר ליעד. מה המספר?");
+      expect(itemUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: ITEM_A },
+          data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+        }),
+      );
+    });
+
+    it("package nested_package_failed still maps to db notice", () => {
+      const merged = asReminderSkipReason("nested_package_failed");
+      expect(merged).toBe("db");
+      expect(
+        formatReminderApplyNotice({
+          removed: [],
+          missed: [],
+          skipped: [{ item: "תור", reason: merged }],
+        }),
+      ).toBe("לא נשמרה «תור» — השמירה נכשלה.");
+    });
+
+    it("package no_time reason is preserved through merge", () => {
+      expect(asReminderSkipReason("no_time")).toBe("no_time");
+      expect(
+        formatReminderApplyNotice({
+          removed: [],
+          missed: [],
+          skipped: [{ item: "תור", reason: "no_time" }],
+        }),
+      ).toMatch(/מתי לשלוח/);
+    });
+
+    it("failed assign package does not block a later self package in the same turn", async () => {
+      const ASSIGNEE = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+      reminderCreate.mockResolvedValue({
+        id: REM_1,
+        fireAt: ymdHm(2026, 12, 20, 9, 0),
+      });
+      transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          reminder: { create: reminderCreate },
+          employeeListItemReminderLink: {
+            create: linkCreate,
+            findUnique: linkFindUnique,
+          },
+        }),
+      );
+      linkFindMany.mockResolvedValue([]);
+      itemUpdate.mockResolvedValue({});
+
+      const result = await applyNestedReminderPackages({
+        userId: USER,
+        actor: ACTOR,
+        employees: [ACTOR],
+        packages: [
+          {
+            itemId: ITEM_A,
+            ownerEmployeeId: ASSIGNEE,
+            listType: "tasks",
+            itemLabel: "משימה לטל",
+            reminds: [{ date: "2026-12-20", time: "09:00", ping: [] }],
+            nestedCompensate: { kind: "soft_delete_item" },
+          },
+          {
+            itemId: ITEM_B,
+            ownerEmployeeId: ACTOR.id,
+            listType: "tasks",
+            itemLabel: "תור לווטרינר",
+            reminds: [{ date: "2026-12-20", time: "09:00", ping: ["טל"] }],
+          },
+        ],
+      });
+
+      expect(result.failedItemIds).toEqual([ITEM_A]);
+      expect(result.skipped).toEqual([
+        { item: "משימה לטל", reason: "no_phone" },
+      ]);
+      expect(result.saved).toHaveLength(1);
+      expect(result.saved[0]?.requestedItemId).toBe(ITEM_B);
+      expect(reminderCreate).toHaveBeenCalledTimes(1);
     });
 
     it("on txn failure restores prior update snapshot", async () => {

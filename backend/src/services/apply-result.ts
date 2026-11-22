@@ -905,6 +905,8 @@ export function buildApplyResult(input: {
   /** NEW task+nested-remind transaction failures (lists apply_miss). */
   nestedRemindMisses?: Array<{
     reason: string;
+    /** When set, reminderResult.skipped uses this (e.g. no_phone) instead of db. */
+    reminderSkipReason?: "no_phone";
     op: string;
     listType: string;
     listName?: string;

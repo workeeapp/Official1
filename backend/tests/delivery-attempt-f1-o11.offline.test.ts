@@ -25,25 +25,39 @@ const {
   reminderUpdate,
   reminderUpdateMany,
   reminderFindUnique,
+  reminderFindFirst,
+  reminderCreate,
   itemUpdateMany,
   itemUpdate,
   itemFindMany,
+  itemFindUnique,
   chatConversationFindUnique,
   deliveryAttemptFindUnique,
   deliveryAttemptCreate,
   deliveryAttemptUpdate,
+  deliveryAttemptUpdateMany,
   ledger,
+  noticeClocks,
 } = vi.hoisted(() => {
   const ledger = new Map<string, LedgerRow>();
+  const noticeClocks: Array<Record<string, unknown>> = [];
   return {
     ledger,
+    noticeClocks,
     reminderFindMany: vi.fn(),
     reminderUpdate: vi.fn(),
     reminderUpdateMany: vi.fn(),
     reminderFindUnique: vi.fn(),
+    reminderFindFirst: vi.fn(async () => null),
+    reminderCreate: vi.fn(async (args: { data: Record<string, unknown> }) => {
+      const row = { id: `notice-${noticeClocks.length + 1}`, ...args.data };
+      noticeClocks.push(row);
+      return row;
+    }),
     itemUpdateMany: vi.fn(),
     itemUpdate: vi.fn(),
     itemFindMany: vi.fn(),
+    itemFindUnique: vi.fn(async () => null),
     chatConversationFindUnique: vi.fn(),
     deliveryAttemptFindUnique: vi.fn(
       async (args: { where: { ledgerKey: string } }) =>
@@ -74,6 +88,23 @@ const {
         throw new Error("DeliveryAttempt not found");
       },
     ),
+    deliveryAttemptUpdateMany: vi.fn(
+      async (args: {
+        where: { id: string; status?: { in: string[] } };
+        data: Partial<LedgerRow>;
+      }) => {
+        for (const row of ledger.values()) {
+          if (row.id !== args.where.id) continue;
+          const allowed = args.where.status?.in;
+          if (allowed && !allowed.includes(row.status)) {
+            return { count: 0 };
+          }
+          Object.assign(row, args.data);
+          return { count: 1 };
+        }
+        return { count: 0 };
+      },
+    ),
   };
 });
 
@@ -93,13 +124,15 @@ vi.mock("../src/database/prisma.js", () => ({
       update: reminderUpdate,
       updateMany: reminderUpdateMany,
       findUnique: reminderFindUnique,
+      findFirst: reminderFindFirst,
+      create: reminderCreate,
       delete: vi.fn(),
     },
     employeeListItem: {
       updateMany: itemUpdateMany,
       update: itemUpdate,
       findMany: itemFindMany,
-      findUnique: vi.fn(),
+      findUnique: itemFindUnique,
     },
     chatConversation: {
       findUnique: chatConversationFindUnique,
@@ -109,6 +142,7 @@ vi.mock("../src/database/prisma.js", () => ({
       findUnique: deliveryAttemptFindUnique,
       create: deliveryAttemptCreate,
       update: deliveryAttemptUpdate,
+      updateMany: deliveryAttemptUpdateMany,
     },
   },
 }));
@@ -286,12 +320,16 @@ describe("Stage 6 fire-time suppress", () => {
     env.NODE_ENV = "development";
     env.WHATSAPP_ACCESS_TOKEN = "not-a-real-token";
     ledger.clear();
+    noticeClocks.length = 0;
     clocks = [];
     wireReminderStore();
+    reminderFindFirst.mockResolvedValue(null);
+    reminderCreate.mockClear();
+    itemFindUnique.mockResolvedValue(null);
     sendWhatsAppButtons.mockReset().mockResolvedValue("sent");
   });
 
-  it("suppresses unauthorized legacy foreign clocks", async () => {
+  it("suppresses unauthorized legacy foreign clocks and schedules one asker notice", async () => {
     clocks = [
       clock({
         pingIds: [OTHER],
@@ -304,6 +342,122 @@ describe("Stage 6 fire-time suppress", () => {
     expect(sendWhatsAppButtons).not.toHaveBeenCalled();
     expect(clocks[0]?.status).toBe("done");
     expect(clocks[0]?.sendStatus).toBe("failed");
+    expect(reminderCreate).toHaveBeenCalledTimes(1);
+    expect(reminderCreate.mock.calls[0][0].data.pingIds).toEqual([ACTOR]);
+    expect(reminderCreate.mock.calls[0][0].data.itemKey).toContain("כשל_מסירה:");
+    expect(
+      [...ledger.values()].some((row) => row.purpose === "reminder_fail_notice"),
+    ).toBe(true);
+  });
+
+  it("does not create a fail notice when ledger is already sending (no Reminder row)", async () => {
+    const sourceId = "clock-sending";
+    const ledgerKey = buildDeliveryLedgerKey({
+      sourceKey: `reminder:${sourceId}`,
+      destination: "0501111111",
+      purpose: "reminder_fail_notice",
+    });
+    ledger.set(ledgerKey, {
+      id: "da-stuck-sending",
+      userId: USER,
+      ledgerKey,
+      stepKey: `reminder_fail_notice:0501111111`,
+      destination: "0501111111",
+      purpose: "reminder_fail_notice",
+      status: "sending",
+      lastError: null,
+    });
+    clocks = [
+      clock({
+        id: sourceId,
+        pingIds: [OTHER],
+        highRiskAuthorizedAt: null,
+        messageText: "תביא חלב",
+        itemLabel: "תביא חלב",
+      }),
+    ];
+    await fireDueReminders(new Date(DUE.getTime() + 60_000));
+    expect(reminderCreate).not.toHaveBeenCalled();
+    expect(ledger.get(ledgerKey)?.status).toBe("sending");
+  });
+
+  it("does not create a fail notice when ledger is already unknown (no Reminder row)", async () => {
+    const sourceId = "clock-unknown";
+    const ledgerKey = buildDeliveryLedgerKey({
+      sourceKey: `reminder:${sourceId}`,
+      destination: "0501111111",
+      purpose: "reminder_fail_notice",
+    });
+    ledger.set(ledgerKey, {
+      id: "da-stuck-unknown",
+      userId: USER,
+      ledgerKey,
+      stepKey: `reminder_fail_notice:0501111111`,
+      destination: "0501111111",
+      purpose: "reminder_fail_notice",
+      status: "unknown",
+      lastError: null,
+    });
+    clocks = [
+      clock({
+        id: sourceId,
+        pingIds: [OTHER],
+        highRiskAuthorizedAt: null,
+        messageText: "תביא חלב",
+        itemLabel: "תביא חלב",
+      }),
+    ];
+    await fireDueReminders(new Date(DUE.getTime() + 60_000));
+    expect(reminderCreate).not.toHaveBeenCalled();
+    expect(ledger.get(ledgerKey)?.status).toBe("unknown");
+  });
+
+  it("does not create a fail notice when Reminder with same itemKey already exists", async () => {
+    reminderFindFirst.mockResolvedValue({ id: "notice-existing" });
+    clocks = [
+      clock({
+        pingIds: [OTHER],
+        highRiskAuthorizedAt: null,
+        messageText: "תביא חלב",
+        itemLabel: "תביא חלב",
+      }),
+    ];
+    await fireDueReminders(new Date(DUE.getTime() + 60_000));
+    expect(reminderCreate).not.toHaveBeenCalled();
+  });
+
+  it("completes fail-notice attempt to accepted and skips on replay", async () => {
+    clocks = [
+      clock({
+        pingIds: [OTHER],
+        highRiskAuthorizedAt: null,
+        messageText: "תביא חלב",
+        itemLabel: "תביא חלב",
+      }),
+    ];
+    await fireDueReminders(new Date(DUE.getTime() + 60_000));
+    expect(reminderCreate).toHaveBeenCalledTimes(1);
+    const noticeAttempt = [...ledger.values()].find(
+      (row) => row.purpose === "reminder_fail_notice",
+    );
+    expect(noticeAttempt?.status).toBe("accepted");
+
+    reminderFindFirst.mockResolvedValue({ id: "notice-1" });
+    reminderCreate.mockClear();
+    clocks = [
+      clock({
+        id: "clock-1",
+        status: "active",
+        sendStatus: "pending",
+        fireAt: DUE,
+        pingIds: [OTHER],
+        highRiskAuthorizedAt: null,
+        messageText: "תביא חלב",
+        itemLabel: "תביא חלב",
+      }),
+    ];
+    await fireDueReminders(new Date(DUE.getTime() + 60_000));
+    expect(reminderCreate).not.toHaveBeenCalled();
   });
 
   it("fires authorized foreign clocks", async () => {
@@ -319,6 +473,7 @@ describe("Stage 6 fire-time suppress", () => {
     expect(sendWhatsAppButtons).toHaveBeenCalledTimes(1);
     expect(clocks[0]?.status).toBe("done");
     expect(clocks[0]?.sendStatus).toBe("sent");
+    expect(reminderCreate).not.toHaveBeenCalled();
   });
 
   it("still fires personal clocks without a marker", async () => {
@@ -327,6 +482,40 @@ describe("Stage 6 fire-time suppress", () => {
     expect(sendWhatsAppButtons).toHaveBeenCalledTimes(1);
     expect(clocks[0]?.status).toBe("done");
     expect(clocks[0]?.sendStatus).toBe("sent");
+  });
+
+  it("fires Lucy-actor Job clocks without suppress (no highRisk stamp)", async () => {
+    itemFindUnique.mockResolvedValue({
+      data: {
+        __job: {
+          kind: "nudge",
+          askerId: ACTOR,
+          askerName: "טל",
+          subjectId: OTHER,
+          subjectName: "עמית",
+          ask: "מה שלומך?",
+          state: "open",
+          createdAt: "2026-11-15T09:00:00.000Z",
+        },
+      },
+    });
+    clocks = [
+      clock({
+        actorId: LUCY,
+        ownerId: OTHER,
+        pingIds: [OTHER],
+        highRiskAuthorizedAt: null,
+        messageText: "טל מחכה לתשובה: מה שלומך?",
+        itemLabel: "להזכיר לעמית מה שלומך?",
+      }),
+    ];
+    await fireDueReminders(new Date(DUE.getTime() + 60_000));
+    expect(sendWhatsAppButtons).toHaveBeenCalledTimes(1);
+    const sentText = String(sendWhatsAppButtons.mock.calls[0][1] ?? "");
+    expect(sentText).toContain("טל מחכה לתשובה");
+    expect(sentText).not.toMatch(/מאת לוסי/);
+    expect(clocks[0]?.sendStatus).toBe("sent");
+    expect(reminderCreate).not.toHaveBeenCalled();
   });
 });
 

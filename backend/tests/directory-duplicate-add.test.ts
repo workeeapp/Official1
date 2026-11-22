@@ -43,6 +43,25 @@ describe("applyDirectoryActions duplicate phone on add", () => {
     contactBookFindUnique.mockResolvedValue(null);
   });
 
+  it("F2 fall-through: refuses phone add when authorizePhoneFields is omitted", async () => {
+    contactFindUnique.mockResolvedValue(null);
+    const result = await applyDirectoryActions({
+      userId: "u1",
+      ownerEmployeeId: "e1",
+      actions: [
+        {
+          action: "add",
+          name: "האקר",
+          phone: "0509999999",
+          contactId: "",
+          targets: [],
+        },
+      ],
+    });
+    expect(result.saved).toEqual([]);
+    expect(contactCreate).not.toHaveBeenCalled();
+  });
+
   it("returns alreadyExisting and does not create/overwrite when phone exists", async () => {
     contactFindUnique.mockResolvedValue({
       id: "c-existing",
@@ -56,6 +75,7 @@ describe("applyDirectoryActions duplicate phone on add", () => {
     const result = await applyDirectoryActions({
       userId: "u1",
       ownerEmployeeId: "e1",
+      authorizePhoneFields: true,
       actions: [
         {
           action: "add",
@@ -96,6 +116,7 @@ describe("applyDirectoryActions duplicate phone on add", () => {
     const result = await applyDirectoryActions({
       userId: "u1",
       ownerEmployeeId: "e1",
+      authorizePhoneFields: true,
       actions: [
         {
           action: "add",

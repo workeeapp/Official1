@@ -418,6 +418,8 @@ export async function applyModelMetadataTurn(input: {
       ownerEmployeeId: account.employeeId,
       actions: metadata.directory ?? [],
       employees: humans,
+      // Eval harness applies model ACTION directly (no Gate) — authorize phones.
+      authorizePhoneFields: true,
     });
   }
 

@@ -1,5 +1,7 @@
 # M1–M3 implementation plan (locked)
 
+**Later (P0 / P2a / P1):** `lucy-high-risk-gate-p0-p1-status.md` — clarifyBind not active on WA/UI; `gateInstructionText` is channel-cleaned EIS not provenance; FP-2/FP-3 are known UX limits; PI-2 and PI-7 remain open.
+
 **Status:** Implementation in progress — **stages 1–5 landed**  
 **Spec:** `lucy-prompt-injection-m1m3-closure.md` (2026-11-18 final+)  
 **S8 decision:** **Option A** (2026-11-18)

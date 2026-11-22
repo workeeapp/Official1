@@ -790,7 +790,8 @@ export async function createScheduledJobsFromRelays(input: {
         data: {
           userId: input.userId,
           ownerId: delivery.subjectId,
-          actorId: input.asker.id,
+          // Lucy-operated deferred Job clock — not a human foreign P-Out.
+          actorId: input.digitalEmployeeId,
           itemKey: normalizeKey(label),
           itemLabel: label.slice(0, 255),
           listType: "tasks",
@@ -1369,7 +1370,9 @@ async function openNudge(input: {
         } satisfies JobMeta,
       }),
       scope: "shared",
-      addedById: input.actorId,
+      // Asker stays on the row; Reminder.actorId is Lucy so fire-time foreign
+      // suppress does not treat this product clock as a user P-Out.
+      addedById: input.job.meta.askerId,
       visibleTo: toJsonValue([input.job.meta.askerId, input.job.meta.subjectId]),
     },
   });
@@ -1380,7 +1383,7 @@ async function openNudge(input: {
     data: {
       userId: input.userId,
       ownerId: input.job.meta.subjectId,
-      actorId: input.actorId,
+      actorId: input.digitalEmployeeId,
       itemKey: normalizeKey(label),
       itemLabel: label.slice(0, 255),
       listType: "tasks",
