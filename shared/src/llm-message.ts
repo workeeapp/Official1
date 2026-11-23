@@ -744,6 +744,75 @@ export interface LlmMetadata {
    * Engine validates audience/digital/quota; model must not rewrite tip copy.
    */
   tips?: string[];
+  /**
+   * Member quiet-turn offer. The preview is her sentence; the engine appends it
+   * only when the tip slot is free. accept ties a later apply to that offer.
+   */
+  opportunity?: LlmOpportunity | null;
+}
+
+export const OPPORTUNITY_CAPABILITIES = [
+  "lists",
+  "reminders",
+  "filing",
+  "share",
+] as const;
+
+export type OpportunityCapability = (typeof OPPORTUNITY_CAPABILITIES)[number];
+
+/** One proactive offer, or an accept of a specific earlier offer. */
+export interface LlmOpportunity {
+  capability?: OpportunityCapability;
+  /** Model-written preview. Not catalog copy. Omitted on accept. */
+  preview?: string;
+  /**
+   * Intended target: an existing item id, or the title of a row not saved yet.
+   * Acceptance still requires the apply result to confirm this target.
+   */
+  subject?: string;
+  /** Id of the offer the speaker is accepting. */
+  accept?: string;
+}
+
+const OPPORTUNITY_ACCEPT_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** metadata.opportunity — capability preview, or accept of one prior offer. */
+export function parseOpportunity(
+  meta: Record<string, unknown>,
+): LlmOpportunity | null {
+  const raw = meta.opportunity;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const capabilityRaw =
+    typeof record.capability === "string" ? record.capability.trim() : "";
+  const capability = (OPPORTUNITY_CAPABILITIES as readonly string[]).includes(
+    capabilityRaw,
+  )
+    ? (capabilityRaw as OpportunityCapability)
+    : undefined;
+  const acceptRaw =
+    typeof record.accept === "string" ? record.accept.trim() : "";
+  const accept = OPPORTUNITY_ACCEPT_ID.test(acceptRaw)
+    ? acceptRaw.toLowerCase()
+    : undefined;
+  const previewRaw =
+    typeof record.preview === "string" ? record.preview.trim() : "";
+  const preview = previewRaw ? previewRaw.slice(0, 400) : undefined;
+  const subjectRaw =
+    typeof record.subject === "string" ? record.subject.trim() : "";
+  const subject = subjectRaw ? subjectRaw.slice(0, 200) : undefined;
+  if (!capability && !accept) {
+    return null;
+  }
+  return {
+    ...(capability ? { capability } : {}),
+    ...(preview ? { preview } : {}),
+    ...(subject ? { subject } : {}),
+    ...(accept ? { accept } : {}),
+  };
 }
 
 export type LlmWeatherAspect =
@@ -1578,6 +1647,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
   const liveSelectParsed = parseLiveSelect(meta);
   const tips = parseTipKeys(meta);
   const awaiting = parseAwaitingClarify(meta);
+  const opportunity = parseOpportunity(meta);
   return {
     messages,
     reminders,
@@ -1655,6 +1725,7 @@ export function parseLlmMetadata(metadata: unknown): LlmMetadata {
       ? { liveSelectMalformed: true }
       : {}),
     ...(tips.length > 0 ? { tips } : {}),
+    ...(opportunity ? { opportunity } : {}),
   };
 }
 
