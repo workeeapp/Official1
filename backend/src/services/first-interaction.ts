@@ -3,7 +3,8 @@
  *
  * Invite (`fi_invite_act`): direct present of the invite item — no Offer/Accept
  * to show. Value only after a meaningful user mutate (not mere display).
- * Cold / Member: soft Act offer unchanged.
+ * Cold / Member: engine no longer injects a fixed soft Act (חלב / רופא).
+ * First Value is model-led via Stage A + live facts; builders remain for tests.
  */
 
 import type { LlmReplyButton, LlmSpokenBubble } from "@workee/shared";
@@ -259,24 +260,20 @@ export function resolveFiPhase(input: {
   }
 
   if (input.isProspect) {
-    const candidate = buildColdFiCandidate({ employeeId: input.employeeId });
-    if (input.suppressKeys.has(candidate.opportunityKey)) {
+    const key = fiColdOpportunityKey(input.employeeId);
+    if (input.suppressKeys.has(key) || input.hasPersonalRecords) {
       return { phase: "done", candidate: null };
     }
-    if (input.hasPersonalRecords) {
-      return { phase: "done", candidate: null };
-    }
-    return { phase: "cold_first_try", candidate };
+    // Model-led First Value — do not inject fixed «חלב» soft offer.
+    return { phase: "cold_first_try", candidate: null };
   }
 
-  const candidate = buildMemberFiCandidate({ employeeId: input.employeeId });
-  if (input.suppressKeys.has(candidate.opportunityKey)) {
+  const key = fiMemberOpportunityKey(input.employeeId);
+  if (input.suppressKeys.has(key) || input.hasPersonalRecords) {
     return { phase: "done", candidate: null };
   }
-  if (input.hasPersonalRecords) {
-    return { phase: "done", candidate: null };
-  }
-  return { phase: "member_first_save", candidate };
+  // Model-led First Value — do not inject fixed «להתקשר לרופא» soft offer.
+  return { phase: "member_first_save", candidate: null };
 }
 
 /**

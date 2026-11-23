@@ -82,7 +82,7 @@ describe("First Interaction Stage 1 — phase + Value", () => {
     expect(resolved.status).toBe("unavailable");
   });
 
-  it("cold prospect → fi_first_try without capability list", () => {
+  it("cold prospect → cold_first_try phase but no fixed soft candidate", () => {
     const { phase, candidate } = resolveFiPhase({
       isProspect: true,
       pendingInvite: null,
@@ -91,12 +91,10 @@ describe("First Interaction Stage 1 — phase + Value", () => {
       employeeId: EMP,
     });
     expect(phase).toBe("cold_first_try");
-    expect(candidate?.kind).toBe("fi_first_try");
-    expect(candidate?.opportunityKey).toBe(fiColdOpportunityKey(EMP));
-    expect(candidate?.text).not.toMatch(/משימות.*קניות.*תזכורות/);
+    expect(candidate).toBeNull();
   });
 
-  it("new member → fi_member_first_save", () => {
+  it("new member → member_first_save phase but no fixed soft candidate", () => {
     const { phase, candidate } = resolveFiPhase({
       isProspect: false,
       pendingInvite: null,
@@ -105,8 +103,7 @@ describe("First Interaction Stage 1 — phase + Value", () => {
       employeeId: EMP,
     });
     expect(phase).toBe("member_first_save");
-    expect(candidate?.kind).toBe("fi_member_first_save");
-    expect(candidate?.opportunityKey).toBe(fiMemberOpportunityKey(EMP));
+    expect(candidate).toBeNull();
   });
 
   it("returning user with ESD records → done (no FI)", () => {

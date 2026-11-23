@@ -177,7 +177,8 @@ describe("WhatsApp independent identity (eval-db)", () => {
       });
       expect(instructions).not.toContain("GUEST MODE");
       expect(instructions).toContain("OPEN JOBS RULES");
-      expect(instructions).toContain("FULL catalog");
+      expect(instructions).toContain("VALUE DISCOVERY");
+      expect(instructions).toContain("FORBIDDEN on these asks: FULL catalog");
 
       const metadata = emptyLlmMetadata();
       metadata.lists.push({
@@ -440,7 +441,8 @@ describe("WhatsApp independent identity (eval-db)", () => {
         consultFrom: "",
       });
       expect(guestInstructions).toBe(memberInstructions);
-      expect(guestInstructions).toContain("FULL catalog");
+      expect(guestInstructions).toContain("VALUE DISCOVERY");
+      expect(guestInstructions).toContain("FORBIDDEN on these asks: FULL catalog");
       expect(guestInstructions).not.toContain("GUEST MODE");
       expect(guestInstructions).not.toContain("לוסי-אורח");
     },
@@ -930,7 +932,8 @@ describe("WhatsApp independent identity (eval-db)", () => {
       expect(seen).toHaveLength(1);
       const turn = seen[0]!;
       expect(turn.instructions).toContain("OPEN JOBS RULES");
-      expect(turn.instructions).toContain("FULL catalog");
+      expect(turn.instructions).toContain("VALUE DISCOVERY");
+      expect(turn.instructions).toContain("FORBIDDEN on these asks: FULL catalog");
       expect(turn.instructions).not.toContain("GUEST MODE");
       expect(turn.liveFacts).toContain("טל");
       expect(turn.liveFacts).toContain(summary);

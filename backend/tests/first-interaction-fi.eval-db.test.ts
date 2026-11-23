@@ -19,7 +19,6 @@ import { assertApprovedEvalDatabaseUrl } from "../src/eval/studio-db-guard.js";
 import { sendChatMessage } from "../src/services/chat.service.js";
 import {
   FI_COLD_SHOP_ITEM,
-  FI_MEMBER_TASK_TITLE,
   fiColdOpportunityKey,
   fiInviteOpportunityKey,
   fiMemberOpportunityKey,
@@ -331,7 +330,7 @@ describe("First Interaction Stage 1 (eval-db production path)", () => {
   );
 
   it(
-    "cold prospect gets fi_first_try; failed act keeps offer without Value",
+    "cold prospect: no fixed soft FI; shopping still Join-gates without FI Value row",
     async () => {
       const { account, digitalEmployeeId } = await openProspectEmpty();
       stubLlm({
@@ -344,15 +343,15 @@ describe("First Interaction Stage 1 (eval-db production path)", () => {
         digitalEmployeeId,
         message: "היי",
       });
-      expect(replyHasFiOffer(offerTurn.reply)).toBe(true);
+      expect(replyHasFiOffer(offerTurn.reply)).toBe(false);
+      expect(offerTurn.reply).not.toMatch(/אוסיף חלב|נתחיל בקניות/);
       const key = fiColdOpportunityKey(account.employeeId);
-      const offered = await prisma.interactionOpportunity.findFirst({
-        where: { employeeId: account.employeeId, opportunityKey: key },
-      });
-      expect(offered?.status).toBe("offered");
-      expect(offered?.kind).toBe("fi_first_try");
+      expect(
+        await prisma.interactionOpportunity.findFirst({
+          where: { employeeId: account.employeeId, opportunityKey: key },
+        }),
+      ).toBeNull();
 
-      // Accept command → durable write gated → Join CTA; no Value.
       resetPieArbitrationStateForTests();
       stubLlm({
         responses: [{ text: "אוסיף חלב.", buttons: [] }],
@@ -373,16 +372,11 @@ describe("First Interaction Stage 1 (eval-db production path)", () => {
         message: `תוסיפי ${FI_COLD_SHOP_ITEM} לקניות`,
       });
       expect(joinCommandFromReply(acceptTurn.reply)).toBeTruthy();
-      const afterFail = await prisma.interactionOpportunity.findFirst({
-        where: { employeeId: account.employeeId, opportunityKey: key },
-      });
-      expect(afterFail?.status).toBe("offered");
-      expect(afterFail?.valueAt).toBeNull();
     },
     30_000,
   );
 
-  it("new member gets fi_member_first_save; successful act sets Value", async () => {
+  it("new member: no fixed soft FI; natural task save still persists", async () => {
     const { account, digitalEmployeeId } = await openMemberEmpty();
     stubLlm({
       responses: [{ text: "היי נועה.", buttons: [] }],
@@ -394,13 +388,14 @@ describe("First Interaction Stage 1 (eval-db production path)", () => {
       digitalEmployeeId,
       message: "היי",
     });
-    expect(replyHasFiOffer(offerTurn.reply)).toBe(true);
+    expect(replyHasFiOffer(offerTurn.reply)).toBe(false);
+    expect(offerTurn.reply).not.toMatch(/להתקשר לרופא|משימה ראשונה/);
     const key = fiMemberOpportunityKey(account.employeeId);
     expect(
       await prisma.interactionOpportunity.findFirst({
-        where: { opportunityKey: key, status: "offered", kind: "fi_member_first_save" },
+        where: { opportunityKey: key, kind: "fi_member_first_save" },
       }),
-    ).toBeTruthy();
+    ).toBeNull();
 
     resetPieArbitrationStateForTests();
     stubLlm({
@@ -410,7 +405,7 @@ describe("First Interaction Stage 1 (eval-db production path)", () => {
           {
             action: "add",
             list_type: "tasks",
-            items: [{ "שם משימה": FI_MEMBER_TASK_TITLE }],
+            items: [{ "שם משימה": "לקנות מתנה" }],
           },
         ],
       },
@@ -419,13 +414,8 @@ describe("First Interaction Stage 1 (eval-db production path)", () => {
       userId: account.userId,
       employeeId: account.employeeId,
       digitalEmployeeId,
-      message: `תוסיפי משימה: ${FI_MEMBER_TASK_TITLE}`,
+      message: "תוסיפי משימה לקנות מתנה",
     });
-    const valued = await prisma.interactionOpportunity.findFirst({
-      where: { opportunityKey: key },
-    });
-    expect(valued?.status).toBe("accepted");
-    expect(valued?.valueAt).toBeTruthy();
     const task = await prisma.employeeListItem.findFirst({
       where: {
         list: { employeeId: account.employeeId, listType: "tasks" },

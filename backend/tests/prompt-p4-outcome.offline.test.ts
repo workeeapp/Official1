@@ -14,12 +14,14 @@ const config = (JSON.parse(readFileSync(resolve(process.cwd(), "..", "LLM.config
 const chat = readFileSync(resolve(process.cwd(), "src/services/chat.service.ts"), "utf8");
 
 describe("P4: outcome over form", () => {
-  it("capabilities: a clear picture fitted to the ask (whole range vs one area), not always the full catalog", () => {
+  it("capabilities: discovery-first, not an automatic full catalog", () => {
     expect(config).not.toContain("When asked what you can do: full catalog in Hebrew");
-    expect(config).toContain("a general ask gets the whole range, an ask about one area gets that area");
-    // Unchanged requirements.
-    expect(config).toContain("Lead with managing any list. Empty actions.");
-    expect(config).toContain("Do not answer capabilities from EMPLOYEE_SAVED_DATA");
+    expect(config).toContain("VALUE DISCOVERY");
+    expect(config).toContain("2–3 concrete everyday examples");
+    expect(config).toContain("FORBIDDEN on these discovery asks: a long feature catalog");
+    expect(config).toContain("Empty actions.");
+    // Full overview only when they explicitly ask for it.
+    expect(config).toContain('explicitly ask for the full list');
   });
 
   it("too-fast repeat: no actions + the 5-minute minimum, no prescribed sentence", () => {

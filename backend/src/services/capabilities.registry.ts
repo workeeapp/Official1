@@ -91,18 +91,32 @@ function forAudience(audience: CapabilityAudience): CapabilityDef[] {
   );
 }
 
-/** Numbered Hebrew catalog for member Lucy «מה את יודעת לעשות». */
+/** Numbered Hebrew catalog — only for an explicit «הכול» / full-list ask. */
 export function formatMemberCapabilityCatalogHe(): string {
   const rows = forAudience("member");
   const body = rows
     .map((row, i) => `(${i + 1}) ${row.labelHe}`)
     .join("; ");
-  return `Lead «${CAPABILITY_LEAD_HE}» then ALL: ${body}. Saved data does not limit that answer. No git digests / schema jargon.`;
+  return `Lead «${CAPABILITY_LEAD_HE}» then ALL: ${body}. Saved data does not invent extra capabilities. No git digests / schema jargon.`;
 }
 
-/** Compact English instruction line embedding the Hebrew catalog. */
+/**
+ * Default = VALUE DISCOVERY (short everyday examples + one question).
+ * FULL catalog only when they explicitly ask for every capability / «הכול».
+ * Registry body stays as a non-spoken support bound (do not invent beyond it).
+ */
 export function formatMemberCapabilityPromptRule(): string {
-  return `If asked what you can do / מה את יודעת לעשות: FULL catalog (same for every employee; not from saved data). ${formatMemberCapabilityCatalogHe()}`;
+  const rows = forAudience("member");
+  const body = rows
+    .map((row, i) => `(${i + 1}) ${row.labelHe}`)
+    .join("; ");
+  return [
+    "CAPABILITIES ASK / מה את יודעת לעשות / מה אפשר לעשות / איך להשתמש / מה עוד / forgetful «הכול בראש»:",
+    "DEFAULT = VALUE DISCOVERY — short Hebrew, 2–3 concrete everyday examples from remember / save-find / manage (fit the utterance + THIS turn's live facts; do NOT mechanically dump all three pillars), then ONE natural question. Empty actions.",
+    "FORBIDDEN on these asks: FULL catalog / numbered brochure / listing live tools (weather, markets, Mashov, transit, flights, Waze, handoff…) unless they explicitly asked for הכול / every capability / the full list.",
+    `Only on that explicit full-list ask: ${formatMemberCapabilityCatalogHe()}`,
+    `Supported surface (internal bound — never invent beyond these; do NOT recite on discovery): ${body}.`,
+  ].join(" ");
 }
 
 export function formatGuestCapabilityPromptRule(): string {
