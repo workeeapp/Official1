@@ -57,6 +57,7 @@ import {
   formatTeamSchedules,
   getEmployeeRecordSnapshot,
   getTeamSchedules,
+  hasEmployeeRecords,
   listOverdueTasksForSpeaker,
   listStaleUndatedTasksForSpeaker,
   loadFilingOwners,
@@ -112,6 +113,18 @@ import {
   stripSoftYesNoOfferBubbles,
 } from "./post-save-reminder-offer.js";
 import {
+  bubblesHaveFiInvitePresent,
+  bubblesHaveFiOffer,
+  fiActSucceeded,
+  injectFiInviteDirectPresentBubble,
+  injectFiOfferBubble,
+  isFiOpportunityKind,
+  resolveFiPhase,
+  resolveInviteFiDirectPresent,
+  type FiCandidate,
+  type FiInviteDirectPresent,
+} from "./first-interaction.js";
+import {
   applyPieReminderOfferIfChosen,
   bubblesHaveConsentCta,
   bubblesHaveRaise,
@@ -130,16 +143,19 @@ import {
   applyExplicitScopedSuppress,
   consentOpportunityKey,
   expireOpportunityById,
+  findOpenFiOffer,
   findOpenReminderOffer,
   isExplicitScopedSuppressUtterance,
   isLiftScopedSuppressUtterance,
   liftExplicitScopedSuppress,
+  loadFiInviteEngagement,
   loadPieStateForTurn,
   raiseOpportunityKey,
   recordOpportunityOffered,
   reminderOfferOpportunityKey,
   resolveOpportunityAccepted,
   resolveOpportunityDeclined,
+  resolveOpportunityValue,
   setInitiativePreference,
   softOfferFallbackKey,
   tipOpportunityKey,
@@ -169,12 +185,14 @@ import {
   ensureStaleUndatedTasksJob,
   formatOpenJobsContext,
   formatOpenJobsWaitingDump,
+  hasRaisableProgressCandidate,
   listOpenJobsForViewer,
   markOverdueJobsOffered,
   markStaleUndatedJobsOffered,
   meetingListsForAnswers,
   sweepJobNudgesForRemovedItems,
 } from "./jobs.service.js";
+import { formatActiveThreadFacts } from "./active-thread-facts.js";
 import { publishChatEvent } from "./chat-events.service.js";
 import {
   getLlmClient,
@@ -225,6 +243,7 @@ import {
   createWhatsAppInvite,
   findPendingInviteForGuest,
   findPendingMessageInviteByPhone,
+  formatInviteFollowUpContext,
   formatInviteOpeningContext,
   formatPendingInviteContext,
   saveContactReplyButton,
@@ -2440,10 +2459,20 @@ export interface TurnContextParts {
   openJobs: Parameters<typeof formatOpenJobsContext>[0];
   activeMissionsBlock: string;
   lastNumberedDump: Parameters<typeof formatLastNumberedDumpContext>[0];
+  /**
+   * W2: compact live Active Thread (OPEN_JOBS / dump). Empty when Invite FI
+   * engagement owns the follow-up slot or nothing is open.
+   */
+  activeThreadFacts?: string;
   pendingAttachments: Parameters<typeof formatPendingAttachmentsContext>[0];
   pendingLocation: Parameters<typeof formatPendingLocationContext>[0];
   lastLiveLocation: Parameters<typeof formatLastLiveLocationContext>[0];
   pendingInvite: Parameters<typeof formatPendingInviteContext>[0] | null;
+  /**
+   * After FI invite present: follow_up keeps facts without re-opening.
+   * Default / omit = first exposure opening.
+   */
+  inviteContextMode?: "first" | "follow_up";
   /** Pending share/assign invitations for this phone. Empty for guests. */
   collabInvites?: string;
   /**
@@ -2490,6 +2519,7 @@ export function composeTurnContext(parts: TurnContextParts): string {
     guest ? "" : formatRecentOutboundContext(parts.recentOutbound),
     guest ? "" : formatOpenJobsContext(parts.openJobs, parts.viewerId),
     guest ? "" : parts.activeMissionsBlock,
+    guest ? "" : (parts.activeThreadFacts?.trim() ?? ""),
     guest ? "" : formatLastNumberedDumpContext(parts.lastNumberedDump),
     guest || parts.consultFrom
       ? ""
@@ -2497,7 +2527,9 @@ export function composeTurnContext(parts: TurnContextParts): string {
     guest ? "" : formatPendingLocationContext(parts.pendingLocation),
     guest ? "" : formatLastLiveLocationContext(parts.lastLiveLocation),
     parts.pendingInvite
-      ? formatInviteOpeningContext(parts.pendingInvite)
+      ? parts.inviteContextMode === "follow_up"
+        ? formatInviteFollowUpContext(parts.pendingInvite)
+        : formatInviteOpeningContext(parts.pendingInvite)
       : "",
     parts.prospectGoalsBrief?.trim() ?? "",
     parts.collabInvites ?? "",
@@ -2820,10 +2852,27 @@ export async function sendChatMessage(input: {
   // Invite Opening Context is Prospect first-exposure only — never for Members.
   const pendingInviteForTurn =
     recipientIsProspect && input.pendingInvite ? input.pendingInvite : null;
+  const inviteEngagement =
+    pendingInviteForTurn && !guestSpeaker && !consultFrom
+      ? ((await withoutFailingTurn("fi_invite_engagement_failed", () =>
+          loadFiInviteEngagement({
+            scope: {
+              employeeId: employee.id,
+              digitalEmployeeId: digital.id,
+            },
+            inviteId: pendingInviteForTurn.inviteId,
+          }),
+        )) ?? "none")
+      : "none";
+  const inviteFollowUp =
+    inviteEngagement === "in_progress" || inviteEngagement === "valued";
+  const inviteEngagementActive = inviteEngagement === "in_progress";
   const presentedCollab: PresentedCollabInvite[] = guestSpeaker
     ? []
     : await loadPresentedCollabInvites(employee.phone);
-  const collabInvites = formatCollabInviteContext(presentedCollab);
+  const collabInvites = formatCollabInviteContext(presentedCollab, {
+    mode: inviteFollowUp ? "follow_up" : "first",
+  });
   const prospectGoalsBrief = shouldInjectProspectGoalsBrief({
     isProspect: recipientIsProspect,
   })
@@ -2831,6 +2880,16 @@ export async function sendChatMessage(input: {
     : "";
   // One wall clock for this turn: SESSION_CLOCK facts + past one-off apply.
   const turnNow = new Date();
+  const activeThreadFacts = guestSpeaker
+    ? ""
+    : formatActiveThreadFacts({
+        viewerId: input.employeeId,
+        openJobs,
+        inviteEngagement,
+        speakerSnapshot,
+        lastNumberedDump,
+        now: turnNow,
+      });
   const context = composeTurnContext({
     guestSpeaker,
     consultFrom: Boolean(consultFrom),
@@ -2845,10 +2904,12 @@ export async function sendChatMessage(input: {
     openJobs,
     activeMissionsBlock,
     lastNumberedDump,
+    activeThreadFacts,
     pendingAttachments,
     pendingLocation: guestSpeaker ? null : getPendingLocation(input.employeeId),
     lastLiveLocation: lastLiveLocationCtx,
     pendingInvite: pendingInviteForTurn,
+    inviteContextMode: inviteFollowUp ? "follow_up" : "first",
     prospectGoalsBrief,
     collabInvites,
     tipsContext,
@@ -5093,6 +5154,8 @@ export async function sendChatMessage(input: {
     // Never utterance-parse dump intent — ACTION fields only.
     let turnLastNumberedDump: LastNumberedDumpLine[] = [];
     let turnLastLiveLocation: LastLiveLocation | undefined;
+    /** Live dump replaced spoken reply this turn (FI invite Value evidence). */
+    let showDumpReplaced = false;
     /** ITEM DUMP rows with files → engine sends them (model may omit send_attachments). */
     let itemDumpAttachmentIds: string[] = [];
     /**
@@ -5273,6 +5336,7 @@ export async function sendChatMessage(input: {
         turnLastNumberedDump = lines;
         if (text) {
           workingReply = setEngineResponse(workingReply, text);
+          showDumpReplaced = true;
           const resolved = resolveShowDumpKind(showDumpKind);
           if (itemDumpRequested && validIds.length > 0) {
             itemDumpAttachmentIds = collectAttachmentIdsForDumpRows(
@@ -5534,6 +5598,7 @@ export async function sendChatMessage(input: {
               workingReply,
               parts.join("\n\n"),
             );
+            showDumpReplaced = true;
             if (
               filingDumpCount === 1 &&
               soleFilingSnapshot &&
@@ -6513,6 +6578,24 @@ export async function sendChatMessage(input: {
             }),
           );
         }
+      } else if (inboundUserText === "לא") {
+        // FI soft Decline — Keep offered until Value; לא closes without Value.
+        const openFi = await withoutFailingTurn("pie_open_fi_lookup_failed", () =>
+          findOpenFiOffer({
+            scope: pieScope,
+            conversationId: conversation.id,
+          }),
+        );
+        if (openFi && isFiOpportunityKind(openFi.kind)) {
+          await withoutFailingTurn("pie_fi_decline_failed", () =>
+            resolveOpportunityDeclined({
+              scope: pieScope,
+              opportunityKey: openFi.opportunityKey,
+              opportunityId: openFi.id,
+              kind: openFi.kind,
+            }),
+          );
+        }
       }
     }
 
@@ -6631,6 +6714,36 @@ export async function sendChatMessage(input: {
         bubbles: pieBubbles,
       });
 
+    const fiPhase = resolveFiPhase({
+      isProspect: recipientIsProspect,
+      guestSpeaker,
+      pendingInvite: pendingInviteForTurn,
+      hasPersonalRecords: hasEmployeeRecords(speakerSnapshot),
+      suppressKeys: pieState.suppressKeys,
+      employeeId: employee.id,
+    });
+    // Soft FI only for cold/member. Invite uses direct present (no show Offer).
+    const fiCandidate: FiCandidate | null =
+      fiPhase.phase === "invite_act" ? null : fiPhase.candidate;
+
+    let inviteDirectPresent: FiInviteDirectPresent | null = null;
+    if (
+      fiPhase.phase === "invite_act" &&
+      pendingInviteForTurn &&
+      !pieState.suppressKeys.has(
+        `fi_invite_act:${pendingInviteForTurn.inviteId}`,
+      )
+    ) {
+      const resolved = resolveInviteFiDirectPresent({
+        invite: pendingInviteForTurn,
+        collabInvites: presentedCollab,
+      });
+      if (resolved.status === "present") {
+        inviteDirectPresent = resolved.present;
+      }
+      // unavailable → no Offer fallback (would reintroduce the redundant show Ask).
+    }
+
     const pieDecision = decidePieArbitration({
       conversationId: conversation.id,
       inboundTurnCount: turnRef,
@@ -6644,6 +6757,20 @@ export async function sendChatMessage(input: {
         prospectAssignJoinGated ||
         prospectCircuitBreakerTripped,
       tipCandidateAvailable: true,
+      fiCandidate: fiCandidate
+        ? {
+            kind: fiCandidate.kind,
+            opportunityKey: fiCandidate.opportunityKey,
+          }
+        : null,
+      inviteDirectPresent: inviteDirectPresent
+        ? { opportunityKey: inviteDirectPresent.opportunityKey }
+        : null,
+      inviteEngagementActive,
+      // W1: raisable OPEN_JOBS (incl. overdue/stale) hold tips like open FI.
+      progressEngagementActive:
+        inviteEngagementActive ||
+        hasRaisableProgressCandidate(openJobs, employee.id, turnNow),
       preferenceMode: pieState.preference.mode,
       suppressKeys: pieState.suppressKeys,
       reminderOpportunityKey,
@@ -6688,6 +6815,80 @@ export async function sendChatMessage(input: {
         void before;
       }
       // created:false or record fail → no inject
+    }
+
+    // Invite FI: direct present (item + act taps). Not Value — user act later is.
+    let fiInvitePresented = false;
+    if (
+      pieDecision.injectInviteDirectPresent &&
+      inviteDirectPresent
+    ) {
+      let recorded: { id: string; created: boolean } | null = null;
+      try {
+        recorded = await recordOpportunityOffered({
+          scope: pieScope,
+          opportunityKey: inviteDirectPresent.opportunityKey,
+          kind: "fi_invite_act",
+          entityRef: inviteDirectPresent.entityRef,
+          conversationId: conversation.id,
+          turnRef,
+        });
+      } catch (error) {
+        recordWhatsAppEvent(
+          "pie_state_record_failed",
+          error instanceof Error ? error.message : "fi_invite_present_record",
+        );
+        recorded = null;
+      }
+      if (recorded?.created === true) {
+        pieBubbles = injectFiInviteDirectPresentBubble(
+          pieBubbles,
+          inviteDirectPresent,
+        );
+        fiInvitePresented = bubblesHaveFiInvitePresent(pieBubbles);
+        if (!fiInvitePresented) {
+          await withoutFailingTurn("pie_offer_orphan_expired", () =>
+            expireOpportunityById({ opportunityId: recorded.id }),
+          );
+        }
+      }
+    }
+
+    // Soft FI (cold/member): record-before-emit; created:false → no inject (H5).
+    let fiShown = false;
+    if (
+      pieDecision.injectFirstInteraction &&
+      fiCandidate &&
+      isFiOpportunityKind(pieDecision.chosenKind ?? "")
+    ) {
+      let recorded: { id: string; created: boolean } | null = null;
+      try {
+        recorded = await recordOpportunityOffered({
+          scope: pieScope,
+          opportunityKey: fiCandidate.opportunityKey,
+          kind: fiCandidate.kind,
+          entityRef: fiCandidate.entityRef,
+          conversationId: conversation.id,
+          turnRef,
+        });
+      } catch (error) {
+        recordWhatsAppEvent(
+          "pie_state_record_failed",
+          error instanceof Error ? error.message : "fi_record",
+        );
+        recorded = null;
+      }
+      if (recorded?.created === true) {
+        const before = pieBubbles;
+        pieBubbles = injectFiOfferBubble(pieBubbles, fiCandidate);
+        fiShown = bubblesHaveFiOffer(pieBubbles);
+        if (!fiShown) {
+          await withoutFailingTurn("pie_offer_orphan_expired", () =>
+            expireOpportunityById({ opportunityId: recorded.id }),
+          );
+        }
+        void before;
+      }
     }
 
     // Raise / Consent: fail-open UI; await record; never strip CTA for idempotency (H5).
@@ -6813,14 +7014,52 @@ export async function sendChatMessage(input: {
     const consentShownFinal =
       Boolean(highRiskOffer) || bubblesHaveConsentCta(finalBubbles);
     const tipShownFinal = tipTextsForReply.length > 0;
+    const fiShownFinal =
+      fiShown ||
+      fiInvitePresented ||
+      bubblesHaveFiOffer(finalBubbles) ||
+      bubblesHaveFiInvitePresent(finalBubbles);
     const initiativeShownInFinalReply =
       softShownFinal ||
       raiseShownFinal ||
       consentShownFinal ||
       tipShownFinal ||
-      reminderShown;
+      reminderShown ||
+      fiShownFinal;
     if (initiativeShownInFinalReply) {
       notePieInitiativeEmitted(conversation.id, turnRef);
+    }
+
+    // FI Value: meaningful successful act only.
+    // Invite direct present / dump is NOT Value (user must act on the item).
+    // Failed / Join-gated applies leave the opportunity offered (not lost).
+    if (!fiShown && !fiInvitePresented) {
+      // Value attribution: any open FI for this speaker↔worker (not conversation-bound).
+      const openFiForValue = await withoutFailingTurn(
+        "pie_open_fi_value_lookup_failed",
+        () =>
+          findOpenFiOffer({
+            scope: pieScope,
+          }),
+      );
+      if (openFiForValue && isFiOpportunityKind(openFiForValue.kind)) {
+        if (
+          fiActSucceeded({
+            kind: openFiForValue.kind,
+            listMutations,
+            reminderSavedCount: reminderResult.saved.length,
+            dumpReplaced: showDumpReplaced,
+          })
+        ) {
+          await withoutFailingTurn("pie_fi_value_failed", () =>
+            resolveOpportunityValue({
+              scope: pieScope,
+              opportunityKey: openFiForValue.opportunityKey,
+              opportunityId: openFiForValue.id,
+            }),
+          );
+        }
+      }
     }
     // Expose tip texts via tipTurn for notice composition below.
     tipTurn.texts.length = 0;

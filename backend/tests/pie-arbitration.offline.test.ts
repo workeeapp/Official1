@@ -38,8 +38,21 @@ describe("PIE-1 arbitration", () => {
       tipTextHasNextStep("דרך אגב, אפשר גם לבקש מזג אוויר."),
     ).toBe(false);
     expect(
+      tipTextHasNextStep("אפשר גם לכתוב «קניתי חלב» — ואוריד את זה מהקניות."),
+    ).toBe(false);
+    expect(
       tipTextHasNextStep("רוצה שאוסיף לזה גם תזכורת?"),
     ).toBe(true);
+    expect(
+      tipTextHasNextStep(
+        "After a verified web/places/Shabbat lookup about «{search_topic}», write one short Hebrew tip: otherwise offer saving a reminder or sharing.",
+      ),
+    ).toBe(true);
+    expect(
+      tipTextHasNextStep(
+        "After a verified lookup about «{search_topic}», write one short Hebrew tip acknowledging the topic.",
+      ),
+    ).toBe(false);
   });
 
   it("consent CTA wins over reminder offer and tips", () => {
@@ -388,5 +401,229 @@ describe("PIE-1 arbitration", () => {
     });
     expect(decision.allowProspectAuto).toBe(false);
     expect(decision.chosenKind).toBeNull();
+  });
+
+  it("FI beats capability tip (Act-before-Offer)", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "היי",
+      bubbles: [{ text: "היי" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      fiCandidate: {
+        kind: "fi_first_try",
+        opportunityKey: "fi_first_try:emp-1",
+      },
+    });
+    expect(decision.chosenKind).toBe("fi_first_try");
+    expect(decision.injectFirstInteraction).toBe(true);
+    expect(decision.allowTipResolve).toBe(false);
+  });
+
+  it("invite direct present beats tips and skips soft FI Offer", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "היי",
+      bubbles: [{ text: "היי" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      fiCandidate: {
+        kind: "fi_first_try",
+        opportunityKey: "fi_first_try:emp-1",
+      },
+      inviteDirectPresent: {
+        opportunityKey: "fi_invite_act:inv-1",
+      },
+    });
+    expect(decision.chosenKind).toBe("fi_invite_act");
+    expect(decision.injectInviteDirectPresent).toBe(true);
+    expect(decision.injectFirstInteraction).toBe(false);
+    expect(decision.allowTipResolve).toBe(false);
+  });
+
+  it("consent CTA blocks invite direct present", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "שמרי",
+      bubbles: [{ text: "ok" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      consentOwnsTurn: true,
+      inviteDirectPresent: {
+        opportunityKey: "fi_invite_act:inv-1",
+      },
+    });
+    expect(decision.chosenKind).toBe("consent_cta");
+    expect(decision.injectInviteDirectPresent).toBe(false);
+  });
+
+  it("open invite engagement blocks competing tips", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 4,
+      inboundUserText: "מה בדיוק צריך לעשות?",
+      bubbles: [{ text: "שאלה" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      inviteEngagementActive: true,
+    });
+    expect(decision.allowTipResolve).toBe(false);
+    expect(decision.injectFirstInteraction).toBe(false);
+    expect(decision.reason).toBe("fi_invite_engagement_active");
+  });
+
+  it("W1: raisable job progress engagement blocks tips (not consent/reminder)", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 4,
+      inboundUserText: "היי",
+      bubbles: [{ text: "היי" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      progressEngagementActive: true,
+    });
+    expect(decision.allowTipResolve).toBe(false);
+    expect(decision.injectFirstInteraction).toBe(false);
+    expect(decision.reason).toBe("progress_engagement_active");
+  });
+
+  it("W1: progress engagement does not override consent", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "שמרי",
+      bubbles: [{ text: "ok" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      consentOwnsTurn: true,
+      progressEngagementActive: true,
+    });
+    expect(decision.chosenKind).toBe("consent_cta");
+    expect(decision.reason).toBe("consent_cta_owns_turn");
+  });
+
+  it("W1: reminder still wins over progress engagement", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "הוספתי",
+      bubbles: [{ text: "שמרתי" }],
+      reminderOfferEligible: true,
+      tipCandidateAvailable: true,
+      progressEngagementActive: true,
+    });
+    expect(decision.chosenKind).toBe("act_followup");
+    expect(decision.injectReminderOffer).toBe(true);
+  });
+
+  it("W1: no progress candidate → tips still allowed", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "היי",
+      bubbles: [{ text: "היי" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      progressEngagementActive: false,
+    });
+    expect(decision.allowTipResolve).toBe(true);
+    expect(decision.chosenKind).toBe("capability_opportunity");
+  });
+
+  it("consent CTA blocks FI", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "שמרי",
+      bubbles: [{ text: "ok" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      consentOwnsTurn: true,
+      fiCandidate: {
+        kind: "fi_first_try",
+        opportunityKey: "fi_first_try:emp-1",
+      },
+    });
+    expect(decision.chosenKind).toBe("consent_cta");
+    expect(decision.injectFirstInteraction).toBe(false);
+  });
+
+  it("Quiet preference blocks FI discovery", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "היי",
+      bubbles: [{ text: "היי" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      preferenceMode: "quiet",
+      fiCandidate: {
+        kind: "fi_member_first_save",
+        opportunityKey: "fi_member_first_save:emp-1",
+      },
+    });
+    expect(decision.chosenKind).toBeNull();
+    expect(decision.injectFirstInteraction).toBe(false);
+    expect(decision.reason).toBe("session_quiet");
+  });
+
+  it("soft Act already chosen blocks FI second initiative", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "משימה",
+      bubbles: [
+        {
+          text: POST_SAVE_REMINDER_OFFER_TEXT,
+          buttons: POST_SAVE_REMINDER_OFFER_BUTTONS,
+        },
+      ],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      fiCandidate: {
+        kind: "fi_invite_act",
+        opportunityKey: "fi_invite_act:inv-1",
+      },
+    });
+    expect(decision.chosenKind).toBe("act_followup");
+    expect(decision.injectFirstInteraction).toBe(false);
+  });
+
+  it("open Ask without buttons blocks FI", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "מחק",
+      bubbles: [{ text: "איזה פריט למחוק?" }],
+      reminderOfferEligible: false,
+      tipCandidateAvailable: true,
+      fiCandidate: {
+        kind: "fi_first_try",
+        opportunityKey: "fi_first_try:emp-1",
+      },
+    });
+    expect(decision.injectFirstInteraction).toBe(false);
+    expect(decision.reason).toBe("open_ask_owns_turn");
+  });
+
+  it("reminder act_followup still beats FI", () => {
+    const decision = decidePieArbitration({
+      conversationId: CONV,
+      inboundTurnCount: 1,
+      inboundUserText: "הוספתי",
+      bubbles: [{ text: "שמרתי" }],
+      reminderOfferEligible: true,
+      tipCandidateAvailable: true,
+      fiCandidate: {
+        kind: "fi_first_try",
+        opportunityKey: "fi_first_try:emp-1",
+      },
+    });
+    expect(decision.chosenKind).toBe("act_followup");
+    expect(decision.injectReminderOffer).toBe(true);
+    expect(decision.injectFirstInteraction).toBe(false);
   });
 });

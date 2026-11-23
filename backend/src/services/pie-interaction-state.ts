@@ -2,7 +2,8 @@
  * PIE-2 — Durable Interaction State (Opportunity + InitiativePreference).
  *
  * TipProgress stays shown-only. Accept / decline / ignore / expire / Quiet
- * preference live here. Value attribution (valueAt) is reserved for PIE-3.
+ * preference live here. Value attribution (valueAt) is used by First Interaction
+ * Stage 1 (success-only) and remains the hook for broader PIE-3.
  *
  * Explicit suppress ledger rows use entityRef = pie:explicit_suppress so
  * future Offer→Decline metrics can exclude them (including offered→declined
@@ -11,7 +12,14 @@
 
 import { randomUUID } from "node:crypto";
 import { prisma } from "../database/prisma.js";
+import {
+  fiInviteOpportunityKey,
+  isFiOpportunityKind,
+} from "./first-interaction.js";
 import type { PieOpportunityKind } from "./pie-arbitration.js";
+
+/** FI invite engagement for follow-up context + tip suppression. */
+export type FiInviteEngagement = "none" | "in_progress" | "valued";
 
 export type InitiativePreferenceMode = "quiet" | "balanced" | "proactive";
 
@@ -96,6 +104,10 @@ export function isExplicitSuppressLedgerRow(row: {
 export function declinedSuppressMs(kind: PieOpportunityKind): number {
   if (kind === "capability_opportunity") {
     return PIE_DECLINED_CAPABILITY_MS;
+  }
+  // FI declines share act_followup TTL (re-offer after cool-down).
+  if (isFiOpportunityKind(kind)) {
+    return PIE_DECLINED_ACT_FOLLOWUP_MS;
   }
   return PIE_DECLINED_ACT_FOLLOWUP_MS;
 }
@@ -227,6 +239,11 @@ export async function loadPieStateForTurn(input: {
     if (row.status !== "offered") {
       continue;
     }
+    // Invite FI stays offered across follow-up Q&A until Value / explicit decline.
+    // Auto-ignore would drop engagement mid-conversation.
+    if (row.opportunityKey.startsWith("fi_invite_act:")) {
+      continue;
+    }
     const ageMs = now.getTime() - row.offeredAt.getTime();
     const turnGap =
       row.turnRef != null
@@ -286,6 +303,9 @@ export async function resolveStaleOfferedOpportunities(input: {
   });
   const staleIds: string[] = [];
   for (const row of offered) {
+    if (row.opportunityKey.startsWith("fi_invite_act:")) {
+      continue;
+    }
     const ageMs = now.getTime() - row.offeredAt.getTime();
     const turnGap =
       row.turnRef != null
@@ -751,4 +771,127 @@ export async function findOpenReminderOffer(input: {
     return null;
   }
   return { id: row.id, opportunityKey: row.opportunityKey };
+}
+
+/**
+ * Whether invite FI was already presented (offered) or completed (valueAt).
+ * Used to switch INVITE CONTEXT to follow-up and to hold tips while in progress.
+ */
+export async function loadFiInviteEngagement(input: {
+  scope: Pick<PieStateScope, "employeeId" | "digitalEmployeeId">;
+  inviteId: string;
+}): Promise<FiInviteEngagement> {
+  const opportunityKey = fiInviteOpportunityKey(input.inviteId);
+  const row = await prisma.interactionOpportunity.findFirst({
+    where: {
+      employeeId: input.scope.employeeId,
+      digitalEmployeeId: input.scope.digitalEmployeeId,
+      opportunityKey,
+      status: { in: ["offered", "accepted"] },
+    },
+    orderBy: { offeredAt: "desc" },
+    select: { status: true, valueAt: true },
+  });
+  if (!row) {
+    return "none";
+  }
+  if (row.valueAt != null) {
+    return "valued";
+  }
+  return "in_progress";
+}
+
+export async function findOpenFiOffer(input: {
+  scope: Pick<PieStateScope, "employeeId" | "digitalEmployeeId">;
+  conversationId?: string | null;
+  opportunityKey?: string | null;
+}): Promise<{
+  id: string;
+  opportunityKey: string;
+  kind: string;
+} | null> {
+  const row = await prisma.interactionOpportunity.findFirst({
+    where: {
+      employeeId: input.scope.employeeId,
+      digitalEmployeeId: input.scope.digitalEmployeeId,
+      status: "offered",
+      kind: {
+        in: ["fi_invite_act", "fi_first_try", "fi_member_first_save"],
+      },
+      ...(input.opportunityKey
+        ? { opportunityKey: input.opportunityKey }
+        : {
+            OR: [
+              { opportunityKey: { startsWith: "fi_invite_act:" } },
+              { opportunityKey: { startsWith: "fi_first_try:" } },
+              { opportunityKey: { startsWith: "fi_member_first_save:" } },
+            ],
+          }),
+      ...(input.conversationId
+        ? { conversationId: input.conversationId }
+        : {}),
+    },
+    orderBy: { offeredAt: "desc" },
+  });
+  if (!row) {
+    return null;
+  }
+  return {
+    id: row.id,
+    opportunityKey: row.opportunityKey,
+    kind: row.kind,
+  };
+}
+
+/**
+ * Mark FI (or any opportunity) Value after a real successful act.
+ * Leaves status=accepted + valueAt; does not run on Accept alone.
+ * If the row is still `offered`, promotes it to accepted with value.
+ */
+export async function resolveOpportunityValue(input: {
+  scope: Pick<PieStateScope, "employeeId" | "digitalEmployeeId">;
+  opportunityKey: string;
+  opportunityId?: string | null;
+  now?: Date;
+}): Promise<boolean> {
+  const now = input.now ?? new Date();
+  let row =
+    input.opportunityId != null
+      ? await prisma.interactionOpportunity.findFirst({
+          where: {
+            id: input.opportunityId,
+            employeeId: input.scope.employeeId,
+            digitalEmployeeId: input.scope.digitalEmployeeId,
+            status: { in: ["offered", "accepted"] },
+          },
+        })
+      : null;
+  if (!row) {
+    row = await prisma.interactionOpportunity.findFirst({
+      where: {
+        employeeId: input.scope.employeeId,
+        digitalEmployeeId: input.scope.digitalEmployeeId,
+        opportunityKey: input.opportunityKey,
+        status: { in: ["offered", "accepted"] },
+      },
+      orderBy: { offeredAt: "desc" },
+    });
+  }
+  if (!row) {
+    return false;
+  }
+  if (row.valueAt != null) {
+    return true;
+  }
+  await prisma.interactionOpportunity.update({
+    where: { id: row.id },
+    data: {
+      status: "accepted",
+      resolvedAt: row.resolvedAt ?? now,
+      valueAt: now,
+      suppressUntil: null,
+      suppressIndefinite: false,
+    },
+  });
+  return true;
 }

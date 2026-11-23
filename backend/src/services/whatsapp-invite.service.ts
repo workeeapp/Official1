@@ -660,6 +660,23 @@ export function formatInviteOpeningContext(ctx: PendingInviteContext): string {
   ].join("\n");
 }
 
+/**
+ * After FI invite was already presented: keep the same invite facts without
+ * re-opening / re-dumping. Engine fact block only — not a Lucy catalog rewrite.
+ */
+export function formatInviteFollowUpContext(ctx: PendingInviteContext): string {
+  return [
+    "INVITE CONTEXT (follow-up — same invite, already presented this conversation):",
+    `asker_name: ${ctx.askerName}`,
+    `activity: ${ctx.askSummary}`,
+    "Answer follow-ups from asker_name + activity and any COLLAB INVITE / INVITE_VALUE facts in THIS turn only.",
+    "FORBIDDEN: re-presenting the activity as a fresh opening; repeating the full item dump; inventing details not listed in those facts.",
+    "If they ask for a detail that is not in those facts → say briefly it is not in the invite details (do not invent).",
+    "If they clearly switch to a new unrelated topic → handle that topic normally; do not force the invite framing.",
+    "Update / complete / mark-done → emit the matching ACTION; never claim success without metadata this turn.",
+  ].join("\n");
+}
+
 /** Idempotent consume — keeps the row for history; no-op when already consumed. */
 export async function consumeWhatsAppInvite(
   inviteId: string,

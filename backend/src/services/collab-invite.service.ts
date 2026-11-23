@@ -284,15 +284,23 @@ export function inviteValueTextFromPayload(
   return desc ? `${name} — ${desc}` : name || "תיעוד";
 }
 
-export function formatCollabInviteContext(invites: PresentedCollabInvite[]): string {
+export function formatCollabInviteContext(
+  invites: PresentedCollabInvite[],
+  options?: { mode?: "first" | "follow_up" },
+): string {
   if (invites.length === 0) {
     return "";
   }
+  const followUp = options?.mode === "follow_up";
   const lines = [
-    "COLLAB INVITE (pending — present only; do not claim it is saved):",
+    followUp
+      ? "COLLAB INVITE (follow-up — same pending invite; already presented):"
+      : "COLLAB INVITE (pending — present only; do not claim it is saved):",
     "Do not emit metadata.collab_invite or metadata.decline_invite — Accept/Decline are engine buttons only when offered.",
     "metadata.confirm true or false does not accept or decline.",
-    "Leave lists, filing, reminders, directory, jobs, and messages empty on this turn unless the user asked something else.",
+    followUp
+      ? "Answer from activity / INVITE_VALUE in THIS block only. Leave mutates empty unless they asked to update/complete/accept."
+      : "Leave lists, filing, reminders, directory, jobs, and messages empty on this turn unless the user asked something else.",
   ];
   for (const invite of invites) {
     if (invite.kind === "assign") {
@@ -302,9 +310,17 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
           `kind: assign`,
           `asker_name: ${invite.askerName}`,
           `activity: ${invite.askSummary}`,
-          "First exposure: warm Hebrew greeting that presents this responsibility from asker_name.",
-          "Mention they can manage tasks/shopping/reminders/filings with you right away (no signup).",
-          "Then ask whether to accept this responsibility. Gender-safe Hebrew (no masculine «ביקש» on a feminine asker name).",
+          followUp
+            ? [
+                "Follow-up: responsibility already presented.",
+                "FORBIDDEN re-opening as first exposure or inventing details not in activity.",
+                "Missing detail → say it is not in the invite; clear new topic → handle normally.",
+              ].join(" ")
+            : [
+                "First exposure: warm Hebrew greeting that presents this responsibility from asker_name.",
+                "Mention they can manage tasks/shopping/reminders/filings with you right away (no signup).",
+                "Then ask whether to accept this responsibility. Gender-safe Hebrew (no masculine «ביקש» on a feminine asker name).",
+              ].join(" "),
         ].join("\n"),
       );
       continue;
@@ -319,9 +335,18 @@ export function formatCollabInviteContext(invites: PresentedCollabInvite[]): str
         invite.inviteValueText
           ? `INVITE_VALUE (scoped read only — not yet co-mutate):\n${invite.inviteValueText}`
           : "INVITE_VALUE: unavailable",
-        "First exposure: warm Hebrew greeting presenting this shared value from asker_name.",
-        "Mention they can manage tasks/shopping/reminders/filings with you right away (no signup).",
-        "Do not claim it was saved to their lists. Gender-safe Hebrew (no masculine «ביקש»).",
+        followUp
+          ? [
+              "Follow-up: shared value already presented.",
+              "Answer only from activity / INVITE_VALUE above.",
+              "FORBIDDEN re-presenting as first exposure; FORBIDDEN inventing fields when INVITE_VALUE is unavailable or silent.",
+              "Clear new topic → handle normally. Do not claim it was saved to their lists.",
+            ].join(" ")
+          : [
+              "First exposure: warm Hebrew greeting presenting this shared value from asker_name.",
+              "Mention they can manage tasks/shopping/reminders/filings with you right away (no signup).",
+              "Do not claim it was saved to their lists. Gender-safe Hebrew (no masculine «ביקש»).",
+            ].join(" "),
       ].join("\n"),
     );
   }

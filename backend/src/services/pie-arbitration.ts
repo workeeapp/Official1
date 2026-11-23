@@ -2,16 +2,20 @@
  * PIE-1/2 — Proactive Interaction Engine arbitration.
  *
  * Single gate for turn initiatives: consent CTA, raise, act_followup (reminder
- * offer), capability tips. Max one initiative per turn; Balanced cadence =
- * at most one initiative per 3 inbound user messages.
+ * offer), First Interaction (fi_*), capability tips. Max one initiative per
+ * turn; Balanced cadence = at most one initiative per 3 inbound user messages.
  *
  * PIE-2: durable preference + suppressKeys hydrate the gate. Quiet blocks
- * discovery (capability/tip) only — not act_followup reminder-offer, consent,
- * or critical raise. Raise is Opportunity — never Value here (PIE-3).
+ * discovery (capability/tip + FI) only — not act_followup reminder-offer,
+ * consent, or critical raise. Raise is Opportunity — never Value here (PIE-3).
  * proactive preference is stored but behaves like balanced in PIE-2.
  */
 
 import type { LlmSpokenBubble } from "@workee/shared";
+import {
+  bubblesHaveOpenAsk,
+  type FiOpportunityKind,
+} from "./first-interaction.js";
 import {
   bubblesHaveSoftYesNoOffer,
   injectPostSaveReminderOfferBubbles,
@@ -23,6 +27,9 @@ export type PieOpportunityKind =
   | "consent_cta"
   | "open_item_raise"
   | "act_followup"
+  | "fi_invite_act"
+  | "fi_first_try"
+  | "fi_member_first_save"
   | "capability_opportunity";
 
 export type PieArbitrationDecision = {
@@ -30,6 +37,13 @@ export type PieArbitrationDecision = {
   chosenKind: PieOpportunityKind | null;
   /** Inject post-save reminder offer bubble. */
   injectReminderOffer: boolean;
+  /** Inject First Interaction soft Act offer (record-before-emit in chat). */
+  injectFirstInteraction: boolean;
+  /**
+   * Inject invite FI direct present (item + act taps) — not a show Offer.
+   * Delivery of pending invite context; still one initiative slot.
+   */
+  injectInviteDirectPresent: boolean;
   /** Allow tip resolver to emit (still subject to tip next-step filter). */
   allowTipResolve: boolean;
   /** Never enable legacy prospect auto-pick. */
@@ -37,6 +51,20 @@ export type PieArbitrationDecision = {
   /** Why Quiet / why this pick — for tests and logs. */
   reason: string;
 };
+
+function emptyDecision(
+  partial: Partial<PieArbitrationDecision> & { reason: string },
+): PieArbitrationDecision {
+  return {
+    chosenKind: null,
+    injectReminderOffer: false,
+    injectFirstInteraction: false,
+    injectInviteDirectPresent: false,
+    allowTipResolve: false,
+    allowProspectAuto: false,
+    ...partial,
+  };
+}
 
 /** Inbound spacing for Balanced: initiative on turn T → next at T+3 or later. */
 export const PIE_BALANCED_INBOUND_GAP = 3;
@@ -192,9 +220,16 @@ export function tipTextHasNextStep(text: string): boolean {
   if (!t) {
     return false;
   }
-  // Dynamic compose instructions — only if they direct an offer/ask.
-  if (/^Write one short/i.test(t)) {
-    return /offer|ask (them|whether)|yes\/no|כן\/לא|רוצה/i.test(t);
+  const directsOfferOrAsk =
+    /offer|ask (them|whether)|yes\/no|כן\/לא|רוצה/i.test(t);
+  // Dynamic / author instructions (shown only after compose) — require an offer/ask.
+  // Covers "Write one short…" and entity follow-ups like web_lookup ("After… offer…").
+  if (
+    /^Write one short/i.test(t) ||
+    /^After\b/i.test(t) ||
+    /\bwrite one short hebrew tip\b/i.test(t)
+  ) {
+    return directsOfferOrAsk;
   }
   // Capability broadcast patterns without a clear ask → reject.
   if (
@@ -242,6 +277,33 @@ export function decidePieArbitration(input: {
   consentOwnsTurn?: boolean;
   /** Tip resolver has at least one next-step-eligible candidate ready. */
   tipCandidateAvailable?: boolean;
+  /**
+   * Soft FI candidate (cold / member). Invite uses inviteDirectPresent instead.
+   * Soft FI is discovery — Quiet / open Ask / other Act block it.
+   */
+  fiCandidate?: {
+    kind: FiOpportunityKind;
+    opportunityKey: string;
+  } | null;
+  /**
+   * Invite item can be shown this turn (pendingInvite + safe title).
+   * Not blocked by Quiet — delivering the invite they arrived for.
+   */
+  inviteDirectPresent?: {
+    opportunityKey: string;
+  } | null;
+  /**
+   * Open invite FI (presented, not yet Valued) — user still on that item.
+   * Blocks competing tips / soft FI; does not inject anything.
+   * Prefer `progressEngagementActive` (W1); this flag remains for Invite FI callers.
+   */
+  inviteEngagementActive?: boolean;
+  /**
+   * W1 Progress Arbitration: live progress candidate (open FI and/or raisable
+   * OPEN_JOBS including overdue/stale). Blocks tips / soft FI; does not inject
+   * a second raise (model/engine raise paths unchanged).
+   */
+  progressEngagementActive?: boolean;
   /** PIE-2 durable preference (proactive ≡ balanced behavior). */
   preferenceMode?: InitiativePreferenceMode | null;
   /** PIE-2 keys that must not be re-offered. */
@@ -261,34 +323,31 @@ export function decidePieArbitration(input: {
   const consent =
     input.consentOwnsTurn === true || bubblesHaveConsentCta(input.bubbles);
   if (consent) {
-    return {
+    return emptyDecision({
       chosenKind: "consent_cta",
-      injectReminderOffer: false,
-      allowTipResolve: false,
-      allowProspectAuto: false,
       reason: "consent_cta_owns_turn",
-    };
+    });
   }
 
   if (bubblesHaveRaise(input.bubbles)) {
     // Raise is Opportunity occupying the slot — not Value by itself.
-    return {
+    return emptyDecision({
       chosenKind: "open_item_raise",
-      injectReminderOffer: false,
-      allowTipResolve: false,
-      allowProspectAuto: false,
       reason: "raise_opportunity_occupies_turn",
-    };
+    });
   }
 
   if (bubblesHaveSoftYesNoOffer(input.bubbles)) {
-    return {
+    return emptyDecision({
       chosenKind: "act_followup",
-      injectReminderOffer: false,
-      allowTipResolve: false,
-      allowProspectAuto: false,
       reason: "soft_offer_already_in_bubbles",
-    };
+    });
+  }
+
+  if (bubblesHaveOpenAsk(input.bubbles)) {
+    return emptyDecision({
+      reason: "open_ask_owns_turn",
+    });
   }
 
   const reminderKey = input.reminderOpportunityKey?.trim() || "";
@@ -298,69 +357,79 @@ export function decidePieArbitration(input: {
   const reminderEligible =
     input.reminderOfferEligible && !reminderSuppressed;
 
-  // Quiet blocks discovery only — act_followup reminder still allowed.
-  if (quietDiscovery && !reminderEligible) {
-    return {
-      chosenKind: null,
-      injectReminderOffer: false,
-      allowTipResolve: false,
-      allowProspectAuto: false,
-      reason: "session_quiet",
-    };
+  const inviteKey = input.inviteDirectPresent?.opportunityKey?.trim() || "";
+  const inviteDirectEligible =
+    Boolean(inviteKey) && !input.suppressKeys?.has(inviteKey);
+
+  // Quiet blocks discovery only — reminder + invite direct present still allowed.
+  if (quietDiscovery && !reminderEligible && !inviteDirectEligible) {
+    return emptyDecision({ reason: "session_quiet" });
   }
 
   if (!pieCadenceAllowsInitiative(input.conversationId, inboundTurnCount)) {
-    return {
-      chosenKind: null,
-      injectReminderOffer: false,
-      allowTipResolve: false,
-      allowProspectAuto: false,
-      reason: "cadence_1_per_3_inbound",
-    };
+    return emptyDecision({ reason: "cadence_1_per_3_inbound" });
   }
 
-  // Priority: act_followup > capability_opportunity.
+  // Priority: act_followup > invite direct present > soft FI > tips.
   // Prospect auto is never enabled (must not bypass).
-  // Quiet + reminderEligible → still inject act_followup.
   if (reminderEligible) {
-    return {
+    return emptyDecision({
       chosenKind: "act_followup",
       injectReminderOffer: true,
-      allowTipResolve: false,
-      allowProspectAuto: false,
       reason: quietDiscovery
         ? "act_followup_reminder_offer_under_quiet"
         : "act_followup_reminder_offer",
-    };
+    });
+  }
+
+  if (inviteDirectEligible) {
+    return emptyDecision({
+      chosenKind: "fi_invite_act",
+      injectInviteDirectPresent: true,
+      reason: "fi_invite_direct_present",
+    });
+  }
+
+  // Progress candidate live — no competing tip / soft FI (raise inject stays model-led).
+  if (
+    input.progressEngagementActive === true ||
+    input.inviteEngagementActive === true
+  ) {
+    return emptyDecision({
+      reason:
+        input.progressEngagementActive === true
+          ? "progress_engagement_active"
+          : "fi_invite_engagement_active",
+    });
   }
 
   if (quietDiscovery) {
-    return {
-      chosenKind: null,
-      injectReminderOffer: false,
-      allowTipResolve: false,
-      allowProspectAuto: false,
-      reason: "session_quiet",
-    };
+    return emptyDecision({ reason: "session_quiet" });
+  }
+
+  const fiKey = input.fiCandidate?.opportunityKey?.trim() || "";
+  const fiKind = input.fiCandidate?.kind;
+  const fiEligible =
+    Boolean(fiKey) &&
+    Boolean(fiKind) &&
+    !input.suppressKeys?.has(fiKey);
+  if (fiEligible && fiKind) {
+    return emptyDecision({
+      chosenKind: fiKind,
+      injectFirstInteraction: true,
+      reason: `first_interaction_${fiKind}`,
+    });
   }
 
   if (input.tipCandidateAvailable) {
-    return {
+    return emptyDecision({
       chosenKind: "capability_opportunity",
-      injectReminderOffer: false,
       allowTipResolve: true,
-      allowProspectAuto: false,
       reason: "capability_opportunity_with_next_step",
-    };
+    });
   }
 
-  return {
-    chosenKind: null,
-    injectReminderOffer: false,
-    allowTipResolve: false,
-    allowProspectAuto: false,
-    reason: "quiet_no_qualified_candidate",
-  };
+  return emptyDecision({ reason: "quiet_no_qualified_candidate" });
 }
 
 /**

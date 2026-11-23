@@ -1036,6 +1036,50 @@ function pendingClock(meta: JobMeta, now: Date): string | null {
   return Number.isFinite(at) && at > now.getTime() ? meta.nudgeFireAt : null;
 }
 
+/**
+ * Same raisable bit injected into OPEN_JOBS JSON for the model.
+ * W1 Progress Arbitration: when true for the viewer, tips must not compete.
+ */
+export function computeOpenJobRaisable(
+  job: OpenJobRow,
+  viewerId: string,
+  now: Date = new Date(),
+): boolean {
+  const clock = pendingClock(job.meta, now);
+  const snoozed = Boolean(clock && !job.meta.nudgeAuto);
+  const scheduled = Boolean(job.meta.pendingActivation);
+  if (scheduled || snoozed) {
+    return false;
+  }
+  if (job.meta.subjectId !== viewerId) {
+    return false;
+  }
+  if (
+    job.meta.overdueItemIds &&
+    job.meta.overdueItemIds.length > 0 &&
+    job.meta.overdueOffered
+  ) {
+    return false;
+  }
+  if (
+    job.meta.staleUndatedItemIds &&
+    job.meta.staleUndatedItemIds.length > 0 &&
+    job.meta.staleOffered
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** True when at least one open job is a live progress candidate for this viewer. */
+export function hasRaisableProgressCandidate(
+  jobs: OpenJobRow[],
+  viewerId: string,
+  now: Date = new Date(),
+): boolean {
+  return jobs.some((job) => computeOpenJobRaisable(job, viewerId, now));
+}
+
 function urgencyFields(job: OpenJobRow, clock: string | null): Record<string, unknown> {
   const urgency = job.urgency ?? "normal";
   if (urgency === "normal") {
@@ -1101,6 +1145,7 @@ export function formatOpenJobsContext(
     const clock = pendingClock(job.meta, now);
     const snoozed = Boolean(clock && !job.meta.nudgeAuto);
     const scheduled = Boolean(job.meta.pendingActivation);
+    const raisable = computeOpenJobRaisable(job, viewerId, now);
     return {
       job_id: job.id,
       asker: job.meta.askerName,
@@ -1123,18 +1168,7 @@ export function formatOpenJobsContext(
           ? { reminder_at: clock, raisable: false }
           : {
               ...(job.meta.deferredAt ? { deferred: true } : {}),
-              raisable:
-                job.meta.subjectId === viewerId &&
-                !(
-                  job.meta.overdueItemIds &&
-                  job.meta.overdueItemIds.length > 0 &&
-                  job.meta.overdueOffered
-                ) &&
-                !(
-                  job.meta.staleUndatedItemIds &&
-                  job.meta.staleUndatedItemIds.length > 0 &&
-                  job.meta.staleOffered
-                ),
+              raisable,
             }),
       ...(job.meta.needsBook
         ? {
