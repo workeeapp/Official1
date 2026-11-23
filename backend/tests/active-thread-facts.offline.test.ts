@@ -189,6 +189,25 @@ describe("W2 Active Thread Facts", () => {
     expect(composed).toMatch(/OPEN_JOBS/);
   });
 
+  it("W3 Facts: prefer useful natural promotion; forbid invent/force; standalone OK", () => {
+    const withThread = formatActiveThreadFacts({
+      viewerId: VIEWER,
+      openJobs: [job({ subjectId: VIEWER, askerId: VIEWER, askerName: "טל" })],
+    });
+    // Baseline gap (pre-W3): continuity only — no post-success preference vs tip/bare confirm.
+    expect(withThread).toMatch(/W3 AFTER A SUCCESSFUL UNRELATED MUTATE/);
+    expect(withThread).toMatch(/prefer that step over a generic tip/);
+    expect(withThread).toMatch(/Not a mechanical duty/);
+    expect(withThread).toMatch(/invent nothing/);
+    expect(withThread).toMatch(/Standalone success with no open thread/);
+    expect(withThread).toMatch(/never re-do a mutate/);
+    expect(withThread).toMatch(/FORBIDDEN forcing this thread when they clearly switched/);
+
+    expect(
+      formatActiveThreadFacts({ viewerId: VIEWER, openJobs: [] }),
+    ).toBe("");
+  });
+
   it("asker-only view scores below subject raisable when both open", () => {
     const subjectJob: OpenJobRow = {
       id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",

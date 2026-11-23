@@ -359,8 +359,10 @@ export function formatActiveThreadFacts(input: ActiveThreadInput): string {
     "ACTIVE_THREAD (live progress — follow-up continuity; already in flight):",
     JSON.stringify(thread),
     "Use THIS block + OPEN_JOBS / EMPLOYEE_SAVED_DATA / LAST_NUMBERED_DUMP for short follow-ups after a pause, Lucy mid-message, or topic digression.",
-    "Live ESD / OPEN_JOBS win over older chat history. Absent job or dump line = gone — never resurrect.",
-    "FORBIDDEN inventing missing fields; FORBIDDEN re-presenting as first exposure; FORBIDDEN forcing this thread when they clearly switched to a new unrelated topic (handle the new topic; return here when they resume).",
-    "Do not invent a second FI / tip / raise from this block — raise/answer still follow OPEN_JOBS raisable rules.",
+    "Live ESD / OPEN_JOBS win over older chat history. Absent job or dump line = gone — never resurrect; never re-do a mutate that already landed in those facts.",
+    "W3 AFTER A SUCCESSFUL UNRELATED MUTATE THIS TURN: if this thread is still open and there is a useful natural next step (raise / answer / continue from waiting + OPEN_JOBS raisable rules), prefer that step over a generic tip or stopping at a bare confirm. Not a mechanical duty after every success — invent nothing; add no question only to force continuity.",
+    "Standalone success with no open thread here → confirm (and any same-turn reminder offer for that item) is enough.",
+    "FORBIDDEN inventing missing fields or next steps not grounded in THIS block / OPEN_JOBS / ESD; FORBIDDEN re-presenting as first exposure; FORBIDDEN forcing this thread when they clearly switched to a new unrelated topic (handle the new topic; return here when they resume).",
+    "Do not invent a second FI / tip / raise from this block — raise/answer still follow OPEN_JOBS raisable rules; tip hold is engine-side when this thread is live.",
   ].join("\n");
 }
