@@ -5360,7 +5360,8 @@ export async function sendChatMessage(input: {
           workingReply = setEngineResponse(workingReply, text);
           showDumpReplaced = true;
           const resolved = resolveShowDumpKind(showDumpKind);
-          if (itemDumpRequested && validIds.length > 0) {
+          // Auto-send files only for a single-row ITEM DUMP (that row's links).
+          if (itemDumpRequested && validIds.length === 1) {
             itemDumpAttachmentIds = collectAttachmentIdsForDumpRows(
               snapshot,
               validIds,
@@ -5556,7 +5557,8 @@ export async function sendChatMessage(input: {
                 ? `*${employeeDisplayName(aboutPerson)}*\n${text}`
                 : text;
             blocks.push(header);
-            if (itemDumpRequested && validIds.length > 0) {
+            // Same single-row gate as the speaker dump path above.
+            if (itemDumpRequested && validIds.length === 1) {
               itemDumpAttachmentIds = [
                 ...new Set([
                   ...itemDumpAttachmentIds,

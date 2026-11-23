@@ -2512,6 +2512,283 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("אמור להיות no-match ACL");
   });
 
+  // ITEM DUMP auto-send: only when exactly one visible row has linked files.
+  describe("ITEM DUMP auto-send attachments (single-row only)", () => {
+    const attA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    const attB = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+    const itemOne = "11111111-1111-4111-8111-111111111101";
+    const itemTwo = "11111111-1111-4111-8111-111111111102";
+    const listId = "list-tasks-item-dump-att";
+
+    beforeEach(async () => {
+      const { prisma: prismaMock } = await import("../src/database/prisma.js");
+      (
+        prismaMock.attachmentLink.findMany as ReturnType<typeof vi.fn>
+      )
+        .mockReset()
+        .mockResolvedValue([]);
+      (prismaMock.attachment.findMany as ReturnType<typeof vi.fn>)
+        .mockReset()
+        .mockResolvedValue([]);
+    });
+
+    function mockTasksWithItems(
+      items: Array<{ id: string; title: string }>,
+    ): void {
+      listFindMany.mockImplementation(
+        async ({ where }: { where?: { employeeId?: unknown } }) => {
+          if (
+            where?.employeeId &&
+            typeof where.employeeId === "object" &&
+            where.employeeId !== null &&
+            "not" in (where.employeeId as object)
+          ) {
+            return [];
+          }
+          return [
+            {
+              id: listId,
+              listType: "tasks",
+              name: "",
+              employeeId,
+              scope: "personal",
+              employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+              items: items.map((row) => ({
+                id: row.id,
+                data: { "שם משימה": row.title },
+                scope: "personal",
+                createdAt: new Date(),
+              })),
+            },
+          ];
+        },
+      );
+    }
+
+    async function mockItemAttachmentLinks(
+      links: Array<{ itemId: string; attachmentId: string; fileName: string }>,
+    ): Promise<void> {
+      const { prisma: prismaMock } = await import("../src/database/prisma.js");
+      (
+        prismaMock.attachmentLink.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue(
+        links.map((link) => ({
+          listItemId: link.itemId,
+          listId: null,
+          filingId: null,
+          reminderId: null,
+          contactId: null,
+          attachment: {
+            id: link.attachmentId,
+            kind: "image",
+            fileName: link.fileName,
+            deletedAt: null,
+          },
+        })),
+      );
+      (
+        prismaMock.attachment.findMany as ReturnType<typeof vi.fn>
+      ).mockImplementation(
+        async ({ where }: { where?: { id?: { in?: string[] } } }) => {
+          const want = new Set(where?.id?.in ?? []);
+          return links
+            .filter((link) => want.has(link.attachmentId))
+            .map((link) => ({
+              id: link.attachmentId,
+              userId,
+              uploaderId: employeeId,
+              kind: "image",
+              fileName: link.fileName,
+              mimeType: "image/jpeg",
+              storageKey: `test/${link.attachmentId}`,
+              caption: "",
+              deletedAt: null,
+              waOutboundMediaId: null,
+              waOutboundUploadedAt: null,
+              _count: { links: 1 },
+              uploader: { kind: "human" },
+            }));
+        },
+      );
+    }
+
+    it("single ITEM DUMP row with linked attachment → outbound includes it", async () => {
+      mockTasksWithItems([{ id: itemOne, title: "משימה עם קובץ" }]);
+      await mockItemAttachmentLinks([
+        { itemId: itemOne, attachmentId: attA, fileName: "a.jpg" },
+      ]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "מציגה" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: itemOne,
+          },
+        }),
+        raw: { output_text: "single att" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי את המשימה", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.reply).toContain("משימה עם קובץ");
+      expect(response.body.attachments).toEqual([
+        expect.objectContaining({ id: attA, file_name: "a.jpg" }),
+      ]);
+    });
+
+    it("single ITEM DUMP row without attachment → no outbound files", async () => {
+      mockTasksWithItems([{ id: itemOne, title: "משימה בלי קובץ" }]);
+      await mockItemAttachmentLinks([]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "מציגה" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: itemOne,
+          },
+        }),
+        raw: { output_text: "single no att" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי את המשימה", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.reply).toContain("משימה בלי קובץ");
+      expect(response.body.attachments).toBeUndefined();
+    });
+
+    it("multi-id ITEM DUMP with attachments → no auto outbound files", async () => {
+      mockTasksWithItems([
+        { id: itemOne, title: "משימה אחת עם קובץ" },
+        { id: itemTwo, title: "משימה שתיים עם קובץ" },
+      ]);
+      await mockItemAttachmentLinks([
+        { itemId: itemOne, attachmentId: attA, fileName: "a.jpg" },
+        { itemId: itemTwo, attachmentId: attB, fileName: "b.jpg" },
+      ]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "מציגה כמה" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: [itemOne, itemTwo],
+          },
+        }),
+        raw: { output_text: "multi att" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי את שתי המשימות", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.reply).toContain("משימה אחת עם קובץ");
+      expect(response.body.reply).toContain("משימה שתיים עם קובץ");
+      expect(response.body.attachments).toBeUndefined();
+    });
+
+    it("list dump still offers קבצי הרשימה tap; does not auto-send list files", async () => {
+      const listAtt = "cccccccc-cccc-4ccc-8ccc-ccccccccccc1";
+      listFindMany.mockImplementation(
+        async ({ where }: { where?: { employeeId?: unknown } }) => {
+          if (
+            where?.employeeId &&
+            typeof where.employeeId === "object" &&
+            where.employeeId !== null &&
+            "not" in (where.employeeId as object)
+          ) {
+            return [];
+          }
+          return [
+            {
+              id: listId,
+              listType: "tasks",
+              name: "",
+              employeeId,
+              scope: "personal",
+              employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+              items: [
+                {
+                  id: itemOne,
+                  data: { "שם משימה": "משימה ברשימה" },
+                  scope: "personal",
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        },
+      );
+      const { prisma: prismaMock } = await import("../src/database/prisma.js");
+      (
+        prismaMock.attachmentLink.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([
+        {
+          listId,
+          listItemId: null,
+          filingId: null,
+          reminderId: null,
+          contactId: null,
+          attachment: {
+            id: listAtt,
+            kind: "image",
+            fileName: "list.jpg",
+            deletedAt: null,
+          },
+        },
+      ]);
+      (
+        prismaMock.attachment.findMany as ReturnType<typeof vi.fn>
+      ).mockResolvedValue([]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "הנה המשימות" }],
+          metadata: { lists: [], show_dump: "tasks" },
+        }),
+        raw: { output_text: "list dump files tap" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הצג משימות", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.attachments).toBeUndefined();
+      const updateCalls = (
+        prismaMock.chatMessage.update as ReturnType<typeof vi.fn>
+      ).mock.calls;
+      const buttonsJson = JSON.stringify(
+        updateCalls.flatMap((call) => {
+          const data = (call[0] as { data?: { buttons?: unknown } } | undefined)
+            ?.data;
+          return data?.buttons ? [data.buttons] : [];
+        }),
+      );
+      expect(buttonsJson).toMatch(/קבצי הרשימה/);
+      expect(buttonsJson).toMatch(/שלחי את הקבצים של רשימת משימות/);
+    });
+  });
+
   // T2 (chat path): show_dump + ids → REPLACE only those rows.
   it("T2: show_dump tasks + show_dump_ids replaces with selected row only", async () => {
     listFindMany.mockImplementation(

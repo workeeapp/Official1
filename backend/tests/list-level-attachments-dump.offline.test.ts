@@ -65,6 +65,16 @@ describe("collectListLevelAttachmentIdsForDump", () => {
     ).toEqual([]);
   });
 
+  it("list-level collect never rolls up item attachments (קבצי הרשימה path unchanged)", () => {
+    // Regression guard: ITEM DUMP single-row auto-send must not change this.
+    expect(
+      collectListLevelAttachmentIdsForDump(snapshot, "שיפוץ", hebrew),
+    ).toEqual(["img-1", "img-2"]);
+    expect(
+      collectListLevelAttachmentIdsForDump(snapshot, "שיפוץ", hebrew),
+    ).not.toContain("item-img");
+  });
+
   it("respects the max and unknown names", () => {
     expect(collectListLevelAttachmentIdsForDump(snapshot, "שיפוץ", hebrew, 1)).toEqual(["img-1"]);
     expect(collectListLevelAttachmentIdsForDump(snapshot, "לא קיימת", hebrew)).toEqual([]);
