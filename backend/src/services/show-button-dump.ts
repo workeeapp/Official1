@@ -3890,10 +3890,13 @@ function filterDumpRows(
   let kept = rows.filter((row) => {
     // Speaker «הצג משימות»: Lucy's tracking rows (להזכיר ל… / לשלוח הודעה…)
     // must not appear even when they wrongly landed on the speaker book.
-    // Worker inventory keeps them (flatLayout).
+    // Worker inventory keeps them (flatLayout). ITEM DUMP (explicit itemIds /
+    // post-mutate ·#t: tap) must still open that exact row — otherwise the
+    // engine show button returns «לא מצאתי את הפריט.» for a live self-nudge.
     if (
       listType === "tasks" &&
       effective?.flatLayout !== true &&
+      effective?.itemIds == null &&
       isWorkerTrackingTitle(row.title)
     ) {
       return false;

@@ -287,6 +287,19 @@ vi.mock("../src/database/prisma.js", () => ({
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
     },
+    // Neutral PIE stubs — keep loadPieStateForTurn from rejecting both
+    // Promise.all legs (undefined model → unhandled findUnique after findMany).
+    initiativePreference: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
+    interactionOpportunity: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   },
 }));
 
@@ -2404,6 +2417,99 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("1234");
     expect(response.body.reply).not.toContain("משימות:");
     expect(response.body.reply).not.toContain("תיוקים:");
+  });
+
+  // ITEM DUMP ids are validated against the speaker-visible snapshot only —
+  // knowing another human's personal item_id must not bypass ACL.
+  it("ITEM DUMP: other human's personal item id → no-match (ACL, no leak)", async () => {
+    const secretTitle = "סוד אישי של טל — אל תדליף";
+    const foreignItemId = "task-tal-private-acl-1";
+    listFindMany.mockImplementation(
+      async ({
+        where,
+      }: {
+        where?: { employeeId?: unknown; scope?: string };
+      }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          // Partner/shared shell query — Tal's personal book must stay out.
+          return [];
+        }
+        if (where?.employeeId === otherEmployeeId) {
+          return [
+            {
+              id: "list-tasks-tal-private",
+              listType: "tasks",
+              name: "",
+              employeeId: otherEmployeeId,
+              scope: "personal",
+              employee: { id: otherEmployeeId, name: "טל", nickname: "טל" },
+              items: [
+                {
+                  id: foreignItemId,
+                  data: { "שם משימה": secretTitle },
+                  scope: "personal",
+                  visibleTo: [otherEmployeeId],
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+        if (where?.employeeId === employeeId) {
+          return [
+            {
+              id: "list-tasks-amit-acl",
+              listType: "tasks",
+              name: "",
+              employeeId,
+              scope: "personal",
+              employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+              items: [
+                {
+                  id: "task-amit-own-1",
+                  data: { "שם משימה": "משימה של עמית בלבד" },
+                  scope: "personal",
+                  visibleTo: [employeeId],
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+        return [];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "אמור להיות no-match ACL" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: foreignItemId,
+        },
+      }),
+      raw: { output_text: "acl item dump" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי משימה לפי מזהה של טל", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לא מצאתי את הפריט.");
+    expect(response.body.reply).not.toContain(secretTitle);
+    expect(response.body.reply).not.toContain("משימה של עמית בלבד");
+    expect(response.body.reply).not.toContain("משימות:");
+    expect(response.body.reply).not.toContain("אמור להיות no-match ACL");
   });
 
   // T2 (chat path): show_dump + ids → REPLACE only those rows.

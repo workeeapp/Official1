@@ -3848,6 +3848,40 @@ describe("worker inventory tasks dump helpers", () => {
     expect(workerView).toContain("להזכיר לטל לשתות חלב");
   });
 
+  it("ITEM DUMP by id still opens a worker-tracking title on the speaker book", () => {
+    // Live bug: post-mutate «להצגת המשימה» ·#t:… pointed at «להזכיר לטל…»
+    // then filterDumpRows hid it → «לא מצאתי את הפריט.»
+    const speakerSnap: EmployeeRecordSnapshot = {
+      lists: [
+        {
+          list_type: "tasks",
+          list_name: "",
+          owner: "טל",
+          scope: "personal",
+          items: [
+            { item_id: "user-1", "שם משימה": "תור לשיננית" },
+            {
+              item_id: "lucy-nudge-1",
+              "שם משימה": "להזכיר לטל לבצע בדיקת UI-DB smoke",
+            },
+          ],
+        } as EmployeeRecordSnapshot["lists"][number],
+      ],
+      filing: [],
+    };
+    const itemDump = formatShowDumpFromKind("tasks", speakerSnap, {
+      viewerName: "טל",
+      itemIds: new Set(["lucy-nudge-1"]),
+      omitEmptySentence: true,
+    });
+    expect(itemDump).toBeTruthy();
+    expect(itemDump!).toContain("להזכיר לטל לבצע בדיקת UI-DB smoke");
+    expect(itemDump!).not.toContain("תור לשיננית");
+    expect(
+      formatShowDumpFromKind("tasks", speakerSnap, { viewerName: "טל" }),
+    ).not.toMatch(/להזכיר לטל/u);
+  });
+
   it("הצג משימות (speaker book) dumps speaker tasks — not Lucy OPEN_JOBS follow-ups", () => {
     // Speaker ESD snapshot has the human's tasks; worker follow-ups live on Lucy's book.
     // Bare show_dump=tasks must use the speaker snapshot (no about=לוסי).
