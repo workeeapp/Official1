@@ -969,6 +969,23 @@ describe("filings flat dump", () => {
           itemIds: new Set(),
         }),
       ).toBe("");
+
+      // Mix: keep only live ids; never expand to the full list.
+      const mixed = formatShowDumpFromKind("tasks", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["t1", "ghost", "t3"]),
+      })!;
+      expect(mixed).toContain("א");
+      expect(mixed).toContain("ג");
+      expect(mixed).not.toContain("1. ב");
+      expect(mixed).not.toContain("ghost");
+
+      // Display order follows snapshot order, not request order.
+      const reordered = formatShowDumpFromKind("tasks", snap, {
+        ...omitEmpty,
+        itemIds: new Set(["t3", "t1"]),
+      })!;
+      expect(reordered.indexOf("א")).toBeLessThan(reordered.indexOf("ג"));
     });
 
     it("filings: single, many, wrong, empty Set", () => {

@@ -2512,6 +2512,179 @@ describe("chat API", () => {
     expect(response.body.reply).not.toContain("אמור להיות no-match ACL");
   });
 
+  it("ITEM DUMP: soft-deleted / absent item id → no-match (not in live snapshot)", async () => {
+    const goneId = "task-soft-deleted-gone";
+    listFindMany.mockImplementation(
+      async ({ where }: { where?: { employeeId?: unknown } }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: "list-tasks-live-only",
+            listType: "tasks",
+            name: "",
+            employeeId,
+            scope: "personal",
+            employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+            items: [
+              {
+                id: "task-still-live",
+                data: { "שם משימה": "משימה חיה" },
+                scope: "personal",
+                createdAt: new Date(),
+              },
+            ],
+          },
+        ];
+      },
+    );
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "לא אמור להגיע" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: goneId,
+        },
+      }),
+      raw: { output_text: "deleted item dump" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי משימה שנמחקה", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לא מצאתי את הפריט.");
+    expect(response.body.reply).not.toContain("משימה חיה");
+    expect(response.body.attachments).toBeUndefined();
+  });
+
+  it("ITEM DUMP: unauthorized item with attachment → no-match and no file leak", async () => {
+    const secretTitle = "סוד עם קובץ של טל";
+    const foreignItemId = "task-tal-private-att-1";
+    const foreignAtt = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
+    listFindMany.mockImplementation(
+      async ({
+        where,
+      }: {
+        where?: { employeeId?: unknown; scope?: string };
+      }) => {
+        if (
+          where?.employeeId &&
+          typeof where.employeeId === "object" &&
+          where.employeeId !== null &&
+          "not" in (where.employeeId as object)
+        ) {
+          return [];
+        }
+        if (where?.employeeId === otherEmployeeId) {
+          return [
+            {
+              id: "list-tasks-tal-att",
+              listType: "tasks",
+              name: "",
+              employeeId: otherEmployeeId,
+              scope: "personal",
+              employee: { id: otherEmployeeId, name: "טל", nickname: "טל" },
+              items: [
+                {
+                  id: foreignItemId,
+                  data: { "שם משימה": secretTitle },
+                  scope: "personal",
+                  visibleTo: [otherEmployeeId],
+                  createdAt: new Date(),
+                },
+              ],
+            },
+          ];
+        }
+        if (where?.employeeId === employeeId) {
+          return [
+            {
+              id: "list-tasks-amit-att-acl",
+              listType: "tasks",
+              name: "",
+              employeeId,
+              scope: "personal",
+              employee: { id: employeeId, name: "עמית", nickname: "עמית" },
+              items: [],
+            },
+          ];
+        }
+        return [];
+      },
+    );
+    const { prisma: prismaMock } = await import("../src/database/prisma.js");
+    (
+      prismaMock.attachmentLink.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        listItemId: foreignItemId,
+        listId: null,
+        filingId: null,
+        reminderId: null,
+        contactId: null,
+        attachment: {
+          id: foreignAtt,
+          kind: "image",
+          fileName: "tal-secret.jpg",
+          deletedAt: null,
+        },
+      },
+    ]);
+    (
+      prismaMock.attachment.findMany as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        id: foreignAtt,
+        userId,
+        uploaderId: otherEmployeeId,
+        kind: "image",
+        fileName: "tal-secret.jpg",
+        mimeType: "image/jpeg",
+        storageKey: `test/${foreignAtt}`,
+        caption: "",
+        deletedAt: null,
+        _count: { links: 1 },
+        uploader: { kind: "human" },
+      },
+    ]);
+    createResponse.mockResolvedValue({
+      reply: JSON.stringify({
+        responses: [{ text: "ACL+file" }],
+        metadata: {
+          lists: [],
+          show_dump: "tasks",
+          show_dump_ids: foreignItemId,
+        },
+      }),
+      raw: { output_text: "acl att" },
+    });
+
+    const cookie = await login();
+    mockOwnedEmployee();
+    const response = await request(app)
+      .post("/api/chat/messages")
+      .set("Cookie", cookie)
+      .send({ message: "הציגי משימה עם קובץ של טל", employeeId });
+
+    expect(response.status).toBe(200);
+    expect(response.body.reply).toContain("לא מצאתי את הפריט.");
+    expect(response.body.reply).not.toContain(secretTitle);
+    expect(response.body.reply).not.toContain("tal-secret");
+    expect(response.body.attachments).toBeUndefined();
+  });
+
   // ITEM DUMP auto-send: only when exactly one visible row has linked files.
   describe("ITEM DUMP auto-send attachments (single-row only)", () => {
     const attA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
@@ -2702,6 +2875,143 @@ describe("chat API", () => {
       expect(response.body.reply).toContain("משימה אחת עם קובץ");
       expect(response.body.reply).toContain("משימה שתיים עם קובץ");
       expect(response.body.attachments).toBeUndefined();
+    });
+
+    it("single ITEM DUMP with multiple linked attachments → sends all of that row", async () => {
+      mockTasksWithItems([{ id: itemOne, title: "משימה עם שני קבצים" }]);
+      await mockItemAttachmentLinks([
+        { itemId: itemOne, attachmentId: attA, fileName: "a.jpg" },
+        { itemId: itemOne, attachmentId: attB, fileName: "b.pdf" },
+      ]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "מציגה" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: itemOne,
+          },
+        }),
+        raw: { output_text: "multi files one row" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי את המשימה", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.reply).toContain("משימה עם שני קבצים");
+      expect(response.body.attachments).toEqual([
+        expect.objectContaining({ id: attA, file_name: "a.jpg" }),
+        expect.objectContaining({ id: attB, file_name: "b.pdf" }),
+      ]);
+    });
+
+    it("single ITEM DUMP does not send a neighbor item's attachments", async () => {
+      mockTasksWithItems([
+        { id: itemOne, title: "משימה שנפתחת" },
+        { id: itemTwo, title: "שכנה עם קובץ" },
+      ]);
+      await mockItemAttachmentLinks([
+        { itemId: itemTwo, attachmentId: attB, fileName: "secret-neighbor.jpg" },
+      ]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "מציגה" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: itemOne,
+          },
+        }),
+        raw: { output_text: "neighbor att" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי את המשימה", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.reply).toContain("משימה שנפתחת");
+      expect(response.body.reply).not.toContain("שכנה עם קובץ");
+      expect(response.body.attachments).toBeUndefined();
+    });
+
+    it("ITEM DUMP + send_attachments same id → outbound once (no duplicate send)", async () => {
+      mockTasksWithItems([{ id: itemOne, title: "משימה עם קובץ" }]);
+      await mockItemAttachmentLinks([
+        { itemId: itemOne, attachmentId: attA, fileName: "a.jpg" },
+      ]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "מציגה" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: itemOne,
+            send_attachments: [attA],
+          },
+        }),
+        raw: { output_text: "dedup send" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי את המשימה", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.attachments).toEqual([
+        expect.objectContaining({ id: attA }),
+      ]);
+      expect(response.body.attachments).toHaveLength(1);
+    });
+
+    it("mixed valid + unknown show_dump_ids → only the live row; no full dump", async () => {
+      mockTasksWithItems([
+        { id: itemOne, title: "משימה חיה" },
+        { id: itemTwo, title: "משימה שנייה שלא נבחרה" },
+      ]);
+      await mockItemAttachmentLinks([
+        { itemId: itemOne, attachmentId: attA, fileName: "a.jpg" },
+        { itemId: itemTwo, attachmentId: attB, fileName: "b.jpg" },
+      ]);
+      createResponse.mockResolvedValue({
+        reply: JSON.stringify({
+          responses: [{ text: "אמור להיות dump מסונן" }],
+          metadata: {
+            lists: [],
+            show_dump: "tasks",
+            show_dump_ids: [itemOne, "missing-item-id-xyz"],
+          },
+        }),
+        raw: { output_text: "mixed ids" },
+      });
+
+      const cookie = await login();
+      mockOwnedEmployee();
+      const response = await request(app)
+        .post("/api/chat/messages")
+        .set("Cookie", cookie)
+        .send({ message: "הציגי משימות לפי מזהים", employeeId });
+
+      expect(response.status).toBe(200);
+      expect(response.body.reply).toContain("משימה חיה");
+      expect(response.body.reply).not.toContain("משימה שנייה שלא נבחרה");
+      expect(response.body.reply).not.toContain("אמור להיות dump מסונן");
+      // After dropping the unknown id, validIds.length === 1 → that row's files only.
+      expect(response.body.attachments).toEqual([
+        expect.objectContaining({ id: attA, file_name: "a.jpg" }),
+      ]);
+      expect(JSON.stringify(response.body.attachments)).not.toContain(attB);
     });
 
     it("list dump still offers קבצי הרשימה tap; does not auto-send list files", async () => {

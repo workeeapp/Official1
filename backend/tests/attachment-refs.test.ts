@@ -146,4 +146,42 @@ describe("collectAttachmentIdsForDumpRows", () => {
       ),
     ).toEqual([]);
   });
+
+  it("collects multiple attachments on one row; never neighbor rows; dedups", () => {
+    const second = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const neighborAtt = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const ids = collectAttachmentIdsForDumpRows(
+      {
+        lists: [
+          {
+            items: [
+              {
+                item_id: itemId,
+                attachments: [
+                  { attachment_id: itemAttId, kind: "image", file_name: "a.jpg" },
+                  { attachment_id: second, kind: "document", file_name: "b.pdf" },
+                  // Duplicate ref must not double-send.
+                  { attachment_id: itemAttId, kind: "image", file_name: "a.jpg" },
+                ],
+              },
+              {
+                item_id: "neighbor",
+                attachments: [
+                  {
+                    attachment_id: neighborAtt,
+                    kind: "image",
+                    file_name: "skip.jpg",
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        filing: [],
+      },
+      [itemId],
+    );
+    expect(ids).toEqual([itemAttId, second]);
+    expect(ids).not.toContain(neighborAtt);
+  });
 });
